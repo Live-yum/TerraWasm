@@ -1,0 +1,36 @@
+[1/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_mem.c.o
+[2/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_json.c.o
+[3/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_api.c.o
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_api.c:162:18: warning: declaration of built-in function 'fopen' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+  162 |     extern void* fopen(const char* path, const char* mode);
+      |                  ^
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_api.c:165:16: warning: declaration of built-in function 'fread' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+  165 |     extern int fread(void* ptr, int size, int count, void* stream);
+      |                ^
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_api.c:192:18: warning: declaration of built-in function 'fopen' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+  192 |     extern void* fopen(const char* path, const char* mode);
+      |                  ^
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_api.c:193:16: warning: declaration of built-in function 'fwrite' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+
+  193 |     extern int fwrite(const void* ptr, int size, int count, void* stream);
+
+      |                ^
+
+4 warnings generated.
+
+[4/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_ops.c.o
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_ops.c:82:22: warning: declaration of built-in function 'fopen' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+   82 |         extern void* fopen(const char* path, const char* mode);
+      |                      ^
+C:/Users/depths/Desktop/Tdecoder/TerraWasm/src/terra_ops.c:83:20: warning: declaration of built-in function 'fwrite' requires inclusion of the header <stdio.h> [-Wbuiltin-requires-header]
+   83 |         extern int fwrite(const void* ptr, int size, int count, void* stream);
+
+      |                    ^
+
+2 warnings generated.
+
+[5/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_update.c.o
+[6/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_render.c.o
+[7/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_wld.c.o
+[8/9] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_map.c.o
+[9/9] Linking C executable terrax_world_wasm.js

@@ -1,0 +1,203 @@
+﻿*** Begin Patch
+*** Update File: C:\Users\depths\Desktop\Tdecoder\TerraWasm\src\terra_types.h
+@@ int32_t  bottom_world @@
+     int32_t  bottom_world;
+ 
++    /* Extended header metadata (version-gated, parsed from binary) */
++    /* Seed flags (u8 booleans) */
++    uint8_t  drunk_world;
++    uint8_t  ftw_world;
++    uint8_t  tenth_anniversary_world;
++    uint8_t  dont_starve_world;
++    uint8_t  not_the_bees_world;
++    uint8_t  remix_world;
++    uint8_t  no_traps_world;
++    uint8_t  zenith_world;
++    uint8_t  skyblock_world;
++    /* Timestamps (u64 ticks) */
++    uint64_t creation_time;
++    uint64_t last_played;
++    /* Terrain */
++    uint8_t  moon_type;
++    uint32_t tree_x[3];
++    uint32_t tree_style[4];
++    uint32_t cave_back_x[3];
++    uint32_t cave_back_style[4];
++    uint32_t ice_back_style;
++    uint32_t jungle_back_style;
++    uint32_t hell_back_style;
++    /* Time / Environment */
++    double   game_time;
++    uint8_t  is_day_time;
++    uint32_t moon_phase;
++    uint8_t  is_blood_moon;
++    uint8_t  is_eclipse;
++    int32_t  dungeon_x;
++    int32_t  dungeon_y;
++    uint8_t  is_crimson;
++    /* Boss / event progress booleans */
++    uint8_t  downed_eye;
++    uint8_t  downed_eater_brain;
++    uint8_t  downed_skeletron;
++    uint8_t  downed_queen_bee;
++    uint8_t  downed_destroyer;
++    uint8_t  downed_twins;
++    uint8_t  downed_skeletron_prime;
++    uint8_t  downed_any_mech;
++    uint8_t  downed_plantera;
++    uint8_t  downed_golem;
++    uint8_t  downed_king_slime;
++    uint8_t  saved_goblin;
++    uint8_t  saved_wizard;
++    uint8_t  saved_mech;
++    uint8_t  downed_goblins;
++    uint8_t  downed_clown;
++    uint8_t  downed_frost;
++    uint8_t  downed_pirates;
++    uint8_t  shadow_orb_smashed;
++    uint8_t  spawn_meteor;
++    uint8_t  shadow_orb_count;
++    uint32_t altar_count;
++    uint8_t  hard_mode;
++    uint8_t  after_party_of_doom;
++    /* Invasion / Rain */
++    uint32_t invasion_delay;
++    uint32_t invasion_size;
++    uint32_t invasion_type;
++    double   invasion_x;
++    double   slime_rain_time;
++    uint8_t  sundial_cooldown;
++    uint8_t  is_raining;
++    uint32_t rain_time;
++    float    max_rain;
++    /* Ore tiers */
++    int32_t  ore_tier_cobalt;
++    int32_t  ore_tier_mythril;
++    int32_t  ore_tier_adamantite;
++    /* Backgrounds */
++    uint8_t  bg_tree;
++    uint8_t  bg_corruption;
++    uint8_t  bg_jungle;
++    uint8_t  bg_snow;
++    uint8_t  bg_hallow;
++    uint8_t  bg_crimson;
++    uint8_t  bg_desert;
++    uint8_t  bg_ocean;
++    int32_t  cloud_bg_active;
++    uint16_t num_clouds;
++    float    wind_speed;
++    /* Angler */
++    uint32_t angler_count;
++    uint32_t anglers_off;
++    uint8_t  saved_angler;
++    uint32_t angler_quest;
++    uint8_t  saved_stylist;
++    uint8_t  saved_tax_collector;
++    uint8_t  saved_golfer;
++    /* Misc */
++    uint32_t invasion_size_start;
++    uint32_t cultist_delay;
++    uint16_t mob_count;
++    uint32_t mobs_off;
++    uint16_t banner_count;
++    uint32_t banners_off;
++    /* Late events */
++    uint8_t  fast_forward_time;
++    uint8_t  downed_fishron;
++    uint8_t  downed_martians;
++    uint8_t  downed_ancient_cultist;
++    uint8_t  downed_moonlord;
++    uint8_t  downed_halloween_king;
++    uint8_t  downed_halloween_tree;
++    uint8_t  downed_xmas_ice_queen;
++    uint8_t  downed_xmas_santank;
++    uint8_t  downed_xmas_tree;
++    /* Celestial towers */
++    uint8_t  downed_solar;
++    uint8_t  downed_vortex;
++    uint8_t  downed_nebula;
++    uint8_t  downed_stardust;
++    uint8_t  tower_solar;
++    uint8_t  tower_vortex;
++    uint8_t  tower_nebula;
++    uint8_t  tower_stardust;
++    uint8_t  lunar_apocalypse;
++    /* Party */
++    uint8_t  party_manual;
++    uint8_t  party_genuine;
++    uint32_t party_cooldown;
++    uint32_t party_npc_count;
++    uint32_t party_npcs_off;
++    /* Sandstorm */
++    uint8_t  sandstorm_happening;
++    uint32_t sandstorm_time;
++    float    sandstorm_severity;
++    float    sandstorm_intended;
++    /* DD2 */
++    uint8_t  saved_bartender;
++    uint8_t  dd2_t1;
++    uint8_t  dd2_t2;
++    uint8_t  dd2_t3;
++    /* 1.4+ backgrounds */
++    uint8_t  mushroom_bg;
++    uint8_t  underworld_bg;
++    uint8_t  bg_tree2;
++    uint8_t  bg_tree3;
++    uint8_t  bg_tree4;
++    /* 1.4+ misc */
++    uint8_t  combat_book;
++    uint32_t lantern_cooldown;
++    uint8_t  lantern_genuine;
++    uint8_t  lantern_manual;
++    uint8_t  lantern_next;
++    uint32_t treetop_count;
++    uint32_t treetops_off;
++    uint8_t  force_halloween;
++    uint8_t  force_xmas;
++    uint32_t ore_tier_copper;
++    uint32_t ore_tier_iron;
++    uint32_t ore_tier_silver;
++    uint32_t ore_tier_gold;
++    uint8_t  bought_cat;
++    uint8_t  bought_dog;
++    uint8_t  bought_bunny;
++    uint8_t  downed_empress;
++    uint8_t  downed_queen_slime;
++    uint8_t  downed_deerclops;
++    /* Unlocked spawns */
++    uint8_t  unlocked_slime_blue;
++    uint8_t  unlocked_merchant;
++    uint8_t  unlocked_demo;
++    uint8_t  unlocked_party_girl;
++    uint8_t  unlocked_dye_trader;
++    uint8_t  unlocked_truffle;
++    uint8_t  unlocked_arms_dealer;
++    uint8_t  unlocked_nurse;
++    uint8_t  unlocked_princess;
++    uint8_t  combat_book_vol2;
++    uint8_t  peddlers_satchel;
++    uint8_t  unlocked_slime_green;
++    uint8_t  unlocked_slime_old;
++    uint8_t  unlocked_slime_purple;
++    uint8_t  unlocked_slime_rainbow;
++    uint8_t  unlocked_slime_red;
++    uint8_t  unlocked_slime_yellow;
++    uint8_t  unlocked_slime_copper;
++    /* 1.4.4+ */
++    uint8_t  fast_forward_dusk;
++    uint8_t  moondial_cooldown;
++    uint8_t  force_halloween_forever;
++    uint8_t  force_xmas_forever;
++    uint8_t  vampire_seed;
++    uint8_t  infected_seed;
++    uint32_t meteor_shower_count;
++    uint32_t coin_rain;
++    uint8_t  team_spawns_seed;
++    uint8_t  spawn_point_count;
++    uint32_t spawn_points_off;
++    uint8_t  dual_dungeons_seed;
++    uint32_t legacy_skip;
++    uint32_t manifest_off;
++
+     /* Section overrides (for terra_section_set_json) */
+*** End Patch

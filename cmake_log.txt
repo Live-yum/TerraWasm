@@ -1,0 +1,4 @@
+emcmake: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release '-DCMAKE_TOOLCHAIN_FILE=D:\Tool\emsdk\upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake' -DCMAKE_CROSSCOMPILING_EMULATOR=D:/Tool/emsdk/node/22.16.0_64bit/bin/node.exe -G Ninja in directory C:\Users\depths\Desktop\Tdecoder\TerraWasm
+-- Configuring done (2.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: C:/Users/depths/Desktop/Tdecoder/TerraWasm/build
