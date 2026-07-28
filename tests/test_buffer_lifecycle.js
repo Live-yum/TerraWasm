@@ -40,6 +40,45 @@ function findFixture() {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate));
 }
 
+// Build the smallest deterministic WLD needed by TerraWasm's own parser:
+// version 88, eleven monotonically valid section pointers, a complete zero-filled
+// base header and positive dimensions. Save-without-overrides must return these
+// exact bytes, so this exercises real buffer open/save/close without relying on
+// a private user world or an external game installation.
+function createMinimalFixture() {
+  const version = 88;
+  const pointerCount = 11;
+  const formatLength = 4 + 2 + pointerCount * 4 + 2;
+  const sectionStart = 2048;
+  const bytes = Buffer.alloc(sectionStart, 0);
+  let offset = 0;
+
+  bytes.writeUInt32LE(version, offset); offset += 4;
+  bytes.writeUInt16LE(pointerCount, offset); offset += 2;
+  bytes.writeUInt32LE(formatLength, offset); offset += 4;
+  for (let index = 1; index < pointerCount; index += 1) {
+    bytes.writeUInt32LE(sectionStart, offset); offset += 4;
+  }
+  bytes.writeUInt16LE(0, offset); offset += 2; // no importance bitmap
+  assert.equal(offset, formatLength);
+
+  offset = formatLength;
+  const name = Buffer.from("TerraWasm-CI", "utf8");
+  assert.ok(name.length < 0x80);
+  bytes[offset++] = name.length;
+  name.copy(bytes, offset); offset += name.length;
+
+  bytes.writeInt32LE(1, offset); offset += 4;       // worldId
+  bytes.writeInt32LE(0, offset); offset += 4;       // left
+  bytes.writeInt32LE(1600, offset); offset += 4;    // right
+  bytes.writeInt32LE(0, offset); offset += 4;       // top
+  bytes.writeInt32LE(1200, offset); offset += 4;    // bottom
+  bytes.writeInt32LE(10, offset); offset += 4;      // maxTilesY
+  bytes.writeInt32LE(10, offset); offset += 4;      // maxTilesX
+  assert.ok(offset < sectionStart, "minimal header exceeded its section boundary");
+  return bytes;
+}
+
 function openWorld(M, bytes) {
   const inputPtr = alloc(M, bytes.length || 1);
   const handlePtr = alloc(M, 4);
@@ -51,20 +90,6 @@ function openWorld(M, bytes) {
   } finally {
     M._tx_free(handlePtr);
     M._tx_free(inputPtr);
-  }
-}
-
-function createWorld(M) {
-  assert.equal(typeof M._terra_world_create, "function", "terra_world_create must be exported for lifecycle fixtures");
-  const handlePtr = alloc(M, 4);
-  try {
-    const status = M._terra_world_create(handlePtr);
-    assert.equal(status, 0, `terra_world_create failed: ${status}`);
-    const handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
-    assert.notEqual(handle, 0, "terra_world_create returned an empty handle");
-    return handle;
-  } finally {
-    M._tx_free(handlePtr);
   }
 }
 
@@ -83,16 +108,6 @@ function saveWorld(M, handle) {
   } finally {
     if (outputPtr) M._tx_free(outputPtr);
     M._tx_free(requiredPtr);
-  }
-}
-
-function createGeneratedFixture(M) {
-  const handle = createWorld(M);
-  try {
-    return saveWorld(M, handle);
-  } finally {
-    assert.equal(M._terra_world_close(handle), 0, "generated fixture close failed");
-    if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
   }
 }
 
@@ -124,7 +139,8 @@ async function main() {
   }
 
   const fixturePath = findFixture();
-  let bytes = fixturePath ? fs.readFileSync(fixturePath) : createGeneratedFixture(M);
+  let bytes = fixturePath ? fs.readFileSync(fixturePath) : createMinimalFixture();
+  const fixtureLabel = fixturePath || "generated:minimal-v88-11-sections";
   assert.ok(bytes.length > 0, "valid lifecycle fixture is empty");
 
   // Prove that the fixture is valid before entering the long loop.
@@ -142,19 +158,22 @@ async function main() {
     assert.notEqual(opened.handle, 0);
 
     let saved;
+    let activeMemory;
     try {
       saved = saveWorld(M, opened.handle);
+      activeMemory = memory(M);
+      peakWasm = Math.max(peakWasm, activeMemory.wasm);
     } finally {
       assert.equal(M._terra_world_close(opened.handle), 0, `close failed at cycle ${index + 1}`);
     }
     if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
 
+    assert.deepEqual(saved, previousBytes, `unmodified world changed at cycle ${index + 1}`);
     const current = memory(M);
     assertLiveMemoryReturned(current, baseline, `valid cycle ${index + 1}`);
 
-    const trackedAtSaveBoundary = current.wasm + previousBytes.length + saved.length;
+    const trackedAtSaveBoundary = activeMemory.wasm + previousBytes.length + saved.length;
     peakTracked = Math.max(peakTracked, trackedAtSaveBoundary);
-    peakWasm = Math.max(peakWasm, current.wasm);
     peakRss = Math.max(peakRss, process.memoryUsage().rss);
     assert.ok(
       trackedAtSaveBoundary <= TRACKED_MEMORY_LIMIT,
@@ -176,7 +195,8 @@ async function main() {
   assertLiveMemoryReturned(final, baseline, "final reopen");
 
   console.log(JSON.stringify({
-    fixture: fixturePath || "generated:terra_world_create",
+    fixture: fixtureLabel,
+    fixtureBytes: bytes.length,
     cycles: CYCLES,
     limits: {
       tracked: TRACKED_MEMORY_LIMIT,
