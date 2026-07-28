@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-build_dir = Path(os.environ.get("TERRAWASM_BUILD_DIR", "build"))
+build_dir = Path(os.environ.get("TERRAWASM_BUILD_DIR", "build-ci"))
 js_path = build_dir / "terrax_world_wasm_web.js"
 wasm_path = build_dir / "terrax_world_wasm_web.wasm"
 
