@@ -10,9 +10,9 @@ WEB_EXPORTS = (ROOT / "exports.web.txt").read_text(encoding="utf-8").splitlines(
 MiB = 1024 * 1024
 LIMITS = {
     "web_initial": 16 * MiB,
-    "web_max": 112 * MiB,
+    "web_max": 96 * MiB,
     "node_initial": 32 * MiB,
-    "node_max": 192 * MiB,
+    "node_max": 160 * MiB,
 }
 
 
@@ -51,9 +51,9 @@ for key, expected in LIMITS.items():
     if value % 65536 != 0:
         raise AssertionError(f"{key} must be a WebAssembly page multiple")
 
-if actual["web_max"] >= 200_000_000:
-    raise AssertionError("web maximum memory must remain below 200 MB")
-if actual["node_max"] >= 202 * MiB:
+if actual["web_max"] >= 100 * MiB:
+    raise AssertionError("web maximum memory unexpectedly exceeds the 96 MiB budget")
+if actual["node_max"] > 160 * MiB:
     raise AssertionError("node validation memory ceiling unexpectedly increased")
 if '-sABORTING_MALLOC=0' not in CMAKE:
     raise AssertionError("OOM must be reported as a recoverable allocation failure")
