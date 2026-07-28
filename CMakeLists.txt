@@ -3,11 +3,10 @@ project(TerraWasm C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-# Include headers from include/ directory
 include_directories(${INC_DIR})
 
 set(SOURCES
@@ -35,6 +34,8 @@ if(EMSCRIPTEN)
 
     function(write_exports_json input_file output_file)
         file(STRINGS "${input_file}" export_lines)
+        list(FILTER export_lines EXCLUDE REGEX "^[ \\t]*#")
+        list(FILTER export_lines EXCLUDE REGEX "^[ \\t]*$")
         list(REMOVE_DUPLICATES export_lines)
         set(export_items)
         foreach(export_fn ${export_lines})
@@ -54,29 +55,39 @@ if(EMSCRIPTEN)
     )
 
     set(COMMON_COMPILE_OPTIONS
+        -Oz
+        -flto
         -fno-exceptions
         -fno-rtti
-        -O3
+        -ffunction-sections
+        -fdata-sections
         "-sUSE_ZLIB=1"
     )
 
     set(COMMON_LINK_OPTIONS
+        -Oz
+        -flto
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
-        "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions.json"
-        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
+        "-sMALLOC=emmalloc"
         "-sMODULARIZE=1"
+        "-sASSERTIONS=0"
+        "-sSAFE_HEAP=0"
+        "-sSTACK_OVERFLOW_CHECK=0"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+        "-sDISABLE_EXCEPTION_CATCHING=1"
+        "-sSUPPORT_LONGJMP=0"
         "--no-entry"
     )
 
-    # ---- Node target ----
+    # Node target retains filesystem compatibility for CLI tools and existing tests.
     add_executable(terrax_world_wasm ${SOURCES})
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
         ${COMMON_LINK_OPTIONS}
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
-        "-sINITIAL_MEMORY=134217728"
+        "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32','FS']"
+        "-sINITIAL_MEMORY=67108864"
         "-sMAXIMUM_MEMORY=536870912"
         "-sEXPORT_NAME='TerraWorldWasm'"
         "-sENVIRONMENT=node"
@@ -84,18 +95,19 @@ if(EMSCRIPTEN)
         "-sFILESYSTEM=1"
     )
 
-    # ---- Web/MiniProgram target ----
-    # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
+    # Web/MiniProgram target is buffer-only. Removing MEMFS avoids a second WLD copy
+    # and drops the filesystem runtime from both glue JS and WASM.
     add_executable(terrax_world_wasm_web ${SOURCES})
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
         ${COMMON_LINK_OPTIONS}
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
-        "-sINITIAL_MEMORY=33554432"
+        "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']"
+        "-sINITIAL_MEMORY=16777216"
         "-sMAXIMUM_MEMORY=134217728"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
-        "-sFILESYSTEM=1"
+        "-sFILESYSTEM=0"
     )
 else()
     add_library(terrax_world_static STATIC ${SOURCES})
