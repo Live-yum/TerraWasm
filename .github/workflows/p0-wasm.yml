@@ -7,13 +7,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: p0-compact-wasm
+  cancel-in-progress: false
 
 jobs:
   build-and-test:
+    if: ${{ !contains(github.event.head_commit.message || '', '[p0-wasm-report]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refactor/p0-world-session-size
+          fetch-depth: 0
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: '3.1.69'
@@ -23,26 +31,32 @@ jobs:
           node-version: 20
       - name: Install CMake and Ninja
         run: python3 -m pip install --user 'cmake>=3.27,<4' ninja
-      - name: Configure
-        run: emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
-      - name: Build Node and Web targets
-        run: cmake --build build --target terrax_world_wasm terrax_world_wasm_web --parallel 2
-      - name: Fifty-cycle lifecycle regression
-        run: node tests/test_buffer_lifecycle.js
-      - name: Existing section and allocation regressions
+      - name: Build, test and measure
+        id: validation
+        continue-on-error: true
+        run: python3 scripts/run_p0_validation.py
+      - name: Commit validation report and compact engine
+        if: always()
         shell: bash
         run: |
-          if [ -d ../TerraX/wld ] && find ../TerraX/wld -name '*.wld' -print -quit | grep -q .; then
-            node --test tests/test_section_mutators.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports dist
+          if git diff --cached --quiet; then
+            echo "No report or artifact changes"
           else
-            echo 'External TerraX WLD fixtures are unavailable; section fixture suite skipped.'
+            git commit -m "ci: update compact wasm artifacts [p0-wasm-report]"
+            git push origin HEAD:refactor/p0-world-session-size
           fi
-      - name: Enforce web engine size budget
-        run: python3 scripts/check_web_bundle_size.py
       - name: Upload compact web engine
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: terrax-web-engine
           path: |
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
+            dist
+            reports
+          if-no-files-found: ignore
+      - name: Fail when validation failed
+        if: ${{ steps.validation.outcome == 'failure' }}
+        run: exit 1
