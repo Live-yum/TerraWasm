@@ -4,6 +4,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
+const MiB = 1024 * 1024;
+const CYCLES = Number(process.env.TERRAWASM_LIFECYCLE_CYCLES || 100);
+const TRACKED_MEMORY_LIMIT = Number(process.env.TERRAWASM_TRACKED_MEMORY_LIMIT || 190 * MiB);
+const NODE_LINEAR_LIMIT = Number(process.env.TERRAWASM_NODE_LINEAR_LIMIT || 192 * MiB);
 const buildDirectory = process.env.TERRAWASM_BUILD_DIR || "build-ci";
 const factory = require(path.join(__dirname, "..", buildDirectory, "terrax_world_wasm.js"));
 
@@ -13,7 +17,10 @@ function memory(M) {
     bridge: read("_tx_bridge_heap_used"),
     native: read("_tx_native_heap_used"),
     heap: read("_tx_heap_used"),
-    wasm: read("_tx_memory_used"),
+    heapPeak: read("_tx_heap_peak"),
+    bridgePeak: read("_tx_bridge_heap_peak"),
+    nativePeak: read("_tx_native_heap_peak"),
+    wasm: read("_tx_memory_used") || M.HEAPU8.byteLength,
   };
 }
 
@@ -29,7 +36,6 @@ function findFixture() {
   candidates.push(
     path.join(__dirname, "fixtures", "sample.wld"),
     path.join(__dirname, "..", "data", "sample.wld"),
-    path.resolve(__dirname, "..", "..", "TerraX", "wld", "copy.wld"),
   );
   return candidates.find((candidate) => candidate && fs.existsSync(candidate));
 }
@@ -45,6 +51,20 @@ function openWorld(M, bytes) {
   } finally {
     M._tx_free(handlePtr);
     M._tx_free(inputPtr);
+  }
+}
+
+function createWorld(M) {
+  assert.equal(typeof M._terra_world_create, "function", "terra_world_create must be exported for lifecycle fixtures");
+  const handlePtr = alloc(M, 4);
+  try {
+    const status = M._terra_world_create(handlePtr);
+    assert.equal(status, 0, `terra_world_create failed: ${status}`);
+    const handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
+    assert.notEqual(handle, 0, "terra_world_create returned an empty handle");
+    return handle;
+  } finally {
+    M._tx_free(handlePtr);
   }
 }
 
@@ -66,51 +86,109 @@ function saveWorld(M, handle) {
   }
 }
 
+function createGeneratedFixture(M) {
+  const handle = createWorld(M);
+  try {
+    return saveWorld(M, handle);
+  } finally {
+    assert.equal(M._terra_world_close(handle), 0, "generated fixture close failed");
+    if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
+  }
+}
+
+function assertLiveMemoryReturned(current, baseline, label) {
+  assert.equal(current.bridge, baseline.bridge, `bridge leak after ${label}`);
+  assert.equal(current.native, baseline.native, `native leak after ${label}`);
+  assert.equal(current.heap, baseline.heap, `managed heap leak after ${label}`);
+  assert.ok(current.wasm <= NODE_LINEAR_LIMIT, `linear memory exceeded ${NODE_LINEAR_LIMIT} after ${label}`);
+}
+
 async function main() {
+  assert.ok(Number.isInteger(CYCLES) && CYCLES >= 50, "lifecycle cycles must be at least 50");
   const M = await factory();
   if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
   const baseline = memory(M);
+  assert.ok(baseline.wasm <= NODE_LINEAR_LIMIT, "initial linear memory exceeds the configured node ceiling");
 
-  // Invalid uploads exercise error paths and must not leave bridge/native roots alive.
+  let peakTracked = baseline.wasm;
+  let peakWasm = baseline.wasm;
+  let peakRss = process.memoryUsage().rss;
+
+  // Invalid uploads exercise all failure cleanup paths.
   for (let index = 0; index < 50; index += 1) {
     const invalid = Buffer.alloc(64, index & 0xff);
     const opened = openWorld(M, invalid);
     assert.notEqual(opened.status, 0, "invalid WLD unexpectedly opened");
     if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
-    const current = memory(M);
-    assert.equal(current.bridge, baseline.bridge, `bridge leak after failed cycle ${index + 1}`);
-    assert.equal(current.native, baseline.native, `native leak after failed cycle ${index + 1}`);
+    assertLiveMemoryReturned(memory(M), baseline, `failed cycle ${index + 1}`);
   }
 
-  const fixture = findFixture();
-  if (!fixture) {
-    console.log("No valid WLD fixture found; valid open/save cycles skipped.");
-    console.log(JSON.stringify({ baseline, final: memory(M) }, null, 2));
-    return;
-  }
+  const fixturePath = findFixture();
+  let bytes = fixturePath ? fs.readFileSync(fixturePath) : createGeneratedFixture(M);
+  assert.ok(bytes.length > 0, "valid lifecycle fixture is empty");
 
-  let bytes = fs.readFileSync(fixture);
-  let plateau = 0;
-  for (let index = 0; index < 50; index += 1) {
-    const opened = openWorld(M, bytes);
+  // Prove that the fixture is valid before entering the long loop.
+  const probe = openWorld(M, bytes);
+  assert.equal(probe.status, 0, "generated or supplied WLD fixture is not valid");
+  assert.equal(M._terra_world_close(probe.handle), 0, "fixture probe close failed");
+  if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
+  assertLiveMemoryReturned(memory(M), baseline, "fixture probe");
+
+  let warmupPlateau = 0;
+  for (let index = 0; index < CYCLES; index += 1) {
+    const previousBytes = bytes;
+    const opened = openWorld(M, previousBytes);
     assert.equal(opened.status, 0, `valid open failed at cycle ${index + 1}`);
     assert.notEqual(opened.handle, 0);
+
+    let saved;
     try {
-      bytes = saveWorld(M, opened.handle);
+      saved = saveWorld(M, opened.handle);
     } finally {
-      assert.equal(M._terra_world_close(opened.handle), 0);
+      assert.equal(M._terra_world_close(opened.handle), 0, `close failed at cycle ${index + 1}`);
     }
     if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
+
     const current = memory(M);
-    assert.equal(current.bridge, baseline.bridge, `bridge leak after valid cycle ${index + 1}`);
-    assert.equal(current.native, baseline.native, `native leak after valid cycle ${index + 1}`);
-    if (index >= 10) plateau = Math.max(plateau, current.wasm);
+    assertLiveMemoryReturned(current, baseline, `valid cycle ${index + 1}`);
+
+    const trackedAtSaveBoundary = current.wasm + previousBytes.length + saved.length;
+    peakTracked = Math.max(peakTracked, trackedAtSaveBoundary);
+    peakWasm = Math.max(peakWasm, current.wasm);
+    peakRss = Math.max(peakRss, process.memoryUsage().rss);
+    assert.ok(
+      trackedAtSaveBoundary <= TRACKED_MEMORY_LIMIT,
+      `tracked memory ${trackedAtSaveBoundary} exceeded ${TRACKED_MEMORY_LIMIT} at cycle ${index + 1}`,
+    );
+
+    if (index >= 10 && index < 20) warmupPlateau = Math.max(warmupPlateau, current.wasm);
     if (index >= 20) {
-      assert.ok(current.wasm <= plateau, `linear memory kept growing at cycle ${index + 1}`);
+      assert.ok(current.wasm <= warmupPlateau, `linear memory kept growing at cycle ${index + 1}`);
     }
+    bytes = saved;
   }
 
-  console.log(JSON.stringify({ fixture, baseline, final: memory(M), outputBytes: bytes.length }, null, 2));
+  const finalProbe = openWorld(M, bytes);
+  assert.equal(finalProbe.status, 0, "final saved WLD cannot be reopened");
+  assert.equal(M._terra_world_close(finalProbe.handle), 0, "final WLD close failed");
+  if (typeof M._tx_reclaim_transients === "function") M._tx_reclaim_transients();
+  const final = memory(M);
+  assertLiveMemoryReturned(final, baseline, "final reopen");
+
+  console.log(JSON.stringify({
+    fixture: fixturePath || "generated:terra_world_create",
+    cycles: CYCLES,
+    limits: {
+      tracked: TRACKED_MEMORY_LIMIT,
+      nodeLinear: NODE_LINEAR_LIMIT,
+    },
+    baseline,
+    final,
+    peakTracked,
+    peakWasm,
+    peakRss,
+    outputBytes: bytes.length,
+  }, null, 2));
 }
 
 main().catch((error) => {
