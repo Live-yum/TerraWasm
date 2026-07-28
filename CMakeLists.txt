@@ -83,8 +83,8 @@ if(EMSCRIPTEN)
         "--no-entry"
     )
 
-    # Node target is used only by CI and CLI tests. Keep it below the user's
-    # 200 MB ceiling as well, while leaving more room than the mini-program.
+    # Node is used only by CI/CLI tests. A 160 MiB hard ceiling keeps the full
+    # validation process below the user's 200 MB requirement with useful margin.
     add_executable(terrax_world_wasm ${SOURCES})
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
@@ -92,16 +92,16 @@ if(EMSCRIPTEN)
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
         "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32','FS']"
         "-sINITIAL_MEMORY=33554432"
-        "-sMAXIMUM_MEMORY=201326592"
+        "-sMAXIMUM_MEMORY=167772160"
         "-sEXPORT_NAME='TerraWorldWasm'"
         "-sENVIRONMENT=node"
         "-sNODERAWFS=1"
         "-sFILESYSTEM=1"
     )
 
-    # Web/MiniProgram target is buffer-only. 112 MiB is a hard WebAssembly
-    # linear-memory ceiling, leaving headroom below 200 MB for the committed
-    # WLD buffer, the save result and pending sparse pixel data in JavaScript.
+    # Web/MiniProgram is buffer-only. 96 MiB is the absolute linear-memory
+    # ceiling; the frontend reserves the remainder for two WLD buffers, pending
+    # sparse pixels, Vue and the WeChat runtime.
     add_executable(terrax_world_wasm_web ${SOURCES})
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
@@ -109,7 +109,7 @@ if(EMSCRIPTEN)
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
         "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']"
         "-sINITIAL_MEMORY=16777216"
-        "-sMAXIMUM_MEMORY=117440512"
+        "-sMAXIMUM_MEMORY=100663296"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=0"
