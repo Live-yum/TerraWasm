@@ -15,8 +15,6 @@ BUILD = ROOT / BUILD_NAME
 REPORTS.mkdir(exist_ok=True)
 DIST.mkdir(exist_ok=True)
 
-# Never reuse a committed/local CMake cache. CI and developer machines may use
-# different source paths, generators and Emscripten toolchains.
 if BUILD.exists():
     shutil.rmtree(BUILD)
 
@@ -24,8 +22,8 @@ steps = []
 run_env = os.environ.copy()
 run_env["TERRAWASM_BUILD_DIR"] = BUILD_NAME
 run_env.setdefault("TERRAWASM_LIFECYCLE_CYCLES", "100")
-run_env.setdefault("TERRAWASM_TRACKED_MEMORY_LIMIT", str(190 * 1024 * 1024))
-run_env.setdefault("TERRAWASM_NODE_LINEAR_LIMIT", str(192 * 1024 * 1024))
+run_env.setdefault("TERRAWASM_TRACKED_MEMORY_LIMIT", str(160 * 1024 * 1024))
+run_env.setdefault("TERRAWASM_NODE_LINEAR_LIMIT", str(160 * 1024 * 1024))
 
 
 def run(name, command):
@@ -78,9 +76,9 @@ report = {
     "commit": os.environ.get("GITHUB_SHA", ""),
     "buildDirectory": BUILD_NAME,
     "limits": {
-        "webLinearBytes": 112 * 1024 * 1024,
-        "nodeLinearBytes": 192 * 1024 * 1024,
-        "trackedLifecycleBytes": 190 * 1024 * 1024,
+        "webLinearBytes": 96 * 1024 * 1024,
+        "nodeLinearBytes": 160 * 1024 * 1024,
+        "trackedLifecycleBytes": 160 * 1024 * 1024,
         "lifecycleCycles": int(run_env["TERRAWASM_LIFECYCLE_CYCLES"]),
     },
     "outputs": outputs,
