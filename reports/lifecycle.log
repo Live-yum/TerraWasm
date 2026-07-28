@@ -3,8 +3,8 @@
   "fixtureBytes": 2048,
   "cycles": 100,
   "limits": {
-    "tracked": 199229440,
-    "nodeLinear": 201326592
+    "tracked": 167772160,
+    "nodeLinear": 167772160
   },
   "baseline": {
     "bridge": 0,
@@ -26,6 +26,6 @@
   },
   "peakTracked": 33558528,
   "peakWasm": 33554432,
-  "peakRss": 52908032,
+  "peakRss": 52973568,
   "outputBytes": 2048
 }
