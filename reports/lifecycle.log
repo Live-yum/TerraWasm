@@ -1,15 +1,12 @@
-No valid WLD fixture found; valid open/save cycles skipped.
-{
-  "baseline": {
-    "bridge": 0,
-    "native": 0,
-    "heap": 0,
-    "wasm": 67108864
-  },
-  "final": {
-    "bridge": 0,
-    "native": 0,
-    "heap": 0,
-    "wasm": 67108864
-  }
+
+[stderr]
+AssertionError [ERR_ASSERTION]: save probe failed: 8
+    at saveWorld (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:76:12)
+    at createGeneratedFixture (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:92:12)
+    at main (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:127:60) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '=='
 }

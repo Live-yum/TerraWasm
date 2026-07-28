@@ -1,3 +1,3 @@
 glue js : 17,042 bytes (limit 225,280)
-wasm    : 143,643 bytes (limit 1,331,200)
-combined: 160,685 bytes (limit 1,484,800)
+wasm    : 143,644 bytes (limit 1,331,200)
+combined: 160,686 bytes (limit 1,484,800)

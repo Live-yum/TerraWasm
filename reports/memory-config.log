@@ -1,0 +1,8 @@
+TerraWasm memory budget configuration
+  web_initial: 16777216 bytes (16.0 MiB)
+  web_max: 117440512 bytes (112.0 MiB)
+  node_initial: 33554432 bytes (32.0 MiB)
+  node_max: 201326592 bytes (192.0 MiB)
+  web filesystem: disabled
+  allocation failure: recoverable
+  buffer-only ABI: verified
