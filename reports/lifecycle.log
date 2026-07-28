@@ -1,12 +1,31 @@
-
-[stderr]
-AssertionError [ERR_ASSERTION]: save probe failed: 8
-    at saveWorld (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:76:12)
-    at createGeneratedFixture (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:92:12)
-    at main (/home/runner/work/TerraWasm/TerraWasm/tests/test_buffer_lifecycle.js:127:60) {
-  generatedMessage: false,
-  code: 'ERR_ASSERTION',
-  actual: false,
-  expected: true,
-  operator: '=='
+{
+  "fixture": "generated:minimal-v88-11-sections",
+  "fixtureBytes": 2048,
+  "cycles": 100,
+  "limits": {
+    "tracked": 199229440,
+    "nodeLinear": 201326592
+  },
+  "baseline": {
+    "bridge": 0,
+    "native": 0,
+    "heap": 0,
+    "heapPeak": 0,
+    "bridgePeak": 0,
+    "nativePeak": 0,
+    "wasm": 33554432
+  },
+  "final": {
+    "bridge": 0,
+    "native": 0,
+    "heap": 0,
+    "heapPeak": 4100,
+    "bridgePeak": 2052,
+    "nativePeak": 2048,
+    "wasm": 33554432
+  },
+  "peakTracked": 33558528,
+  "peakWasm": 33554432,
+  "peakRss": 52908032,
+  "outputBytes": 2048
 }
