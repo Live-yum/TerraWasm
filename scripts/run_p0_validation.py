@@ -23,6 +23,9 @@ if BUILD.exists():
 steps = []
 run_env = os.environ.copy()
 run_env["TERRAWASM_BUILD_DIR"] = BUILD_NAME
+run_env.setdefault("TERRAWASM_LIFECYCLE_CYCLES", "100")
+run_env.setdefault("TERRAWASM_TRACKED_MEMORY_LIMIT", str(190 * 1024 * 1024))
+run_env.setdefault("TERRAWASM_NODE_LINEAR_LIMIT", str(192 * 1024 * 1024))
 
 
 def run(name, command):
@@ -49,7 +52,8 @@ def run(name, command):
     return proc.returncode == 0
 
 
-configure_ok = run("configure", [
+memory_config_ok = run("memory-config", [sys.executable, "scripts/check_memory_budget.py"])
+configure_ok = memory_config_ok and run("configure", [
     "emcmake", "cmake", "-S", ".", "-B", BUILD_NAME, "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=MinSizeRel",
 ])
@@ -73,9 +77,15 @@ report = {
     "generatedAt": datetime.now(timezone.utc).isoformat(),
     "commit": os.environ.get("GITHUB_SHA", ""),
     "buildDirectory": BUILD_NAME,
+    "limits": {
+        "webLinearBytes": 112 * 1024 * 1024,
+        "nodeLinearBytes": 192 * 1024 * 1024,
+        "trackedLifecycleBytes": 190 * 1024 * 1024,
+        "lifecycleCycles": int(run_env["TERRAWASM_LIFECYCLE_CYCLES"]),
+    },
     "outputs": outputs,
     "steps": steps,
-    "passed": bool(configure_ok and build_ok and lifecycle_ok and size_ok),
+    "passed": bool(memory_config_ok and configure_ok and build_ok and lifecycle_ok and size_ok),
 }
 (REPORTS / "p0-wasm-validation.json").write_text(
     json.dumps(report, ensure_ascii=False, indent=2) + "\n",
