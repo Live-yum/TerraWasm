@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-07-28T10:09:53.975726+00:00",
+  "commit": "480e43db9b83717595cd41c7f98f786249fcaa97",
+  "outputs": {},
+  "steps": [
+    {
+      "name": "configure",
+      "command": "emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel",
+      "startedAt": "2026-07-28T10:09:53.740348+00:00",
+      "finishedAt": "2026-07-28T10:09:53.975674+00:00",
+      "status": 1
+    }
+  ],
+  "passed": false
+}
