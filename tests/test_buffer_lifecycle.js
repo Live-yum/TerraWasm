@@ -4,7 +4,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const factory = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
+const buildDirectory = process.env.TERRAWASM_BUILD_DIR || "build-ci";
+const factory = require(path.join(__dirname, "..", buildDirectory, "terrax_world_wasm.js"));
 
 function memory(M) {
   const read = (name) => typeof M[name] === "function" ? Number(M[name]()) : 0;
