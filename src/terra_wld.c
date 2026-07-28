@@ -1,6 +1,7 @@
 /* * terra_wld.c -- WLD binary parser for TerraWasm. * * Pure C implementation that parses raw .wld bytes int o TxWorld metadata, * streams tiles on-demand, and provides JSON serializers/deserializers * for all 11 world sections matching the TerraX V2 API. * * Uses bump allocator from terra_mem.c (tx_malloc, tx_alloc, TxBuf). * Uses json_string, json_u32, etc. from terra_json.c for JSON output. */
 
 #include "terra_types.h"
+#include "terra_reader.h"
 /* ==================================================================== * Extern declarations from terra_mem.c * ==================================================================== */extern uint32_t tx_strlen(const char *s);
 extern int tx_streq_c(const char *a,const char *b);
 extern int tx_streq_n(const char *a,uint32_t alen,const char *b);
@@ -46,7 +47,7 @@ extern void json_float(TxBuf *b,double v);
     }
 uint16_t rd_u16le(const uint8_t *p,uint32_t len,uint32_t *off){
     uint32_t o=*off;
-    if (o+2u>len){
+    if (!terra_reader_has(o,2u,len)){
         *off=len;
         return 0;
         }
@@ -55,7 +56,7 @@ uint16_t rd_u16le(const uint8_t *p,uint32_t len,uint32_t *off){
     }
 uint32_t rd_u32le(const uint8_t *p,uint32_t len,uint32_t *off){
     uint32_t o=*off;
-    if (o+4u>len){
+    if (!terra_reader_has(o,4u,len)){
         *off=len;
         return 0;
         }
@@ -68,7 +69,7 @@ uint32_t rd_i32le(const uint8_t *p,uint32_t len,uint32_t *off){
 uint64_t rd_u64le(const uint8_t *p,uint32_t len,uint32_t *off){
     uint64_t v=0;
     uint32_t o=*off;
-    if (o+8u>len){
+    if (!terra_reader_has(o,8u,len)){
         *off=len;
         return 0;
         }
@@ -96,7 +97,7 @@ float rd_f32le(const uint8_t *p,uint32_t len,uint32_t *off){
     }
 void rd_skip(const uint8_t *p,uint32_t len,uint32_t *off,uint32_t n){
     (void)p;
-    *off=(*off+n<=len)?*off+n:len;
+    (void)terra_reader_take(off,n,len);
     }
 uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok){
     uint32_t result=0;
@@ -107,6 +108,7 @@ uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok){
     i++){
         if (*off>=len)return 0;
         uint8_t b=p[(*off)++];
+        if (i==4u&&(b&0x7fu)>0x0fu)return 0;
         result|=(uint32_t)(b&0x7fu)<<shift;
     if ((b&0x80u)==0u){
             *ok=1;
@@ -119,7 +121,7 @@ uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok){
 void rd_string_copy(const uint8_t *p,uint32_t len,uint32_t *off,char *out,uint32_t cap){
     int ok=0;
     uint32_t slen=rd_7bit(p,len,off,&ok);
-    if (!ok||*off+slen>len){
+    if (!ok||!terra_reader_has(*off,slen,len)){
         if (cap)out[0]=0;
         *off=len;
         ;
@@ -130,7 +132,7 @@ void rd_string_copy(const uint8_t *p,uint32_t len,uint32_t *off,char *out,uint32
     i<n;
     i++)out[i]=(char)p[*off+i];
     if (cap)out[n]=0;
-    *off+=slen;
+    (void)terra_reader_take(off,slen,len);
     }
 void uuid_to_string(const uint8_t *p,char *out){
     static const char hex[]="0123456789abcdef";
@@ -151,11 +153,11 @@ void uuid_to_string(const uint8_t *p,char *out){
 void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     int ok=0;
     uint32_t slen=rd_7bit(p,len,off,&ok);
-    if (!ok||*off+slen>len){
+    if (!ok||!terra_reader_has(*off,slen,len)){
         *off=len;
         ;
         }
-    *off+=slen;
+    (void)terra_reader_take(off,slen,len);
     }
 /* ==================================================================== * Tile importance lookup * ==================================================================== */static int tile_important(TxWorld *w,uint16_t type){
     if (!w||type>=w->tile_type_count)return 0;
@@ -175,7 +177,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     w->magic[0]=0;
     w->file_type=2;
     if (w->version>=135u){
-        if (off+20u>len){
+        if (!terra_reader_has(off,20u,len)){
             tx_set_error("TERRAX_TRUNCATED_FORMAT","format metadata truncated");
             return 0;
             }
@@ -197,7 +199,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     i++)w->positions[i]=rd_u32le(p,len,&off);
     w->tile_type_count=rd_u16le(p,len,&off);
     w->important_len=(w->tile_type_count+7u)/8u;
-    if (off+w->important_len>len){
+    if (!terra_reader_has(off,w->important_len,len)){
         tx_set_error("TERRAX_TRUNCATED_FORMAT","tile importance bitmap truncated");
         return 0;
         }
@@ -254,7 +256,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         w->worldGeneratorVersion=rd_u64le(p,len,&off);
         }
     /* uuid (>=181) */if (w->version>=181u){
-        if (off+16u<=len){
+        if (terra_reader_has(off,16u,len)){
             uuid_to_string(p+off,w->uuid);
             off+=16u;
             }
@@ -388,12 +390,18 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     /* Kill counts (>=109) */if (w->version>=109u){
         w->numMobs=rd_u16le(p,len,&off);
         w->mobsOff=off;
-        off+=w->numMobs*4u;
+        if (!terra_reader_take_count(&off,w->numMobs,4u,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","mob data exceeds section bounds");
+            return 0;
+        }
         }
     /* Banners */if (w->version>=109u){
         w->numClaimableBanners=rd_u16le(p,len,&off);
         w->claimableBannersOff=off;
-        off+=w->numClaimableBanners*2u;
+        if (!terra_reader_take_count(&off,w->numClaimableBanners,2u,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","banner data exceeds section bounds");
+            return 0;
+        }
         }
     /* fastForwardTime (>=140, but gate starts at >=128) */if (w->version>=128u){
         if (w->version>=140u)TX_RD_HEADER_BOOL(fastForwardTime,"fastForwardTimeToDawn");
@@ -428,7 +436,10 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         w->partyCooldown=rd_u32le(p,len,&off);
         w->partyCelebratingNPCSize=rd_u32le(p,len,&off);
         w->partyCelebratingNPCsOff=off;
-        off+=w->partyCelebratingNPCSize*4u;
+        if (!terra_reader_take_count(&off,w->partyCelebratingNPCSize,4u,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","party data exceeds section bounds");
+            return 0;
+        }
         }
     /* Sandstorm (>=174) */if (w->version>=174u){
         TX_RD_HEADER_BOOL(sandstormHappening,"sandstormHappening");
@@ -459,7 +470,10 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     /* treeTopVariations (>=211) */if (w->version>=211u){
         w->treetopSize=rd_u32le(p,len,&off);
         w->treeTopVariationsOff=off;
-        off+=w->treetopSize*4u;
+        if (!terra_reader_take_count(&off,w->treetopSize,4u,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","tree data exceeds section bounds");
+            return 0;
+        }
         }
     /* forceHalloween/forceXMas (>=212) */if (w->version>=212u){
         TX_RD_HEADER_BOOL(forceHalloweenForToday,"forceHalloweenForToday");
@@ -521,7 +535,10 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         TX_RD_HEADER_BOOL(teambasedSpawnsSeed,"teamBasedSpawnsSeed");
         w->numExtradSpawnPointManager=rd_u8(p,len,&off);
         w->extradSpawnPointManagerOff=off;
-        off+=(uint32_t)w->numExtradSpawnPointManager*4u;
+        if (!terra_reader_take_count(&off,(uint32_t)w->numExtradSpawnPointManager,4u,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","spawn point data exceeds section bounds");
+            return 0;
+        }
         }
     /* dualDungeonsSeed (>=304) */if (w->version>=304u)TX_RD_HEADER_BOOL(dualdungeonsSeed,"dualDungeonsSeed");
     /* legacySkip (>=299 && <313) */if (w->version>=299u&&w->version<313u)w->legacySkip=rd_u32le(p,len,&off);
@@ -530,8 +547,11 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         uint32_t slen=0;
         ok=0;
         slen=rd_7bit(p,len,&off,&ok);
+        if (!ok || !terra_reader_take(&off,slen,len)) {
+            tx_set_error("TERRAX_TRUNCATED_HEADER","manifest string exceeds section bounds");
+            return 0;
+        }
         w->maniFestLen=slen;
-        off+=slen;
         }
     if (w->maxTilesX<=0||w->maxTilesY<=0){
         tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");
@@ -1321,11 +1341,11 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     /* * NPC section binary format (v318): * [v268+] shimmered_count (u32) + shimmered_count * netId (u32) * Town NPCs loop: hasNPCs (u8) then for each: * [v190+] SpriteId (i32) * DisplayName (vString: varint-len + bytes) * X (f32), Y (f32) * IsHomeless (u8) * HomeX (u32), HomeY (u32) * [v213+] hasVariation (u8) + optional VariationIndex (i32) * [v315+] HomelessDespawn (u8) * Persistent NPCs loop: hasNPCs (u8) then for each: * SpriteId (i32) * X (f32), Y (f32) * Terminator: hasNPCs byte = 0 */uint32_t scan_off=off;
     /* --- Read shimmered section (v268+) --- */uint32_t shimmered_count=0;
     uint32_t shimmered_start=off;
-    if (w->version>=268u&&scan_off+4u<=end){
+    if (w->version>=268u&&terra_reader_has(scan_off,4u,end)){
         shimmered_count=rd_u32le(p,len,&scan_off);
         shimmered_start=scan_off;
         /* Skip past the shimmered net IDs */for (uint32_t i=0;
-        i<shimmered_count&&scan_off+4u<=end;
+        i<shimmered_count&&terra_reader_has(scan_off,4u,end);
         i++){
             rd_u32le(p,len,&scan_off);
             }
@@ -1335,7 +1355,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     while (scan_off<end){
         uint8_t has_npc=rd_u8(p,len,&scan_off);
         if (!has_npc) break;
-        /* SpriteId */if (scan_off+4u>end) break;
+        /* SpriteId */if (!terra_reader_has(scan_off,4u,end)) break;
         rd_skip(p,len,&scan_off,4);
         /* DisplayName (vString: varint length + bytes) */rd_skip_string_value(p,len,&scan_off);
         /* X, Y (f32 each) */rd_skip(p,len,&scan_off,8);
@@ -1355,14 +1375,14 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     while (scan_off<end){
         uint8_t has_npc=rd_u8(p,len,&scan_off);
         if (!has_npc) break;
-        /* SpriteId (i32) + X (f32) + Y (f32) = 12 bytes */if (scan_off+12u>end) break;
+        /* SpriteId (i32) + X (f32) + Y (f32) = 12 bytes */if (!terra_reader_has(scan_off,12u,end)) break;
         rd_skip(p,len,&scan_off,12);
         persistent_count++;
         }
     /* === Serialize === *//* Shimmered */buf_cstr(b," { \"shimmeredTownNpcNetIds\":[");
     uint32_t shimmer_off=shimmered_start;
     for (uint32_t i=0;
-    i<shimmered_count&&shimmer_off+4u<=end;
+    i<shimmered_count&&terra_reader_has(shimmer_off,4u,end);
     i++){
         if (i)buf_u8(b,',');
         json_i32(b,rd_i32le(p,len,&shimmer_off));
@@ -1693,7 +1713,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     uint32_t len=w->section_overrides[8].active?w->section_overrides[8].len:w->file_len;
     buf_cstr(b," { \"kills\":[");
     uint32_t kill_count=0;
-    if (off+4u<=end)kill_count=rd_u32le(p,len,&off);
+    if (terra_reader_has(off,4u,end))kill_count=rd_u32le(p,len,&off);
     for (uint32_t i=0;
     i<kill_count&&off<end;
     i++){
@@ -1709,7 +1729,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_cstr(b,"],\"sightings\":[");
     uint32_t sighting_count=0;
-    if (off+4u<=end)sighting_count=rd_u32le(p,len,&off);
+    if (terra_reader_has(off,4u,end))sighting_count=rd_u32le(p,len,&off);
     for (uint32_t i=0;
     i<sighting_count&&off<end;
     i++){
@@ -1722,7 +1742,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_cstr(b,"],\"chats\":[");
     uint32_t chat_count=0;
-    if (off+4u<=end)chat_count=rd_u32le(p,len,&off);
+    if (terra_reader_has(off,4u,end))chat_count=rd_u32le(p,len,&off);
     for (uint32_t i=0;
     i<chat_count&&off<end;
     i++){
@@ -1742,7 +1762,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     uint32_t len=w->file_len;
     buf_u8(b,'[');
     int first=1;
-    if (off+2u<=end){
+    if (terra_reader_has(off,2u,end)){
         uint16_t power_id=rd_u16le(p,len,&off);
         if (!first) buf_u8(b,',');
         first=0;

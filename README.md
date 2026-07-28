@@ -77,9 +77,11 @@ python scripts/build_txci.py
 
 产出：
 - `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128MB-512MB 内存）
-- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32MB-128MB 内存）
+- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32MB-96MB 内存）
 
-编译完成后自动复制到 `viewer-app/subpkg_terrax/wasm`。
+编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、内存预算、导出集合和每个产物的 SHA-256。构建不会自动修改其他仓库。
+
+只有明确传入 `-DeployDir` 才会部署 Web manifest 白名单中的 wrapper 和 `.wasm` 两个文件；脏工作树默认拒绝部署。`-AllowDirty` 仅用于本地诊断，不能产生可发布部署。
 
 ### 3. 运行测试
 

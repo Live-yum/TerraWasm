@@ -263,7 +263,11 @@ uint32_t tx_native_heap_peak(void) {
 }
 
 uint32_t tx_memory_used(void) {
+#if defined(__wasm__)
     return (uint32_t)__builtin_wasm_memory_size(0) * TX_PAGE_SIZE;
+#else
+    return 0u;
+#endif
 }
 
 uint32_t tx_mark(void) {

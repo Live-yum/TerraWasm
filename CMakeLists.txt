@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.27)
 project(TerraWasm C)
 
+include(CTest)
+option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
+option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
+
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -11,6 +15,10 @@ set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 include_directories(${INC_DIR})
 
 set(SOURCES
+    "${SRC_DIR}/terra_abi.c"
+    "${SRC_DIR}/terra_reader.c"
+    "${SRC_DIR}/terra_commands.c"
+    "${SRC_DIR}/terra_task.c"
     "${SRC_DIR}/terra_mem.c"
     "${SRC_DIR}/terra_json.c"
     "${SRC_DIR}/terra_wld.c"
@@ -24,6 +32,23 @@ set(SOURCES
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_hash.c"
 )
+
+set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
+set(TERRAX_BUILD_DIRTY "unknown" CACHE STRING "Dirty state embedded in ABI identity")
+set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in ABI identity")
+set(TERRAX_BUILD_FLAGS "-O3" CACHE STRING "Build flags embedded in ABI identity")
+
+function(configure_terra_identity target target_name initial_memory maximum_memory)
+    target_compile_definitions(${target} PRIVATE
+        TERRAX_BUILD_COMMIT="${TERRAX_BUILD_COMMIT}"
+        TERRAX_BUILD_DIRTY="${TERRAX_BUILD_DIRTY}"
+        TERRAX_BUILD_COMPILER="${TERRAX_BUILD_COMPILER}"
+        TERRAX_BUILD_FLAGS="${TERRAX_BUILD_FLAGS}"
+        TERRAX_BUILD_TARGET="${target_name}"
+        TERRAX_INITIAL_MEMORY=${initial_memory}
+        TERRAX_MAXIMUM_MEMORY=${maximum_memory}
+    )
+endfunction()
 
 if(EMSCRIPTEN)
     set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
@@ -63,7 +88,6 @@ if(EMSCRIPTEN)
     set(COMMON_LINK_OPTIONS
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
-        "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions.json"
         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
         "-sMODULARIZE=1"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
@@ -72,6 +96,7 @@ if(EMSCRIPTEN)
 
     # ---- Node target ----
     add_executable(terrax_world_wasm ${SOURCES})
+    configure_terra_identity(terrax_world_wasm "node" 134217728 536870912)
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
         ${COMMON_LINK_OPTIONS}
@@ -87,17 +112,33 @@ if(EMSCRIPTEN)
     # ---- Web/MiniProgram target ----
     # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
     add_executable(terrax_world_wasm_web ${SOURCES})
+    configure_terra_identity(terrax_world_wasm_web "web" 33554432 100663296)
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
         ${COMMON_LINK_OPTIONS}
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
         "-sINITIAL_MEMORY=33554432"
-        "-sMAXIMUM_MEMORY=134217728"
+        "-sMAXIMUM_MEMORY=100663296"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
     )
 else()
     add_library(terrax_world_static STATIC ${SOURCES})
+    configure_terra_identity(terrax_world_static "native" 0 0)
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
+    if(TERRAWASM_SANITIZERS)
+        target_compile_options(terrax_world_static PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(terrax_world_static PRIVATE -fsanitize=address,undefined)
+    endif()
+    if(TERRAWASM_NATIVE_TESTS)
+        add_executable(terra_native_contract tests/native_contract.c)
+        target_link_libraries(terra_native_contract PRIVATE terrax_world_static)
+        target_compile_definitions(terra_native_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_native_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_native_contract COMMAND terra_native_contract)
+    endif()
 endif()

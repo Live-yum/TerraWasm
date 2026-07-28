@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 #include "terra_status.h"
+#include "terra_task.h"
+#include "terra_commands.h"
 
 /*
  * Lifecycle

@@ -1,4 +1,0 @@
-C:/Users/depths/Desktop/Tdecoder/TerraWasm/build/CMakeFiles/terrax_world_wasm.dir
-C:/Users/depths/Desktop/Tdecoder/TerraWasm/build/CMakeFiles/terrax_world_wasm_web.dir
-C:/Users/depths/Desktop/Tdecoder/TerraWasm/build/CMakeFiles/edit_cache.dir
-C:/Users/depths/Desktop/Tdecoder/TerraWasm/build/CMakeFiles/rebuild_cache.dir

@@ -1,5 +1,17 @@
 _terra_world_open
 _terra_world_create
+_terra_abi_version
+_terra_capabilities
+_terra_build_info_json
+_terra_world_open_begin
+_terra_world_open_step
+_terra_world_open_finish
+_terra_world_open_cancel
+_terra_world_task_get_progress
+_terra_world_task_get_status
+_terra_world_task_get_world_handle
+_terra_world_task_close
+_terra_world_apply_commands
 _terra_world_close
 _terra_world_save
 _terra_info_get_last_error_json
