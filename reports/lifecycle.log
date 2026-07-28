@@ -1,0 +1,15 @@
+No valid WLD fixture found; valid open/save cycles skipped.
+{
+  "baseline": {
+    "bridge": 0,
+    "native": 0,
+    "heap": 0,
+    "wasm": 67108864
+  },
+  "final": {
+    "bridge": 0,
+    "native": 0,
+    "heap": 0,
+    "wasm": 67108864
+  }
+}

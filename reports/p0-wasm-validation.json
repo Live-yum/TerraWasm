@@ -1,15 +1,40 @@
 {
-  "generatedAt": "2026-07-28T10:13:45.448303+00:00",
-  "commit": "d9f500d89aeeec4bd28b6c5051fad6b507485cff",
-  "outputs": {},
+  "generatedAt": "2026-07-28T10:21:37.337136+00:00",
+  "commit": "f1db3fd17d6b4845f9807217a9877fb6aa41777f",
+  "buildDirectory": "build-ci",
+  "outputs": {
+    "terrax_world_wasm_web.js": 17042,
+    "terrax_world_wasm_web.wasm": 143643
+  },
   "steps": [
     {
       "name": "configure",
-      "command": "emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel",
-      "startedAt": "2026-07-28T10:13:45.192904+00:00",
-      "finishedAt": "2026-07-28T10:13:45.448271+00:00",
-      "status": 1
+      "command": "emcmake cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel",
+      "startedAt": "2026-07-28T10:20:05.525964+00:00",
+      "finishedAt": "2026-07-28T10:20:06.286788+00:00",
+      "status": 0
+    },
+    {
+      "name": "build",
+      "command": "cmake --build build-ci --target terrax_world_wasm terrax_world_wasm_web --parallel 2",
+      "startedAt": "2026-07-28T10:20:06.286809+00:00",
+      "finishedAt": "2026-07-28T10:21:37.245475+00:00",
+      "status": 0
+    },
+    {
+      "name": "lifecycle",
+      "command": "node tests/test_buffer_lifecycle.js",
+      "startedAt": "2026-07-28T10:21:37.245495+00:00",
+      "finishedAt": "2026-07-28T10:21:37.301979+00:00",
+      "status": 0
+    },
+    {
+      "name": "size-budget",
+      "command": "/usr/bin/python3 scripts/check_web_bundle_size.py",
+      "startedAt": "2026-07-28T10:21:37.302005+00:00",
+      "finishedAt": "2026-07-28T10:21:37.336545+00:00",
+      "status": 0
     }
   ],
-  "passed": false
+  "passed": true
 }
