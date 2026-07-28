@@ -1,6 +1,6 @@
--- Configuring done (0.5s)
+-- Configuring done (0.4s)
 -- Generating done (0.0s)
 -- Build files have been written to: /home/runner/work/TerraWasm/TerraWasm/build-ci
 
 [stderr]
-configure: cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE=/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_CROSSCOMPILING_EMULATOR=/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/node/22.16.0_64bit/bin/node
+configure: cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE=/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_CROSSCOMPILING_EMULATOR=/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/node/22.16.0_64bit/bin/node

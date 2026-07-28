@@ -1,19 +1,19 @@
-[1/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_mem.c.o
+[1/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_json.c.o
 shared:INFO: (Emscripten: Running sanity checks)
 ports:INFO: retrieving port: zlib from https://github.com/madler/zlib/archive/refs/tags/v1.2.13.tar.gz
 ports:INFO: unpacking port: zlib
-cache:INFO: generating port: sysroot/lib/wasm32-emscripten/lto/libz.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libz.a" for subsequent builds)
-system_libs:INFO: compiled 15 inputs in 1.88s
+cache:INFO: generating port: sysroot/lib/wasm32-emscripten/lto/libz.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libz.a" for subsequent builds)
+system_libs:INFO: compiled 15 inputs in 1.94s
 cache:INFO:  - ok
-[2/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_json.c.o
+[2/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_mem.c.o
 [3/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_api.c.o
 [4/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_wld.c.o
 [5/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_ops.c.o
 [6/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_mutators.c.o
 [7/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_render.c.o
 [8/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_map.c.o
-[9/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_update.c.o
-[10/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_txci.c.o
+[9/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_txci.c.o
+[10/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_update.c.o
 [11/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_hash.c.o
 [12/26] Building C object CMakeFiles/terrax_world_wasm.dir/src/terra_pixel_art.c.o
 [13/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_mem.c.o
@@ -24,50 +24,50 @@ cache:INFO:  - ok
 [18/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_mutators.c.o
 [19/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_render.c.o
 [20/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_map.c.o
-[21/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_update.c.o
-[22/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_txci.c.o
+[21/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_txci.c.o
+[22/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_update.c.o
 [23/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_hash.c.o
 [24/26] Building C object CMakeFiles/terrax_world_wasm_web.dir/src/terra_pixel_art.c.o
 [25/26] Linking C executable terrax_world_wasm_web.js
-cache:WARNING: Accessing the Emscripten cache at "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache" (for "sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a") is taking a long time, another process should be writing to it. If there are none and you suspect this process has deadlocked, try deleting the lock file "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/cache.lock" and try again. If this occurs deterministically, consider filing a bug.
-cache:INFO: generating system asset: symbol_lists/7b90c7200c7ae65442a4ab5e9becbf286af61d02.json... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/symbol_lists/7b90c7200c7ae65442a4ab5e9becbf286af61d02.json" for subsequent builds)
+cache:WARNING: Accessing the Emscripten cache at "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache" (for "sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a") is taking a long time, another process should be writing to it. If there are none and you suspect this process has deadlocked, try deleting the lock file "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/cache.lock" and try again. If this occurs deterministically, consider filing a bug.
+cache:INFO: generating system asset: symbol_lists/7b90c7200c7ae65442a4ab5e9becbf286af61d02.json... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/symbol_lists/7b90c7200c7ae65442a4ab5e9becbf286af61d02.json" for subsequent builds)
 cache:INFO:  - ok
 [26/26] Linking C executable terrax_world_wasm.js
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a" for subsequent builds)
-system_libs:INFO: compiled 4 inputs in 0.39s
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libGL-getprocaddr.a" for subsequent builds)
+system_libs:INFO: compiled 4 inputs in 0.43s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libal.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libal.a" for subsequent builds)
-system_libs:INFO: compiled 1 inputs in 0.16s
-cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libhtml5.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libhtml5.a" for subsequent builds)
-system_libs:INFO: compiled 5 inputs in 0.50s
-cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc_optz.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc_optz.a" for subsequent builds)
-system_libs:INFO: compiled 7 inputs in 0.63s
-cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libstubs.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libstubs.a" for subsequent builds)
-system_libs:INFO: compiled 2 inputs in 0.20s
-cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libnoexit.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libnoexit.a" for subsequent builds)
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libal.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libal.a" for subsequent builds)
 system_libs:INFO: compiled 1 inputs in 0.11s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc.a" for subsequent builds)
-system_libs:INFO: compiled 1037 inputs in 14.27s
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libhtml5.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libhtml5.a" for subsequent builds)
+system_libs:INFO: compiled 5 inputs in 0.45s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libemmalloc.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libemmalloc.a" for subsequent builds)
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc_optz.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc_optz.a" for subsequent builds)
+system_libs:INFO: compiled 7 inputs in 0.62s
+cache:INFO:  - ok
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libstubs.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libstubs.a" for subsequent builds)
+system_libs:INFO: compiled 2 inputs in 0.20s
+cache:INFO:  - ok
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libnoexit.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libnoexit.a" for subsequent builds)
+system_libs:INFO: compiled 1 inputs in 0.11s
+cache:INFO:  - ok
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc.a" for subsequent builds)
+system_libs:INFO: compiled 1037 inputs in 13.90s
+cache:INFO:  - ok
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libemmalloc.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libemmalloc.a" for subsequent builds)
 system_libs:INFO: compiled 1 inputs in 0.26s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libcompiler_rt.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libcompiler_rt.a" for subsequent builds)
-system_libs:INFO: compiled 162 inputs in 2.75s
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libcompiler_rt.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libcompiler_rt.a" for subsequent builds)
+system_libs:INFO: compiled 162 inputs in 2.71s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc++-noexcept.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc++-noexcept.a" for subsequent builds)
-system_libs:INFO: compiled 55 inputs in 41.26s
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc++-noexcept.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc++-noexcept.a" for subsequent builds)
+system_libs:INFO: compiled 55 inputs in 46.34s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc++abi-noexcept.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc++abi-noexcept.a" for subsequent builds)
-system_libs:INFO: compiled 16 inputs in 3.34s
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libc++abi-noexcept.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libc++abi-noexcept.a" for subsequent builds)
+system_libs:INFO: compiled 16 inputs in 3.79s
 cache:INFO:  - ok
-cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libsockets.a... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libsockets.a" for subsequent builds)
+cache:INFO: generating system library: sysroot/lib/wasm32-emscripten/lto/libsockets.a... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/lto/libsockets.a" for subsequent builds)
 system_libs:INFO: compiled 27 inputs in 0.74s
 cache:INFO:  - ok
-cache:INFO: generating system asset: symbol_lists/6baa60e8af0694f6bf68fa233c871f6b49743ab5.json... (this will be cached in "/home/runner/work/_temp/aa1d391d-835c-4169-a914-e1fac8879a76/emsdk-main/upstream/emscripten/cache/symbol_lists/6baa60e8af0694f6bf68fa233c871f6b49743ab5.json" for subsequent builds)
+cache:INFO: generating system asset: symbol_lists/6baa60e8af0694f6bf68fa233c871f6b49743ab5.json... (this will be cached in "/home/runner/work/_temp/9fcf20c0-fd52-4d15-8d79-112c6702e4bf/emsdk-main/upstream/emscripten/cache/symbol_lists/6baa60e8af0694f6bf68fa233c871f6b49743ab5.json" for subsequent builds)
 cache:INFO:  - ok
