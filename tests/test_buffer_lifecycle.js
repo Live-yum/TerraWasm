@@ -6,8 +6,8 @@ const path = require("node:path");
 
 const MiB = 1024 * 1024;
 const CYCLES = Number(process.env.TERRAWASM_LIFECYCLE_CYCLES || 100);
-const TRACKED_MEMORY_LIMIT = Number(process.env.TERRAWASM_TRACKED_MEMORY_LIMIT || 190 * MiB);
-const NODE_LINEAR_LIMIT = Number(process.env.TERRAWASM_NODE_LINEAR_LIMIT || 192 * MiB);
+const TRACKED_MEMORY_LIMIT = Number(process.env.TERRAWASM_TRACKED_MEMORY_LIMIT || 160 * MiB);
+const NODE_LINEAR_LIMIT = Number(process.env.TERRAWASM_NODE_LINEAR_LIMIT || 160 * MiB);
 const buildDirectory = process.env.TERRAWASM_BUILD_DIR || "build-ci";
 const factory = require(path.join(__dirname, "..", buildDirectory, "terrax_world_wasm.js"));
 
@@ -40,11 +40,6 @@ function findFixture() {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate));
 }
 
-// Build the smallest deterministic WLD needed by TerraWasm's own parser:
-// version 88, eleven monotonically valid section pointers, a complete zero-filled
-// base header and positive dimensions. Save-without-overrides must return these
-// exact bytes, so this exercises real buffer open/save/close without relying on
-// a private user world or an external game installation.
 function createMinimalFixture() {
   const version = 88;
   const pointerCount = 11;
@@ -59,7 +54,7 @@ function createMinimalFixture() {
   for (let index = 1; index < pointerCount; index += 1) {
     bytes.writeUInt32LE(sectionStart, offset); offset += 4;
   }
-  bytes.writeUInt16LE(0, offset); offset += 2; // no importance bitmap
+  bytes.writeUInt16LE(0, offset); offset += 2;
   assert.equal(offset, formatLength);
 
   offset = formatLength;
@@ -68,13 +63,13 @@ function createMinimalFixture() {
   bytes[offset++] = name.length;
   name.copy(bytes, offset); offset += name.length;
 
-  bytes.writeInt32LE(1, offset); offset += 4;       // worldId
-  bytes.writeInt32LE(0, offset); offset += 4;       // left
-  bytes.writeInt32LE(1600, offset); offset += 4;    // right
-  bytes.writeInt32LE(0, offset); offset += 4;       // top
-  bytes.writeInt32LE(1200, offset); offset += 4;    // bottom
-  bytes.writeInt32LE(10, offset); offset += 4;      // maxTilesY
-  bytes.writeInt32LE(10, offset); offset += 4;      // maxTilesX
+  bytes.writeInt32LE(1, offset); offset += 4;
+  bytes.writeInt32LE(0, offset); offset += 4;
+  bytes.writeInt32LE(1600, offset); offset += 4;
+  bytes.writeInt32LE(0, offset); offset += 4;
+  bytes.writeInt32LE(1200, offset); offset += 4;
+  bytes.writeInt32LE(10, offset); offset += 4;
+  bytes.writeInt32LE(10, offset); offset += 4;
   assert.ok(offset < sectionStart, "minimal header exceeded its section boundary");
   return bytes;
 }
@@ -129,7 +124,6 @@ async function main() {
   let peakWasm = baseline.wasm;
   let peakRss = process.memoryUsage().rss;
 
-  // Invalid uploads exercise all failure cleanup paths.
   for (let index = 0; index < 50; index += 1) {
     const invalid = Buffer.alloc(64, index & 0xff);
     const opened = openWorld(M, invalid);
@@ -143,7 +137,6 @@ async function main() {
   const fixtureLabel = fixturePath || "generated:minimal-v88-11-sections";
   assert.ok(bytes.length > 0, "valid lifecycle fixture is empty");
 
-  // Prove that the fixture is valid before entering the long loop.
   const probe = openWorld(M, bytes);
   assert.equal(probe.status, 0, "generated or supplied WLD fixture is not valid");
   assert.equal(M._terra_world_close(probe.handle), 0, "fixture probe close failed");
