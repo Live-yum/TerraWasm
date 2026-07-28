@@ -69,34 +69,39 @@ if(EMSCRIPTEN)
         -flto
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
+        "-sABORTING_MALLOC=0"
         "-sMALLOC=emmalloc"
         "-sMODULARIZE=1"
         "-sASSERTIONS=0"
         "-sSAFE_HEAP=0"
         "-sSTACK_OVERFLOW_CHECK=0"
+        "-sSTACK_SIZE=1048576"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "-sDISABLE_EXCEPTION_CATCHING=1"
         "-sSUPPORT_LONGJMP=0"
+        "-sEXIT_RUNTIME=0"
         "--no-entry"
     )
 
-    # Node target retains filesystem compatibility for CLI tools and existing tests.
+    # Node target is used only by CI and CLI tests. Keep it below the user's
+    # 200 MB ceiling as well, while leaving more room than the mini-program.
     add_executable(terrax_world_wasm ${SOURCES})
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
         ${COMMON_LINK_OPTIONS}
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
         "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32','FS']"
-        "-sINITIAL_MEMORY=67108864"
-        "-sMAXIMUM_MEMORY=536870912"
+        "-sINITIAL_MEMORY=33554432"
+        "-sMAXIMUM_MEMORY=201326592"
         "-sEXPORT_NAME='TerraWorldWasm'"
         "-sENVIRONMENT=node"
         "-sNODERAWFS=1"
         "-sFILESYSTEM=1"
     )
 
-    # Web/MiniProgram target is buffer-only. Removing MEMFS avoids a second WLD copy
-    # and drops the filesystem runtime from both glue JS and WASM.
+    # Web/MiniProgram target is buffer-only. 112 MiB is a hard WebAssembly
+    # linear-memory ceiling, leaving headroom below 200 MB for the committed
+    # WLD buffer, the save result and pending sparse pixel data in JavaScript.
     add_executable(terrax_world_wasm_web ${SOURCES})
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
@@ -104,7 +109,7 @@ if(EMSCRIPTEN)
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
         "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']"
         "-sINITIAL_MEMORY=16777216"
-        "-sMAXIMUM_MEMORY=134217728"
+        "-sMAXIMUM_MEMORY=117440512"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=0"
