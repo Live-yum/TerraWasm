@@ -1,0 +1,40 @@
+name: P0 WASM pull request validation
+
+on:
+  pull_request:
+    branches:
+      - master
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-wasm-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.69'
+          actions-cache-folder: emsdk-cache
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install CMake and Ninja
+        run: python3 -m pip install --user 'cmake>=3.27,<4' ninja
+      - name: Configure, build, test and measure
+        run: python3 scripts/run_p0_validation.py
+      - name: Upload compact engine and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrax-wasm-p0-validation
+          path: |
+            reports
+            dist
+          if-no-files-found: ignore
