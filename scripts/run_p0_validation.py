@@ -10,14 +10,30 @@ from pathlib import Path
 ROOT = Path.cwd()
 REPORTS = ROOT / "reports"
 DIST = ROOT / "dist"
+BUILD_NAME = os.environ.get("TERRAWASM_BUILD_DIR", "build-ci")
+BUILD = ROOT / BUILD_NAME
 REPORTS.mkdir(exist_ok=True)
 DIST.mkdir(exist_ok=True)
 
+# Never reuse a committed/local CMake cache. CI and developer machines may use
+# different source paths, generators and Emscripten toolchains.
+if BUILD.exists():
+    shutil.rmtree(BUILD)
+
 steps = []
+run_env = os.environ.copy()
+run_env["TERRAWASM_BUILD_DIR"] = BUILD_NAME
+
 
 def run(name, command):
     started = datetime.now(timezone.utc).isoformat()
-    proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    proc = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        env=run_env,
+    )
     (REPORTS / f"{name}.log").write_text(
         proc.stdout + ("\n[stderr]\n" + proc.stderr if proc.stderr else ""),
         encoding="utf-8",
@@ -32,12 +48,13 @@ def run(name, command):
     print(f"[p0-wasm] {name}: {'passed' if proc.returncode == 0 else f'failed ({proc.returncode})'}")
     return proc.returncode == 0
 
+
 configure_ok = run("configure", [
-    "emcmake", "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
+    "emcmake", "cmake", "-S", ".", "-B", BUILD_NAME, "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=MinSizeRel",
 ])
 build_ok = configure_ok and run("build", [
-    "cmake", "--build", "build", "--target",
+    "cmake", "--build", BUILD_NAME, "--target",
     "terrax_world_wasm", "terrax_world_wasm_web", "--parallel", "2",
 ])
 lifecycle_ok = build_ok and run("lifecycle", ["node", "tests/test_buffer_lifecycle.js"])
@@ -46,7 +63,7 @@ size_ok = build_ok and run("size-budget", [sys.executable, "scripts/check_web_bu
 outputs = {}
 if build_ok:
     for name in ("terrax_world_wasm_web.js", "terrax_world_wasm_web.wasm"):
-        source = ROOT / "build" / name
+        source = BUILD / name
         if source.is_file():
             target = DIST / name
             shutil.copy2(source, target)
@@ -55,6 +72,7 @@ if build_ok:
 report = {
     "generatedAt": datetime.now(timezone.utc).isoformat(),
     "commit": os.environ.get("GITHUB_SHA", ""),
+    "buildDirectory": BUILD_NAME,
     "outputs": outputs,
     "steps": steps,
     "passed": bool(configure_ok and build_ok and lifecycle_ok and size_ok),
