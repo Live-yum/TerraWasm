@@ -1,0 +1,48 @@
+name: P0 compact WASM
+
+on:
+  push:
+    branches:
+      - refactor/p0-world-session-size
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.69'
+          actions-cache-folder: emsdk-cache
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install CMake and Ninja
+        run: python3 -m pip install --user 'cmake>=3.27,<4' ninja
+      - name: Configure
+        run: emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
+      - name: Build Node and Web targets
+        run: cmake --build build --target terrax_world_wasm terrax_world_wasm_web --parallel 2
+      - name: Fifty-cycle lifecycle regression
+        run: node tests/test_buffer_lifecycle.js
+      - name: Existing section and allocation regressions
+        shell: bash
+        run: |
+          if [ -d ../TerraX/wld ] && find ../TerraX/wld -name '*.wld' -print -quit | grep -q .; then
+            node --test tests/test_section_mutators.js
+          else
+            echo 'External TerraX WLD fixtures are unavailable; section fixture suite skipped.'
+          fi
+      - name: Enforce web engine size budget
+        run: python3 scripts/check_web_bundle_size.py
+      - name: Upload compact web engine
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrax-web-engine
+          path: |
+            build/terrax_world_wasm_web.js
+            build/terrax_world_wasm_web.wasm
