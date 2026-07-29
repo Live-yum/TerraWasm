@@ -81,8 +81,8 @@ powershell -File TerraWasm/build.ps1
 
 | 目标 | 文件 | 初始内存 | 最大内存 |
 |------|------|----------|----------|
-| Node | `build/terrax_world_wasm.js` + `.wasm` | 128 MB | 512 MB |
-| Web  | `build/terrax_world_wasm_web.js` + `.wasm` | 32 MB | 128 MB |
+| Node | `build/terrax_world_wasm.js` + `.wasm` | 128 MiB | 512 MiB |
+| Web  | `build/terrax_world_wasm_web.js` + `.wasm` | 32 MiB | 96 MiB |
 
 ---
 

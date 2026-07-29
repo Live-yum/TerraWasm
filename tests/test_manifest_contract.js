@@ -40,14 +40,37 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
       exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
     },
     memory: { initialBytes: 33554432, maxBytes: 100663296 },
-    build: { compiler: "test-compiler", flags: ["-O3"] },
+    build: {
+      compiler: "test-compiler",
+      flags: {
+        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
+        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+      },
+    },
     targets: {
-      node: { memory: { initialBytes: 134217728, maxBytes: 536870912 } },
-      web: { memory: { initialBytes: 33554432, maxBytes: 100663296 } },
+      node: {
+        memory: { initialBytes: 134217728, maxBytes: 536870912 },
+        exports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
+        exportHash: sha256(Buffer.from("_terra_world_open\n_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
+        artifacts: [
+          { role: "wrapper", path: "build/terrax_world_wasm.js", bytes: 1, sha256: "d".repeat(64) },
+          { role: "wasm", path: "build/terrax_world_wasm.wasm", bytes: 1, sha256: "e".repeat(64) },
+        ],
+      },
+      web: {
+        memory: { initialBytes: 33554432, maxBytes: 100663296 },
+        exports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
+        exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
+        artifacts: [
+          { role: "wrapper", path: "build/terrax_world_wasm_web.js", bytes: 1, sha256: "b".repeat(64) },
+          { role: "wasm", path: "build/terrax_world_wasm_web.wasm", bytes: 1, sha256: "c".repeat(64) },
+        ],
+      },
     },
     artifacts: [
-      { role: "wrapper", path: "terrax_world_wasm_web.js", bytes: 1, sha256: "b".repeat(64) },
-      { role: "wasm", path: "terrax_world_wasm_web.wasm", bytes: 1, sha256: "c".repeat(64) },
+      { role: "wrapper", path: "build/terrax_world_wasm_web.js", bytes: 1, sha256: "b".repeat(64) },
+      { role: "wasm", path: "build/terrax_world_wasm_web.wasm", bytes: 1, sha256: "c".repeat(64) },
     ],
   };
 
@@ -58,6 +81,12 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     ["memory", (manifest) => { manifest.memory.maxBytes = 134217728; }],
     ["SHA", (manifest) => { manifest.artifacts[0].sha256 = "not-a-sha"; }],
     ["export set", (manifest) => { manifest.abi.requiredExports = []; }],
+    ["Node target exports", (manifest) => { manifest.targets.node.exports = []; }],
+    ["Node target export hash", (manifest) => { manifest.targets.node.exportHash = "invalid"; }],
+    ["Node target artifacts", (manifest) => { manifest.targets.node.artifacts = [{ role: "wrapper", path: "build/node.js", bytes: 1, sha256: "f".repeat(64) }]; }],
+    ["Web target artifacts", (manifest) => { manifest.targets.web.artifacts[0].path = "build/terrax_world_wasm_web.wasm"; }],
+    ["top-level artifacts", (manifest) => { manifest.artifacts[0].path = "build/other.js"; }],
+    ["build flags", (manifest) => { manifest.build.flags = ["-O3"]; }],
   ]) {
     const candidate = structuredClone(base);
     mutate(candidate);
@@ -71,28 +100,69 @@ test("manifest artifact hashes match the files on disk", async () => {
   const { createManifest, validateManifest } = await loadGenerator();
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "terrawasm-manifest-"));
   try {
-    const wrapperText = "wrapper _terra_abi_version _terra_capabilities _terra_build_info_json";
-    fs.writeFileSync(path.join(temp, "wrapper.js"), wrapperText);
+    const webWrapperText = "wrapper _terra_abi_version _terra_capabilities _terra_build_info_json";
+    const nodeWrapperText = "node wrapper _terra_abi_version _terra_capabilities _terra_build_info_json";
+    fs.writeFileSync(path.join(temp, "wrapper.js"), webWrapperText);
+    fs.writeFileSync(path.join(temp, "node-wrapper.js"), nodeWrapperText);
     fs.writeFileSync(path.join(temp, "module.wasm"), Buffer.from([0, 97, 115, 109]));
+    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.from([0, 97, 115, 109, 1]));
     const manifest = createManifest({
       root: temp,
       sourceCommit: "0123456789abcdef0123456789abcdef01234567",
       dirty: false,
       compiler: "test-compiler",
-      flags: ["-O3"],
+      buildFlags: {
+        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
+        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+      },
       webWrapper: "wrapper.js",
       webWasm: "module.wasm",
       webExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-      nodeWrapper: "wrapper.js",
-      nodeWasm: "module.wasm",
-      nodeExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
+      nodeWrapper: "node-wrapper.js",
+      nodeWasm: "node-module.wasm",
+      nodeExports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
     });
-    assert.equal(manifest.artifacts[0].bytes, Buffer.byteLength(wrapperText));
-    assert.equal(manifest.artifacts[0].sha256, sha256(Buffer.from(wrapperText)));
+    assert.equal(manifest.artifacts[0].bytes, Buffer.byteLength(webWrapperText));
+    assert.equal(manifest.artifacts[0].sha256, sha256(Buffer.from(webWrapperText)));
     assert.equal(manifest.artifacts[1].sha256, sha256(Buffer.from([0, 97, 115, 109])));
     assert.equal(manifest.memory.maxBytes, 100663296);
     assert.equal(manifest.targets.node.memory.maxBytes, 536870912);
+    assert.deepEqual(manifest.artifacts, manifest.targets.web.artifacts);
+    assert.equal(manifest.targets.node.artifacts[0].sha256, sha256(Buffer.from(nodeWrapperText)));
+    assert.match(manifest.targets.node.artifacts[0].path, /node-wrapper\.js$/);
+    assert.deepEqual(manifest.build.flags.common, ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"]);
     assert.doesNotThrow(() => validateManifest(manifest));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("createManifest rejects wrappers that do not expose build identity exports", async () => {
+  const { createManifest } = await loadGenerator();
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "terrawasm-manifest-identity-"));
+  try {
+    fs.writeFileSync(path.join(temp, "web-wrapper.js"), "wrapper _terra_abi_version _terra_capabilities");
+    fs.writeFileSync(path.join(temp, "node-wrapper.js"), "wrapper _terra_abi_version _terra_capabilities _terra_build_info_json");
+    fs.writeFileSync(path.join(temp, "module.wasm"), Buffer.from([0, 97, 115, 109]));
+    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.from([0, 97, 115, 109, 1]));
+    assert.throws(() => createManifest({
+      root: temp,
+      sourceCommit: "0123456789abcdef0123456789abcdef01234567",
+      dirty: false,
+      compiler: "test-compiler",
+      buildFlags: {
+        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
+        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+      },
+      webWrapper: "web-wrapper.js",
+      webWasm: "module.wasm",
+      webExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
+      nodeWrapper: "node-wrapper.js",
+      nodeWasm: "node-module.wasm",
+      nodeExports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
+    }), /Web wrapper is missing _terra_build_info_json/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

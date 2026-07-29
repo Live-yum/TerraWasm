@@ -18,6 +18,9 @@ test("local builds deploy only when an explicit destination is supplied", () => 
   assert.match(buildScript, /\[string\]\$DeployDir/);
   assert.match(buildScript, /if \(\$DeployDir\)/);
   assert.match(buildScript, /terra-wasm\.js/);
+  assert.match(buildScript, /\[string\]\$OptimizeFlag/);
+  assert.match(buildScript, /\[switch\]\$EnableLto/);
+  assert.match(buildScript, /check-artifact-size\.mjs/);
 });
 
 test("changing exports.txt automatically invalidates CMake configuration", () => {
@@ -28,4 +31,8 @@ test("Node and Web targets use independent export lists", () => {
   assert.match(cmake, /exports\.web\.txt/);
   assert.match(cmake, /exported_functions_node\.json/);
   assert.match(cmake, /exported_functions_web\.json/);
+  assert.match(cmake, /TERRAX_OPTIMIZE_FLAG/);
+  assert.match(cmake, /TERRAX_ENABLE_LTO/);
+  assert.match(cmake, /TERRAX_BUILD_COMMON_FLAGS_TEXT/);
+  assert.match(cmake, /TERRAX_BUILD_TARGET_FLAGS_TEXT/);
 });

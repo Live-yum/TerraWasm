@@ -76,12 +76,40 @@ python scripts/build_txci.py
 ```
 
 产出：
-- `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128MB-512MB 内存）
-- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32MB-96MB 内存）
+- `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128 MiB 初始内存，512 MiB 最大内存）
+- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32 MiB 初始内存，96 MiB 最大内存）
 
-编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、内存预算、导出集合和每个产物的 SHA-256。构建不会自动修改其他仓库。
+编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、Node/Web 导出集合与导出哈希、公共与目标专属构建 flags、内存预算，以及每个交付产物的 byte size 和 SHA-256。构建不会自动修改其他仓库。
 
 只有明确传入 `-DeployDir` 才会部署 Web manifest 白名单中的 wrapper 和 `.wasm` 两个文件；脏工作树默认拒绝部署。`-AllowDirty` 仅用于本地诊断，不能产生可发布部署。
+
+发布默认仍使用 `-O3`。如需比较更激进的体积优化配置，可在不改源码的前提下执行：
+
+```powershell
+.\build.ps1 -Target all -OptimizeFlag -Oz -EnableLto
+```
+
+这条命令只用于对比正确性、体积和运行表现；当前仓库不会在没有重新验证的情况下把发布默认值从 `-O3` 改成 `-Oz + LTO`。
+
+Web 交付包有显式体积门禁：
+
+- wrapper 上限：`128 KiB`
+- wasm 上限：`256 KiB`
+
+可以单独运行：
+
+```powershell
+node scripts/check-artifact-size.mjs build/terra.manifest.json
+```
+
+该门禁会同时校验 manifest 记录的 byte size 与磁盘实际文件是否一致。
+
+CI 工作流位于 `.github/workflows/quality.yml`，当前包含：
+
+- 原生 `cmake + ctest` 合约门禁
+- `ASan/UBSan + fuzz smoke` 门禁
+- 固定 `Emscripten 5.0.7` 的 Node/Web 发布构建门禁
+- manifest 产物大小门禁与可追溯 artifact 上传
 
 ### 3. 运行测试
 

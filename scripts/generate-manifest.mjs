@@ -4,12 +4,41 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const ABI_VERSION = 1
-const WEB_INITIAL_MEMORY = 32 * 1024 * 1024
-const WEB_MAXIMUM_MEMORY = 96 * 1024 * 1024
-const NODE_INITIAL_MEMORY = 128 * 1024 * 1024
-const NODE_MAXIMUM_MEMORY = 512 * 1024 * 1024
-const ID_EXPORTS = ['_terra_abi_version', '_terra_capabilities', '_terra_build_info_json']
+export const ABI_VERSION = 1
+export const WEB_INITIAL_MEMORY = 32 * 1024 * 1024
+export const WEB_MAXIMUM_MEMORY = 96 * 1024 * 1024
+export const NODE_INITIAL_MEMORY = 128 * 1024 * 1024
+export const NODE_MAXIMUM_MEMORY = 512 * 1024 * 1024
+export const ID_EXPORTS = ['_terra_abi_version', '_terra_capabilities', '_terra_build_info_json']
+export const EXPORTED_RUNTIME_METHODS_FLAG = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
+export const DEFAULT_COMMON_FLAGS = Object.freeze([
+  '-O3',
+  '-fno-exceptions',
+  '-fno-rtti',
+  '-sUSE_ZLIB=1',
+  '-sALLOW_MEMORY_GROWTH=1',
+  EXPORTED_RUNTIME_METHODS_FLAG,
+  '-sMODULARIZE=1',
+  '-sERROR_ON_UNDEFINED_SYMBOLS=1',
+  '--no-entry',
+])
+export const DEFAULT_NODE_FLAGS = Object.freeze([
+  '-sEXPORTED_FUNCTIONS=@exported_functions_node.json',
+  '-sINITIAL_MEMORY=134217728',
+  '-sMAXIMUM_MEMORY=536870912',
+  "-sEXPORT_NAME='TerraWorldWasm'",
+  '-sENVIRONMENT=node',
+  '-sNODERAWFS=1',
+  '-sFILESYSTEM=1',
+])
+export const DEFAULT_WEB_FLAGS = Object.freeze([
+  '-sEXPORTED_FUNCTIONS=@exported_functions_web.json',
+  '-sINITIAL_MEMORY=33554432',
+  '-sMAXIMUM_MEMORY=100663296',
+  "-sEXPORT_NAME='TerraWorldWasmWeb'",
+  '-sENVIRONMENT=web,worker',
+  '-sFILESYSTEM=1',
+])
 
 function fail(message) {
   throw new Error(`TerraWasm manifest: ${message}`)
@@ -25,6 +54,34 @@ function isSha256(value) {
 
 function isCommit(value) {
   return typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value)
+}
+
+function normalizeStringList(values, label) {
+  if (!Array.isArray(values)) fail(`${label} must be an array`)
+  const normalized = values.map((value) => String(value).trim()).filter(Boolean)
+  if (normalized.length === 0) fail(`${label} is empty`)
+  if (normalized.length !== values.length) fail(`${label} contains blank entries`)
+  if (new Set(normalized).size !== normalized.length) fail(`${label} contains duplicates`)
+  return normalized
+}
+
+function normalizeExports(exportsList, label = 'export set') {
+  return normalizeStringList(exportsList, label)
+}
+
+function normalizeBuildFlags(buildFlags) {
+  if (!buildFlags || typeof buildFlags !== 'object' || Array.isArray(buildFlags)) {
+    fail('build flags must contain common/node/web arrays')
+  }
+  return {
+    common: normalizeStringList(buildFlags.common, 'common build flags'),
+    node: normalizeStringList(buildFlags.node, 'node build flags'),
+    web: normalizeStringList(buildFlags.web, 'web build flags'),
+  }
+}
+
+function exportHash(exportsList) {
+  return sha256(Buffer.from(`${normalizeExports(exportsList).join('\n')}\n`, 'utf8'))
 }
 
 function readArtifact(root, relativePath, role) {
@@ -43,20 +100,83 @@ function readArtifact(root, relativePath, role) {
   }
 }
 
-function normalizeExports(exportsList) {
-  const values = [...new Set((exportsList ?? []).map((value) => String(value).trim()).filter(Boolean))]
-  return values
+function validateArtifacts(artifacts, label) {
+  if (!Array.isArray(artifacts) || artifacts.length !== 2) {
+    fail(`${label} must contain exactly two artifacts`)
+  }
+  const paths = new Set()
+  const roles = new Set()
+  const normalized = artifacts.map((artifact) => {
+    if (!artifact || !['wrapper', 'wasm'].includes(artifact.role)) {
+      fail(`${label} contains an invalid artifact role`)
+    }
+    const normalizedPath = String(artifact.path || '').replaceAll('\\', '/')
+    if (!normalizedPath || path.isAbsolute(normalizedPath) || normalizedPath.split('/').includes('..')) {
+      fail(`${label} contains an invalid artifact path`)
+    }
+    if (paths.has(normalizedPath)) fail(`${label} contains duplicate artifact paths`)
+    paths.add(normalizedPath)
+    if (roles.has(artifact.role)) fail(`${label} contains duplicate ${artifact.role} artifacts`)
+    roles.add(artifact.role)
+    if (!Number.isInteger(artifact.bytes) || artifact.bytes <= 0) {
+      fail(`${label} contains an invalid byte count`)
+    }
+    if (!isSha256(artifact.sha256)) fail(`${label} contains an invalid SHA-256`)
+    if (artifact.role === 'wrapper' && !normalizedPath.endsWith('.js')) {
+      fail(`${label} wrapper must be a JavaScript artifact`)
+    }
+    if (artifact.role === 'wasm' && !normalizedPath.endsWith('.wasm')) {
+      fail(`${label} wasm must be a WebAssembly artifact`)
+    }
+    return {
+      role: artifact.role,
+      path: normalizedPath,
+      bytes: artifact.bytes,
+      sha256: artifact.sha256,
+    }
+  })
+  return normalized.sort((left, right) => left.role.localeCompare(right.role))
 }
 
-function exportHash(exportsList) {
-  return sha256(Buffer.from(`${normalizeExports(exportsList).join('\n')}\n`, 'utf8'))
+function artifactSignature(artifacts) {
+  return artifacts.map((artifact) => `${artifact.role}|${artifact.path}|${artifact.bytes}|${artifact.sha256}`)
+}
+
+function validateTarget(target, label, expectedMemory) {
+  if (!target || typeof target !== 'object') fail(`${label} is missing`)
+  if (target.memory?.initialBytes !== expectedMemory.initialBytes || target.memory?.maxBytes !== expectedMemory.maxBytes) {
+    fail(`${label} memory is invalid`)
+  }
+  const exportsList = normalizeExports(target.exports, `${label} exports`)
+  for (const name of ID_EXPORTS) {
+    if (!exportsList.includes(name)) fail(`${label} exports are missing ${name}`)
+  }
+  if (!isSha256(target.exportHash)) fail(`${label} export hash is invalid`)
+  if (target.exportHash !== exportHash(exportsList)) fail(`${label} export hash does not match the export set`)
+  return {
+    memory: {
+      initialBytes: target.memory.initialBytes,
+      maxBytes: target.memory.maxBytes,
+    },
+    exports: exportsList,
+    exportHash: target.exportHash,
+    artifacts: validateArtifacts(target.artifacts, `${label} artifacts`),
+  }
+}
+
+function verifyWrapperIdentity(root, relativePath, label) {
+  const wrapperSource = fs.readFileSync(path.resolve(root, relativePath), 'utf8')
+  for (const name of ID_EXPORTS) {
+    if (!wrapperSource.includes(name)) fail(`${label} is missing ${name}`)
+  }
 }
 
 function targetInfo({ initialBytes, maxBytes, exportsList, artifacts }) {
+  const normalizedExports = normalizeExports(exportsList)
   return {
     memory: { initialBytes, maxBytes },
-    exports: normalizeExports(exportsList),
-    exportHash: exportHash(exportsList),
+    exports: normalizedExports,
+    exportHash: exportHash(normalizedExports),
     artifacts,
   }
 }
@@ -70,47 +190,57 @@ export function validateManifest(manifest) {
 
   const abi = manifest.abi
   if (!abi || abi.version !== ABI_VERSION) fail('ABI version is invalid')
-  const requiredExports = normalizeExports(abi.requiredExports)
-  if (requiredExports.length === 0 || requiredExports.length !== (abi.requiredExports ?? []).length) {
-    fail('ABI export set is empty or contains duplicates')
-  }
+  const requiredExports = normalizeExports(abi.requiredExports, 'ABI export set')
   for (const name of ID_EXPORTS) {
     if (!requiredExports.includes(name)) fail(`ABI export set is missing ${name}`)
   }
   if (!isSha256(abi.exportHash)) fail('ABI export hash is invalid')
   if (abi.exportHash !== exportHash(requiredExports)) fail('ABI export hash does not match the export set')
 
+  const build = manifest.build
+  if (!build || typeof build.compiler !== 'string' || !build.compiler.trim()) {
+    fail('compiler is required')
+  }
+  const buildFlags = normalizeBuildFlags(build.flags)
+
   const memory = manifest.memory
   if (memory?.initialBytes !== WEB_INITIAL_MEMORY || memory?.maxBytes !== WEB_MAXIMUM_MEMORY) {
     fail(`Web memory must be ${WEB_INITIAL_MEMORY}/${WEB_MAXIMUM_MEMORY} bytes`)
   }
-  if (manifest.targets?.web?.memory?.initialBytes !== WEB_INITIAL_MEMORY ||
-      manifest.targets?.web?.memory?.maxBytes !== WEB_MAXIMUM_MEMORY) {
-    fail('Web target memory does not match the top-level contract')
-  }
-  if (manifest.targets?.node?.memory?.initialBytes !== NODE_INITIAL_MEMORY ||
-      manifest.targets?.node?.memory?.maxBytes !== NODE_MAXIMUM_MEMORY) {
-    fail('Node target memory is invalid')
+
+  const nodeTarget = validateTarget(manifest.targets?.node, 'Node target', {
+    initialBytes: NODE_INITIAL_MEMORY,
+    maxBytes: NODE_MAXIMUM_MEMORY,
+  })
+  const webTarget = validateTarget(manifest.targets?.web, 'Web target', {
+    initialBytes: WEB_INITIAL_MEMORY,
+    maxBytes: WEB_MAXIMUM_MEMORY,
+  })
+
+  if (abi.exportHash !== webTarget.exportHash) fail('ABI export hash must match the Web target hash')
+  if (requiredExports.join('\n') !== webTarget.exports.join('\n')) fail('ABI export set must match the Web target exports')
+
+  const topLevelArtifacts = validateArtifacts(manifest.artifacts, 'top-level artifacts')
+  if (artifactSignature(topLevelArtifacts).join('\n') !== artifactSignature(webTarget.artifacts).join('\n')) {
+    fail('top-level artifacts must exactly match the Web target artifacts')
   }
 
-  if (!manifest.build || typeof manifest.build.compiler !== 'string' || !Array.isArray(manifest.build.flags)) {
-    fail('compiler and flags are required')
+  return {
+    ...manifest,
+    abi: {
+      ...abi,
+      requiredExports,
+    },
+    build: {
+      compiler: build.compiler.trim(),
+      flags: buildFlags,
+    },
+    targets: {
+      node: nodeTarget,
+      web: webTarget,
+    },
+    artifacts: topLevelArtifacts,
   }
-
-  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 2) {
-    fail('exactly two Web artifacts are required')
-  }
-  const paths = new Set()
-  for (const artifact of manifest.artifacts) {
-    if (!artifact || !['wrapper', 'wasm'].includes(artifact.role)) fail('artifact role is invalid')
-    if (paths.has(artifact.path)) fail(`duplicate artifact path: ${artifact.path}`)
-    paths.add(artifact.path)
-    if (!Number.isInteger(artifact.bytes) || artifact.bytes <= 0) fail(`${artifact.path}: byte count is invalid`)
-    if (!isSha256(artifact.sha256)) fail(`${artifact.path}: SHA-256 is invalid`)
-    if (artifact.role === 'wrapper' && !artifact.path.endsWith('.js')) fail('wrapper must be a JavaScript artifact')
-    if (artifact.role === 'wasm' && !artifact.path.endsWith('.wasm')) fail('wasm must be a WebAssembly artifact')
-  }
-  return manifest
 }
 
 export function createManifest({
@@ -118,6 +248,7 @@ export function createManifest({
   sourceCommit,
   dirty,
   compiler,
+  buildFlags,
   flags,
   webWrapper,
   webWasm,
@@ -126,20 +257,23 @@ export function createManifest({
   nodeWasm,
   nodeExports,
 }) {
-  const normalizedWebExports = normalizeExports(webExports)
-  const normalizedNodeExports = normalizeExports(nodeExports)
+  const normalizedBuildFlags = normalizeBuildFlags(buildFlags ?? {
+    common: flags ?? DEFAULT_COMMON_FLAGS,
+    node: DEFAULT_NODE_FLAGS,
+    web: DEFAULT_WEB_FLAGS,
+  })
+  const normalizedWebExports = normalizeExports(webExports, 'Web target exports')
+  const normalizedNodeExports = normalizeExports(nodeExports, 'Node target exports')
   const webArtifacts = [
     readArtifact(root, webWrapper, 'wrapper'),
     readArtifact(root, webWasm, 'wasm'),
   ]
-  const wrapperSource = fs.readFileSync(path.resolve(root, webWrapper), 'utf8')
-  for (const name of ID_EXPORTS) {
-    if (!wrapperSource.includes(name)) fail(`Web wrapper is missing ${name}`)
-  }
+  verifyWrapperIdentity(root, webWrapper, 'Web wrapper')
   const nodeArtifacts = [
     readArtifact(root, nodeWrapper, 'wrapper'),
     readArtifact(root, nodeWasm, 'wasm'),
   ]
+  verifyWrapperIdentity(root, nodeWrapper, 'Node wrapper')
   return {
     version: 1,
     artifactId: 'terrax-world-web',
@@ -151,7 +285,10 @@ export function createManifest({
       exportHash: exportHash(normalizedWebExports),
     },
     memory: { initialBytes: WEB_INITIAL_MEMORY, maxBytes: WEB_MAXIMUM_MEMORY },
-    build: { compiler, flags: [...flags] },
+    build: {
+      compiler,
+      flags: normalizedBuildFlags,
+    },
     targets: {
       node: targetInfo({
         initialBytes: NODE_INITIAL_MEMORY,
@@ -185,16 +322,27 @@ function readExportFile(root, file) {
     .filter((line) => line && !line.startsWith('#'))
 }
 
-export function generateManifest({ root, output, dirtyOverride, compiler, flags } = {}) {
+export function generateManifest({
+  root,
+  output,
+  dirtyOverride,
+  compiler,
+  commonFlags,
+  nodeFlags,
+  webFlags,
+} = {}) {
   const repositoryRoot = path.resolve(root ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'))
   const manifest = createManifest({
     root: repositoryRoot,
     sourceCommit: gitValue(repositoryRoot, ['rev-parse', 'HEAD'], '0'.repeat(40)),
-    // Build outputs are checked into this repository and are regenerated by the build itself;
-    // provenance dirty state therefore covers source/config changes, not generated build/ files.
+    // Build outputs are regenerated by the build itself; publishability tracks source/config drift.
     dirty: dirtyOverride ?? Boolean(gitValue(repositoryRoot, ['status', '--porcelain', '--', '.', ':(exclude)build'], '')),
     compiler: compiler ?? (process.env.EMSCRIPTEN ? 'emscripten' : 'native'),
-    flags: flags ?? ['-O3', '-sALLOW_MEMORY_GROWTH=1'],
+    buildFlags: {
+      common: commonFlags?.length ? commonFlags : DEFAULT_COMMON_FLAGS,
+      node: nodeFlags?.length ? nodeFlags : DEFAULT_NODE_FLAGS,
+      web: webFlags?.length ? webFlags : DEFAULT_WEB_FLAGS,
+    },
     webWrapper: 'build/terrax_world_wasm_web.js',
     webWasm: 'build/terrax_world_wasm_web.wasm',
     webExports: readExportFile(repositoryRoot, 'exports.web.txt'),
@@ -209,13 +357,24 @@ export function generateManifest({ root, output, dirtyOverride, compiler, flags 
 }
 
 function parseArgs(argv) {
-  const args = { root: undefined, output: 'build/terra.manifest.json', dirtyOverride: undefined, compiler: undefined, flags: undefined }
+  const args = {
+    root: undefined,
+    output: 'build/terra.manifest.json',
+    dirtyOverride: undefined,
+    compiler: undefined,
+    commonFlags: [],
+    nodeFlags: [],
+    webFlags: [],
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === '--root') args.root = argv[++index]
     else if (value === '--output') args.output = argv[++index]
     else if (value === '--compiler') args.compiler = argv[++index]
-    else if (value === '--flags') args.flags = argv[++index].split(',').map((flag) => flag.trim()).filter(Boolean)
+    else if (value === '--common-flag') args.commonFlags.push(argv[++index])
+    else if (value === '--node-flag') args.nodeFlags.push(argv[++index])
+    else if (value === '--web-flag') args.webFlags.push(argv[++index])
+    else if (value === '--flags') args.commonFlags.push(argv[++index])
     else if (value === '--allow-dirty') args.dirtyOverride = true
     else fail(`unknown option ${value}`)
   }

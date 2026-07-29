@@ -35,19 +35,43 @@ set(SOURCES
 )
 
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
-set(TERRAX_BUILD_DIRTY "unknown" CACHE STRING "Dirty state embedded in ABI identity")
+set(TERRAX_BUILD_DIRTY "false" CACHE STRING "Dirty state embedded in ABI identity")
 set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in ABI identity")
-set(TERRAX_BUILD_FLAGS "-O3" CACHE STRING "Build flags embedded in ABI identity")
+set(TERRAX_OPTIMIZE_FLAG "-O3" CACHE STRING "Optimization flag for release-style Wasm builds")
+option(TERRAX_ENABLE_LTO "Enable link-time optimization for Wasm targets" OFF)
 
-function(configure_terra_identity target target_name initial_memory maximum_memory)
+function(json_escape out_var value)
+    string(REPLACE "\\" "\\\\" escaped "${value}")
+    string(REPLACE "\"" "\\\"" escaped "${escaped}")
+    set(${out_var} "${escaped}" PARENT_SCOPE)
+endfunction()
+
+function(list_to_json out_var)
+    set(result "[")
+    set(first_item TRUE)
+    foreach(item IN LISTS ARGN)
+        json_escape(escaped "${item}")
+        if(first_item)
+            set(first_item FALSE)
+        else()
+            string(APPEND result ",")
+        endif()
+        string(APPEND result "\"${escaped}\"")
+    endforeach()
+    string(APPEND result "]")
+    set(${out_var} "${result}" PARENT_SCOPE)
+endfunction()
+
+function(configure_terra_identity target target_name initial_memory maximum_memory common_flags_text target_flags_text)
     target_compile_definitions(${target} PRIVATE
         TERRAX_BUILD_COMMIT="${TERRAX_BUILD_COMMIT}"
         TERRAX_BUILD_DIRTY="${TERRAX_BUILD_DIRTY}"
         TERRAX_BUILD_COMPILER="${TERRAX_BUILD_COMPILER}"
-        TERRAX_BUILD_FLAGS="${TERRAX_BUILD_FLAGS}"
         TERRAX_BUILD_TARGET="${target_name}"
         TERRAX_INITIAL_MEMORY=${initial_memory}
         TERRAX_MAXIMUM_MEMORY=${maximum_memory}
+        TERRAX_BUILD_COMMON_FLAGS_TEXT="${common_flags_text}"
+        TERRAX_BUILD_TARGET_FLAGS_TEXT="${target_flags_text}"
     )
 endfunction()
 
@@ -82,9 +106,11 @@ if(EMSCRIPTEN)
     set(COMMON_COMPILE_OPTIONS
         -fno-exceptions
         -fno-rtti
-        -O3
-        "-sUSE_ZLIB=1"
+        "${TERRAX_OPTIMIZE_FLAG}"
     )
+    if(TERRAX_ENABLE_LTO)
+        list(APPEND COMMON_COMPILE_OPTIONS -flto)
+    endif()
 
     set(COMMON_LINK_OPTIONS
         "-sUSE_ZLIB=1"
@@ -94,13 +120,11 @@ if(EMSCRIPTEN)
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
     )
+    if(TERRAX_ENABLE_LTO)
+        list(APPEND COMMON_LINK_OPTIONS -flto)
+    endif()
 
-    # ---- Node target ----
-    add_executable(terrax_world_wasm ${SOURCES})
-    configure_terra_identity(terrax_world_wasm "node" 134217728 536870912)
-    target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
-    target_link_options(terrax_world_wasm PRIVATE
-        ${COMMON_LINK_OPTIONS}
+    set(NODE_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
         "-sINITIAL_MEMORY=134217728"
         "-sMAXIMUM_MEMORY=536870912"
@@ -109,14 +133,7 @@ if(EMSCRIPTEN)
         "-sNODERAWFS=1"
         "-sFILESYSTEM=1"
     )
-
-    # ---- Web/MiniProgram target ----
-    # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
-    add_executable(terrax_world_wasm_web ${SOURCES})
-    configure_terra_identity(terrax_world_wasm_web "web" 33554432 100663296)
-    target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
-    target_link_options(terrax_world_wasm_web PRIVATE
-        ${COMMON_LINK_OPTIONS}
+    set(WEB_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
         "-sINITIAL_MEMORY=33554432"
         "-sMAXIMUM_MEMORY=100663296"
@@ -124,9 +141,32 @@ if(EMSCRIPTEN)
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
     )
+    set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
+    string(JOIN " @@ " COMMON_FLAGS_TEXT ${COMMON_MANIFEST_FLAGS})
+    string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_LINK_OPTIONS})
+    string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_LINK_OPTIONS})
+
+    # ---- Node target ----
+    add_executable(terrax_world_wasm ${SOURCES})
+    configure_terra_identity(terrax_world_wasm "node" 134217728 536870912 "${COMMON_FLAGS_TEXT}" "${NODE_FLAGS_TEXT}")
+    target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
+    target_link_options(terrax_world_wasm PRIVATE
+        ${COMMON_LINK_OPTIONS}
+        ${NODE_LINK_OPTIONS}
+    )
+
+    # ---- Web/MiniProgram target ----
+    # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
+    add_executable(terrax_world_wasm_web ${SOURCES})
+    configure_terra_identity(terrax_world_wasm_web "web" 33554432 100663296 "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}")
+    target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
+    target_link_options(terrax_world_wasm_web PRIVATE
+        ${COMMON_LINK_OPTIONS}
+        ${WEB_LINK_OPTIONS}
+    )
 else()
     add_library(terrax_world_static STATIC ${SOURCES})
-    configure_terra_identity(terrax_world_static "native" 0 0)
+    configure_terra_identity(terrax_world_static "native" 0 0 "" "")
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
     if(TERRAWASM_SANITIZERS)
         target_compile_options(terrax_world_static PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)

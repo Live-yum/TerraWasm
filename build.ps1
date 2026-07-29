@@ -6,6 +6,9 @@ param(
     [switch]$Test,
     [switch]$AllowDirty,
     [string]$EmsdkDir = "D:\Tool\emsdk",
+    [ValidateSet("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz")]
+    [string]$OptimizeFlag = "-O3",
+    [switch]$EnableLto,
     [string]$DeployDir
 )
 
@@ -16,6 +19,50 @@ $SourceCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
 $DirtyOutput = (& git -C $ProjectDir status --porcelain -- . ':(exclude)build')
 $Dirty = -not [string]::IsNullOrWhiteSpace(($DirtyOutput -join "`n"))
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
+$EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
+$CommonFlags = @(
+    $OptimizeFlag,
+    "-fno-exceptions",
+    "-fno-rtti",
+    "-sUSE_ZLIB=1",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']",
+    "-sMODULARIZE=1",
+    "-sERROR_ON_UNDEFINED_SYMBOLS=1",
+    "--no-entry"
+)
+if ($EnableLto) {
+    $CommonFlags += "-flto"
+}
+$NodeFlags = @(
+    "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
+    "-sINITIAL_MEMORY=134217728",
+    "-sMAXIMUM_MEMORY=536870912",
+    "-sEXPORT_NAME='TerraWorldWasm'",
+    "-sENVIRONMENT=node",
+    "-sNODERAWFS=1",
+    "-sFILESYSTEM=1"
+)
+$WebFlags = @(
+    "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
+    "-sINITIAL_MEMORY=33554432",
+    "-sMAXIMUM_MEMORY=100663296",
+    "-sEXPORT_NAME='TerraWorldWasmWeb'",
+    "-sENVIRONMENT=web,worker",
+    "-sFILESYSTEM=1"
+)
+
+function Add-FlagArgs {
+    param(
+        [System.Collections.Generic.List[string]]$Arguments,
+        [string]$Option,
+        [string[]]$Values
+    )
+    foreach ($value in $Values) {
+        $Arguments.Add($Option)
+        $Arguments.Add($value)
+    }
+}
 
 # --- Activate Emscripten ---
 $env:EMSDK_QUIET = 1
@@ -40,7 +87,8 @@ if (-not $Quick) {
         "-DTERRAX_BUILD_COMMIT=$SourceCommit" `
         "-DTERRAX_BUILD_DIRTY=$DirtyFlag" `
         "-DTERRAX_BUILD_COMPILER=emscripten" `
-        "-DTERRAX_BUILD_FLAGS=-O3" 2>&1
+        "-DTERRAX_OPTIMIZE_FLAG=$OptimizeFlag" `
+        "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "CMake configure failed"
         Pop-Location
@@ -87,7 +135,18 @@ foreach ($t in $buildTargets) {
 # --- Generate and validate the source/artifact identity manifest ---
 Write-Host "=== Generating artifact manifest ===" -ForegroundColor Cyan
 Push-Location $ProjectDir
-& node scripts/generate-manifest.mjs --root $ProjectDir --output build/terra.manifest.json --compiler emscripten --flags '-O3'
+$manifestArgs = [System.Collections.Generic.List[string]]::new()
+$manifestArgs.Add("scripts/generate-manifest.mjs")
+$manifestArgs.Add("--root")
+$manifestArgs.Add($ProjectDir)
+$manifestArgs.Add("--output")
+$manifestArgs.Add("build/terra.manifest.json")
+$manifestArgs.Add("--compiler")
+$manifestArgs.Add("emscripten")
+Add-FlagArgs -Arguments $manifestArgs -Option "--common-flag" -Values $CommonFlags
+Add-FlagArgs -Arguments $manifestArgs -Option "--node-flag" -Values $NodeFlags
+Add-FlagArgs -Arguments $manifestArgs -Option "--web-flag" -Values $WebFlags
+& node @manifestArgs
 $manifestExitCode = $LASTEXITCODE
 Pop-Location
 if (-not (Test-Path (Join-Path $BuildDir "terra.manifest.json"))) {
@@ -99,6 +158,16 @@ if ($manifestExitCode -ne 0 -and -not $AllowDirty) {
 }
 if ($manifest.dirty -and -not $AllowDirty) {
     throw "Dirty TerraWasm builds are not publishable; use a clean checkout or -AllowDirty for local diagnostics"
+}
+if ($Target -ne "node") {
+    Push-Location $ProjectDir
+    if ($AllowDirty) {
+        & node scripts/check-artifact-size.mjs build/terra.manifest.json --allow-dirty
+    } else {
+        & node scripts/check-artifact-size.mjs build/terra.manifest.json
+    }
+    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Web artifact size gate failed" }
+    Pop-Location
 }
 
 # --- Optional explicit deployment ---
@@ -149,7 +218,7 @@ if ($Test) {
     }
     Write-Host "`n=== Running tests ===" -ForegroundColor Cyan
     Push-Location $ProjectDir
-    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_sha256.js 2>&1
+    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
     node tests/test_all.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }

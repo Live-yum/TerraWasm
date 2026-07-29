@@ -12,15 +12,19 @@
 #endif
 
 #ifndef TERRAX_BUILD_DIRTY
-#define TERRAX_BUILD_DIRTY "unknown"
+#define TERRAX_BUILD_DIRTY false
 #endif
 
 #ifndef TERRAX_BUILD_COMPILER
 #define TERRAX_BUILD_COMPILER "unknown"
 #endif
 
-#ifndef TERRAX_BUILD_FLAGS
-#define TERRAX_BUILD_FLAGS "unknown"
+#ifndef TERRAX_BUILD_COMMON_FLAGS_TEXT
+#define TERRAX_BUILD_COMMON_FLAGS_TEXT ""
+#endif
+
+#ifndef TERRAX_BUILD_TARGET_FLAGS_TEXT
+#define TERRAX_BUILD_TARGET_FLAGS_TEXT ""
 #endif
 
 #ifndef TERRAX_BUILD_TARGET
@@ -52,12 +56,13 @@ static const char g_capabilities[] =
 static const char g_build_info_json[] =
     "{\"abiVersion\":" TERRAX_STRINGIFY(TERRAX_ABI_VERSION)
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""
-    ",\"dirty\":\"" TERRAX_BUILD_DIRTY "\""
+    ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)
     ",\"compiler\":\"" TERRAX_BUILD_COMPILER "\""
-    ",\"flags\":\"" TERRAX_BUILD_FLAGS "\""
     ",\"target\":\"" TERRAX_BUILD_TARGET "\""
     ",\"initialMemory\":" TERRAX_STRINGIFY(TERRAX_INITIAL_MEMORY)
     ",\"maxMemory\":" TERRAX_STRINGIFY(TERRAX_MAXIMUM_MEMORY)
+    ",\"commonFlagsText\":\"" TERRAX_BUILD_COMMON_FLAGS_TEXT "\""
+    ",\"targetFlagsText\":\"" TERRAX_BUILD_TARGET_FLAGS_TEXT "\""
     "}";
 
 uint32_t terra_abi_version(void) {
