@@ -65,7 +65,7 @@ endfunction()
 function(configure_terra_identity target target_name initial_memory maximum_memory common_flags_text target_flags_text)
     target_compile_definitions(${target} PRIVATE
         TERRAX_BUILD_COMMIT="${TERRAX_BUILD_COMMIT}"
-        TERRAX_BUILD_DIRTY="${TERRAX_BUILD_DIRTY}"
+        TERRAX_BUILD_DIRTY=${TERRAX_BUILD_DIRTY}
         TERRAX_BUILD_COMPILER="${TERRAX_BUILD_COMPILER}"
         TERRAX_BUILD_TARGET="${target_name}"
         TERRAX_INITIAL_MEMORY=${initial_memory}

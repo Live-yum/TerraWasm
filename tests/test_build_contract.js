@@ -41,6 +41,10 @@ test("Node and Web targets use independent export lists", () => {
   assert.doesNotMatch(cmake, /set\(COMMON_MANIFEST_FLAGS\s+\$\{COMMON_COMPILE_OPTIONS\}\s+\$\{COMMON_LINK_OPTIONS\}\)/);
   assert.match(cmake, /target_link_options\(terrax_world_wasm[\s\S]*TERRAX_OPTIMIZE_FLAG/);
   assert.match(cmake, /target_link_options\(terrax_world_wasm_web[\s\S]*TERRAX_OPTIMIZE_FLAG/);
+  assert.match(buildScript, /--source-commit/);
+  assert.match(buildScript, /--dirty/);
+  assert.match(buildScript, /source changed during build/i);
+  assert.match(manifestScript, /sourceCommit:\s*sourceCommit\s*\?\?/);
 });
 
 test("artifact paths are repository-relative on every host platform", () => {

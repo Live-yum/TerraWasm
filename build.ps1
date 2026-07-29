@@ -17,7 +17,8 @@ $ProjectDir = $PSScriptRoot
 $BuildDir = Join-Path $ProjectDir "build"
 $SourceCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
 $DirtyOutput = (& git -C $ProjectDir status --porcelain -- . ':(exclude)build')
-$Dirty = -not [string]::IsNullOrWhiteSpace(($DirtyOutput -join "`n"))
+$SourceState = $DirtyOutput -join "`n"
+$Dirty = -not [string]::IsNullOrWhiteSpace($SourceState)
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
 $EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
 $CommonFlags = @(
@@ -76,6 +77,25 @@ Push-Location $EmsdkDir
 & $emsdkEnv 2>$null
 Pop-Location
 
+# Quick mode is safe only when the cached build identity exactly matches this invocation.
+if ($Quick) {
+    $cachePath = Join-Path $BuildDir "CMakeCache.txt"
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+        throw "Quick build requires an existing CMake cache"
+    }
+    $cache = Get-Content -LiteralPath $cachePath -Raw
+    foreach ($expected in @(
+        "TERRAX_BUILD_COMMIT:STRING=$SourceCommit",
+        "TERRAX_BUILD_DIRTY:STRING=$DirtyFlag",
+        "TERRAX_OPTIMIZE_FLAG:STRING=$OptimizeFlag",
+        "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag"
+    )) {
+        if (-not $cache.Contains($expected)) {
+            throw "Quick build cache identity does not match the current source/options; rerun without -Quick"
+        }
+    }
+}
+
 # --- Configure (skip in Quick mode) ---
 if (-not $Quick) {
     Write-Host "=== Configuring CMake ===" -ForegroundColor Cyan
@@ -132,6 +152,13 @@ foreach ($t in $buildTargets) {
     Build-Target -Name $t
 }
 
+# Refuse artifacts if the source changed while compilation was in flight.
+$CurrentSourceCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
+$CurrentSourceState = ((& git -C $ProjectDir status --porcelain -- . ':(exclude)build') -join "`n")
+if ($CurrentSourceCommit -ne $SourceCommit -or $CurrentSourceState -ne $SourceState) {
+    throw "TerraWasm source changed during build; discard the artifacts and rebuild"
+}
+
 # --- Generate and validate the source/artifact identity manifest ---
 Write-Host "=== Generating artifact manifest ===" -ForegroundColor Cyan
 Push-Location $ProjectDir
@@ -143,6 +170,11 @@ $manifestArgs.Add("--output")
 $manifestArgs.Add("build/terra.manifest.json")
 $manifestArgs.Add("--compiler")
 $manifestArgs.Add("emscripten")
+$manifestArgs.Add("--source-commit")
+$manifestArgs.Add($SourceCommit)
+$manifestArgs.Add("--dirty")
+$manifestArgs.Add($DirtyFlag)
+if ($AllowDirty) { $manifestArgs.Add("--allow-dirty") }
 Add-FlagArgs -Arguments $manifestArgs -Option "--common-flag" -Values $CommonFlags
 Add-FlagArgs -Arguments $manifestArgs -Option "--node-flag" -Values $NodeFlags
 Add-FlagArgs -Arguments $manifestArgs -Option "--web-flag" -Values $WebFlags
@@ -218,7 +250,7 @@ if ($Test) {
     }
     Write-Host "`n=== Running tests ===" -ForegroundColor Cyan
     Push-Location $ProjectDir
-    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
+    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_build_identity.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
     node tests/test_all.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }
