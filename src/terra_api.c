@@ -6,10 +6,32 @@
  */
 #include "terra_types.h"
 #include "terra_world.h"
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#include <sys/stat.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
-extern void* memset(void* dst, int value, unsigned long n);
-extern void* memcpy(void* dst, const void* src, unsigned long n);
+extern void* memset(void* dst, int value, size_t n);
+extern void* memcpy(void* dst, const void* src, size_t n);
+
+#ifdef TERRAX_TESTING
+static uint32_t g_tx_test_save_write_limit = UINT32_MAX;
+
+void terrax_test_fail_save_after_bytes(uint32_t bytes) {
+    g_tx_test_save_write_limit = bytes;
+}
+
+void terrax_test_reset_fail_save(void) {
+    g_tx_test_save_write_limit = UINT32_MAX;
+}
+#endif
 
 /* ---------- External declarations from terra_mem.c ---------- */
 extern uint8_t* tx_alloc(uint32_t size);
@@ -202,13 +224,158 @@ static uint8_t* read_file_to_heap(const char* path, uint32_t* out_len) {
 
 /* ---------- Helper: write buffer to file ---------- */
 
+static int tx_write_stream(FILE* f, const uint8_t* data, uint32_t len) {
+    if (!f) return 0;
+    size_t requested = (size_t)len;
+#ifdef TERRAX_TESTING
+    if (g_tx_test_save_write_limit < len) {
+        requested = (size_t)g_tx_test_save_write_limit;
+    }
+#endif
+    size_t written = fwrite(data, 1, requested, f);
+    if (written != requested) return 0;
+#ifdef TERRAX_TESTING
+    if (requested != (size_t)len) return 0;
+#endif
+    return written == (size_t)len;
+}
+
 int write_file_from_heap(const char* path, const uint8_t* data, uint32_t len) {
 
     FILE* f = fopen(path, "wb");
     if (!f) return 0;
-    size_t written = fwrite(data, 1, (size_t)len, f);
+    int ok = tx_write_stream(f, data, len);
     fclose(f);
-    return written == (size_t)len;
+    return ok;
+}
+
+static int tx_replace_file(const char* temp_path, const char* path) {
+#ifdef _WIN32
+    return MoveFileExA(
+        temp_path,
+        path,
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return rename(temp_path, path) == 0;
+#endif
+}
+
+static int tx_remove_if_exists_checked(const char* path) {
+    if (remove(path) == 0) return 1;
+    return errno == ENOENT;
+}
+
+static char* tx_build_temp_save_path(
+    const char* path,
+    unsigned long pid,
+    uint32_t counter) {
+    char suffix[64];
+    int suffix_len = snprintf(
+        suffix,
+        sizeof(suffix),
+        ".tmp.%lu.%lu",
+        pid,
+        (unsigned long)counter);
+    if (suffix_len <= 0 || suffix_len >= (int)sizeof(suffix)) return NULL;
+
+    uint32_t path_len = tx_strlen(path);
+    if (path_len > UINT32_MAX - (uint32_t)suffix_len - 1u) return NULL;
+    char* temp_path = (char*)tx_alloc(path_len + (uint32_t)suffix_len + 1u);
+    if (!temp_path) return NULL;
+    for (uint32_t i = 0; i < path_len; i++) temp_path[i] = path[i];
+    for (int i = 0; i < suffix_len; i++) temp_path[path_len + (uint32_t)i] = suffix[i];
+    temp_path[path_len + (uint32_t)suffix_len] = 0;
+    return temp_path;
+}
+
+static int tx_open_unique_temp_save_file(
+    const char* path,
+    char** out_temp_path,
+    FILE** out_file) {
+    static uint32_t g_tx_save_temp_counter = 0u;
+    unsigned long pid = 0u;
+    if (!out_temp_path || !out_file) return 0;
+    *out_temp_path = NULL;
+    *out_file = NULL;
+#ifdef _WIN32
+    pid = (unsigned long)_getpid();
+#else
+    pid = (unsigned long)getpid();
+#endif
+
+    for (uint32_t attempt = 0; attempt < 1024u; attempt++) {
+        char* temp_path = tx_build_temp_save_path(path, pid, ++g_tx_save_temp_counter);
+        if (!temp_path) return 0;
+#ifdef _WIN32
+        int fd = _open(
+            temp_path,
+            _O_CREAT | _O_EXCL | _O_BINARY | _O_WRONLY,
+            _S_IREAD | _S_IWRITE);
+#else
+        int fd = open(temp_path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+#endif
+        if (fd >= 0) {
+#ifdef _WIN32
+            FILE* f = _fdopen(fd, "wb");
+#else
+            FILE* f = fdopen(fd, "wb");
+#endif
+            if (!f) {
+#ifdef _WIN32
+                _close(fd);
+#else
+                close(fd);
+#endif
+                if (!tx_remove_if_exists_checked(temp_path)) {
+                    tx_internal_free(temp_path);
+                    return 0;
+                }
+                tx_internal_free(temp_path);
+                return 0;
+            }
+            *out_temp_path = temp_path;
+            *out_file = f;
+            return 1;
+        }
+        if (errno != EEXIST) {
+            tx_internal_free(temp_path);
+            return 0;
+        }
+        tx_internal_free(temp_path);
+    }
+    return 0;
+}
+
+static int tx_write_file_atomic_from_heap(
+    const char* path,
+    const uint8_t* data,
+    uint32_t len) {
+    char* temp_path = NULL;
+    FILE* f = NULL;
+    if (!tx_open_unique_temp_save_file(path, &temp_path, &f)) return 0;
+    int ok = tx_write_stream(f, data, len);
+    if (ok && fflush(f) != 0) ok = 0;
+    if (fclose(f) != 0) ok = 0;
+    if (!ok) {
+        if (!tx_remove_if_exists_checked(temp_path)) {
+            tx_internal_free(temp_path);
+            return 0;
+        }
+        tx_internal_free(temp_path);
+        return 0;
+    }
+
+    ok = tx_replace_file(temp_path, path);
+    if (!ok) {
+        /* Replace is atomic only on success; cleanup still checks whether the
+         * temp artifact can be removed on this host after the failed rename. */
+        if (!tx_remove_if_exists_checked(temp_path)) {
+            tx_internal_free(temp_path);
+            return 0;
+        }
+    }
+    tx_internal_free(temp_path);
+    return ok;
 }
 
 static TxWorld* tx_begin_world_open(uint32_t* allocation_mark) {
@@ -545,7 +712,7 @@ terrax_world_status terra_world_save(
         len = out.len;
     }
 
-    if (!write_file_from_heap(path_utf8, data, len)) {
+    if (!tx_write_file_atomic_from_heap(path_utf8, data, len)) {
         if (out.data) tx_internal_free(out.data);
         tx_set_error("TERRAX_IO_ERROR", "failed to write file");
         return TERRAX_WORLD_STATUS_IO_ERROR;

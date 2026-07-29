@@ -133,9 +133,15 @@ else()
         target_link_options(terrax_world_static PRIVATE -fsanitize=address,undefined)
     endif()
     if(TERRAWASM_NATIVE_TESTS)
+        find_package(ZLIB REQUIRED)
+        target_compile_definitions(terrax_world_static PRIVATE TERRAX_TESTING)
         add_executable(terra_native_contract tests/native_contract.c)
-        target_link_libraries(terra_native_contract PRIVATE terrax_world_static)
-        target_compile_definitions(terra_native_contract PRIVATE TERRAX_STATIC)
+        target_link_libraries(terra_native_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_native_contract PRIVATE
+            TERRAX_STATIC
+            TERRAX_TESTING
+            TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        )
         if(TERRAWASM_SANITIZERS)
             target_compile_options(terra_native_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
@@ -147,7 +153,7 @@ else()
                 tests/fuzz/fuzz_wld_open.c
                 tests/fuzz/fuzz_json.c
             )
-            target_link_libraries(terra_fuzz_smoke PRIVATE terrax_world_static)
+            target_link_libraries(terra_fuzz_smoke PRIVATE terrax_world_static ZLIB::ZLIB)
             target_compile_definitions(terra_fuzz_smoke PRIVATE TERRAX_STATIC)
             if(TERRAWASM_SANITIZERS)
                 target_compile_options(terra_fuzz_smoke PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
