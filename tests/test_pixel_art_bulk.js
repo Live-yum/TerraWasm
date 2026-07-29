@@ -4,10 +4,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { getPrimaryWorldPath } = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 
-const WLD_PATH = path.resolve(__dirname, "..", "..", "TerraX", "wld", "1.wld");
+const WLD_PATH = getPrimaryWorldPath();
 const TXCI_PATH = path.resolve(__dirname, "..", "data", "terraria_color_index.txci");
 const RECORD_CELLS = 64 * 64;
 const RECORD_BYTES = 8 + RECORD_CELLS * 2;
@@ -24,12 +25,9 @@ function makeRecord({ cx = 0, cy = 0, used = 1, reserved = 0, fill } = {}) {
   return bytes;
 }
 
-test("bulk indexed ABI rejects malformed records without leaking either heap", async (t) => {
-  if (!fs.existsSync(WLD_PATH) || !fs.existsSync(TXCI_PATH)) {
-    t.skip("pixel-art fixtures are unavailable");
-    return;
-  }
-
+test("bulk indexed ABI rejects malformed records without leaking either heap", async () => {
+  assert.ok(fs.existsSync(WLD_PATH), `missing checked-in world fixture: ${WLD_PATH}`);
+  assert.ok(fs.existsSync(TXCI_PATH), `missing checked-in TXCI palette: ${TXCI_PATH}`);
   const M = await TerraWorldWasm();
   assert.equal(typeof M._txw_add_pixel_art_chunks_bulk, "function");
 

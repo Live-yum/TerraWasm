@@ -4,10 +4,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { getPrimaryWorldPath } = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
-const WLD_DIR = path.resolve(__dirname, "..", "..", "TerraX", "wld");
-const TEST_WLD = path.join(WLD_DIR, "1.wld");
+const TEST_WLD = getPrimaryWorldPath();
 
 function alloc(M, bytes, label) {
   const ptr = M._tx_malloc(bytes.length || bytes);

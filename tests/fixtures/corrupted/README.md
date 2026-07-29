@@ -1,1 +1,4 @@
-This fixture directory is reserved for malformed WLD inputs used by reader regression and fuzz smoke tests. The deterministic corrupted seed is generated in `tests/test_reader_safety.js` so the fixture remains text-only and reviewable.
+This directory contains committed malformed WLD inputs used by reader regression and fuzz smoke tests.
+
+- `pattern-4096.wld` is a deterministic 4096-byte invalid payload checked into the repo so reader tests stay self-contained.
+- Additional malformed cases may be derived in test code, but required CI coverage must continue to pass with the files committed here.

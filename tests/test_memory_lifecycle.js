@@ -5,12 +5,12 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { getPrimaryWorldPath, getWorldFixturePaths } = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 
-const WLD_DIR = path.resolve(__dirname, "..", "..", "TerraX", "wld");
-const WLD_FILES = fs.readdirSync(WLD_DIR).filter((name) => name.endsWith(".wld"));
-const TEST_WLD = path.join(WLD_DIR, WLD_FILES.find((name) => name.includes("copy")) || WLD_FILES[0]);
+const WORLD_FIXTURE_PATHS = getWorldFixturePaths();
+const TEST_WLD = getPrimaryWorldPath();
 const TEST_BYTES = fs.readFileSync(TEST_WLD);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -258,12 +258,12 @@ function inspectFixtureHeader(M, filePath) {
 }
 
 function find8400x2400Fixture(M) {
-  const sortedFiles = [...WLD_FILES].sort((left, right) => left.localeCompare(right));
-  for (const fileName of sortedFiles) {
-    const fixture = inspectFixtureHeader(M, path.join(WLD_DIR, fileName));
+  const sortedFiles = [...WORLD_FIXTURE_PATHS].sort((left, right) => left.localeCompare(right));
+  for (const filePath of sortedFiles) {
+    const fixture = inspectFixtureHeader(M, filePath);
     if (fixture.header.maxTilesX === 8400 && fixture.header.maxTilesY === 2400) return fixture;
   }
-  assert.fail("missing required 8400x2400 fixture in ../../TerraX/wld");
+  assert.fail("missing required 8400x2400 fixture in checked-in tests/*.wld");
 }
 
 function findFirstStoredItemInBytes(M, bytes) {

@@ -5,12 +5,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const zlib = require("node:zlib");
+const { getPrimaryWorldPath } = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 
-const WLD_DIR = path.resolve(__dirname, "..", "..", "TerraX", "wld");
-const WLD_FILES = fs.readdirSync(WLD_DIR).filter((name) => name.endsWith(".wld"));
-const TEST_WLD = path.join(WLD_DIR, WLD_FILES.find((name) => name.includes("copy")) || WLD_FILES[0]);
+const TEST_WLD = getPrimaryWorldPath();
 const TEST_BYTES = fs.readFileSync(TEST_WLD);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 

@@ -1,16 +1,21 @@
 "use strict";
 const path = require("path");
 const fs = require("fs");
-const sharp = require("sharp");
+const { getPrimaryWorldPath, JPEG_PATH } = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 
-const WLD_PATH = path.resolve(__dirname, "..", "..", "TerraX", "wld", "1.wld");
-const JPEG_PATH = path.resolve(__dirname, "..", "..", "TerraX", "img", "test.jpeg");
+const WLD_PATH = getPrimaryWorldPath();
 const TXCI_PATH = path.join(__dirname, "..", "data", "terraria_color_index.txci");
 const OUTPUT_PATH = path.join(__dirname, "pixel_art_from_jpeg.wld");
 
 async function main() {
+    let sharp;
+    try {
+        sharp = require("sharp");
+    } catch (error) {
+        throw new Error("test_pixel_art_from_jpeg.js requires the optional 'sharp' package for manual JPEG validation");
+    }
     console.log("Loading WASM...");
     const t0 = Date.now();
     const M = await TerraWorldWasm();

@@ -5,9 +5,13 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {
+  CORRUPTED_FIXTURE_DIR,
+  TRUNCATED_FIXTURE_DIR,
+  readFixtureDirectory,
+} = require("./helpers/fixtures");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
-const TEST_WLD = path.resolve(__dirname, "..", "..", "TerraX", "wld", "1.wld");
 
 function alloc(M, bytes) {
   const ptr = M._tx_malloc(bytes.length);
@@ -18,10 +22,9 @@ function alloc(M, bytes) {
 
 test("truncated and corrupted world buffers fail as statuses without crashing", async () => {
   const M = await TerraWorldWasm();
-  const source = fs.readFileSync(TEST_WLD);
   const candidates = [
-    source.subarray(0, 16),
-    source.subarray(0, 128),
+    ...readFixtureDirectory(TRUNCATED_FIXTURE_DIR).map((fixturePath) => fs.readFileSync(fixturePath)),
+    ...readFixtureDirectory(CORRUPTED_FIXTURE_DIR).map((fixturePath) => fs.readFileSync(fixturePath)),
     Uint8Array.from({ length: 4096 }, (_, index) => (index * 73) & 0xff),
     crypto.randomBytes(4096),
   ];

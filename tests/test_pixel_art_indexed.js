@@ -2,8 +2,9 @@
 const path = require("path");
 const fs = require("fs");
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
+const { getPrimaryWorldPath } = require("./helpers/fixtures");
 
-const WLD_PATH = path.resolve(__dirname, "..", "..", "TerraX", "wld", "1.wld");
+const WLD_PATH = getPrimaryWorldPath();
 const TXCI_PATH = path.resolve(__dirname, "..", "data", "terraria_color_index.txci");
 const OUT_PATH = path.join(__dirname, "tmp_pixel_indexed.wld");
 

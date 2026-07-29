@@ -2,10 +2,9 @@
 const path = require("path");
 const fs = require("fs");
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
+const { getPrimaryWorldPath } = require("./helpers/fixtures");
 
-const WLD_DIR = path.resolve(__dirname, "..", "..", "TerraX", "wld");
-const WLD_FILES = fs.readdirSync(WLD_DIR).filter(f => f.endsWith(".wld"));
-const TEST_WLD = path.join(WLD_DIR, WLD_FILES.find(f => f.includes("copy")) || WLD_FILES[0]);
+const TEST_WLD = getPrimaryWorldPath();
 
 let passed = 0, failed = 0;
 const failures = [];
