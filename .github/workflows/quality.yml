@@ -1,0 +1,81 @@
+name: TerraWasm quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terrawasm-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes zlib1g-dev
+      - name: Configure native contracts
+        run: cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON
+      - name: Build native contracts
+        run: cmake --build build-native --config Release --parallel
+      - name: Run native contracts and fuzz smoke
+        run: ctest --test-dir build-native --build-config Release --output-on-failure
+
+  sanitizer-and-fuzz:
+    runs-on: ubuntu-latest
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install sanitizer dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang zlib1g-dev
+      - name: Configure sanitizer contracts
+        env:
+          CC: clang
+        run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_SANITIZERS=ON -DTERRAWASM_FUZZ_SMOKE=ON
+      - name: Build sanitizer contracts
+        run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
+      - name: Run sanitizer contracts
+        run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
+      - name: Run fuzz smoke explicitly
+        run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure -R terra_fuzz_smoke
+
+  wasm-release:
+    runs-on: ubuntu-latest
+    env:
+      EMSCRIPTEN_VERSION: "5.0.7"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pinned Emscripten SDK
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
+          & "$env:RUNNER_TEMP/emsdk/emsdk" install $env:EMSCRIPTEN_VERSION
+          & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
+      - name: Build and test Node and Web artifacts
+        shell: pwsh
+        run: ./build.ps1 -Target all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Enforce manifest artifact sizes
+        run: node scripts/check-artifact-size.mjs build/terra.manifest.json
+      - name: Upload traceable release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrawasm-${{ github.sha }}
+          path: |
+            build/terra.manifest.json
+            build/terrax_world_wasm.js
+            build/terrax_world_wasm.wasm
+            build/terrax_world_wasm_web.js
+            build/terrax_world_wasm_web.wasm
+          if-no-files-found: error
