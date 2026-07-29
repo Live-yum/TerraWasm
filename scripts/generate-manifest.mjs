@@ -84,11 +84,16 @@ function exportHash(exportsList) {
   return sha256(Buffer.from(`${normalizeExports(exportsList).join('\n')}\n`, 'utf8'))
 }
 
+function isAbsoluteArtifactPath(value) {
+  return path.posix.isAbsolute(value) || path.win32.isAbsolute(value)
+}
+
 function readArtifact(root, relativePath, role) {
-  if (typeof relativePath !== 'string' || !relativePath || path.isAbsolute(relativePath)) {
+  if (typeof relativePath !== 'string' || !relativePath) {
     fail(`${role} artifact path must be repository-relative`)
   }
   const normalized = relativePath.replaceAll('\\', '/')
+  if (isAbsoluteArtifactPath(normalized)) fail(`${role} artifact path must be repository-relative`)
   if (normalized.split('/').includes('..')) fail(`${role} artifact path escapes the repository`)
   const absolutePath = path.resolve(root, relativePath)
   const bytes = fs.readFileSync(absolutePath)
@@ -111,7 +116,7 @@ function validateArtifacts(artifacts, label) {
       fail(`${label} contains an invalid artifact role`)
     }
     const normalizedPath = String(artifact.path || '').replaceAll('\\', '/')
-    if (!normalizedPath || path.isAbsolute(normalizedPath) || normalizedPath.split('/').includes('..')) {
+    if (!normalizedPath || isAbsoluteArtifactPath(normalizedPath) || normalizedPath.split('/').includes('..')) {
       fail(`${label} contains an invalid artifact path`)
     }
     if (paths.has(normalizedPath)) fail(`${label} contains duplicate artifact paths`)

@@ -8,6 +8,8 @@ const test = require("node:test");
 const ROOT = path.resolve(__dirname, "..");
 const buildScript = fs.readFileSync(path.join(ROOT, "build.ps1"), "utf8");
 const cmake = fs.readFileSync(path.join(ROOT, "CMakeLists.txt"), "utf8");
+const manifestScript = fs.readFileSync(path.join(ROOT, "scripts", "generate-manifest.mjs"), "utf8");
+const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
 
 test("local builds deploy only when an explicit destination is supplied", () => {
   assert.doesNotMatch(
@@ -35,4 +37,13 @@ test("Node and Web targets use independent export lists", () => {
   assert.match(cmake, /TERRAX_ENABLE_LTO/);
   assert.match(cmake, /TERRAX_BUILD_COMMON_FLAGS_TEXT/);
   assert.match(cmake, /TERRAX_BUILD_TARGET_FLAGS_TEXT/);
+});
+
+test("artifact paths are repository-relative on every host platform", () => {
+  assert.match(manifestScript, /path\.posix\.isAbsolute/);
+  assert.match(manifestScript, /path\.win32\.isAbsolute/);
+});
+
+test("the documented PowerShell size profile binds -Oz as a value", () => {
+  assert.match(readme, /-OptimizeFlag\s+'-Oz'\s+-EnableLto/);
 });

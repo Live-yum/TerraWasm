@@ -86,7 +86,7 @@ python scripts/build_txci.py
 发布默认仍使用 `-O3`。如需比较更激进的体积优化配置，可在不改源码的前提下执行：
 
 ```powershell
-.\build.ps1 -Target all -OptimizeFlag -Oz -EnableLto
+.\build.ps1 -Target all -OptimizeFlag '-Oz' -EnableLto
 ```
 
 这条命令只用于对比正确性、体积和运行表现；当前仓库不会在没有重新验证的情况下把发布默认值从 `-O3` 改成 `-Oz + LTO`。
