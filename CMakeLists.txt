@@ -104,14 +104,10 @@ if(EMSCRIPTEN)
     )
 
     set(COMMON_COMPILE_OPTIONS
+        "${TERRAX_OPTIMIZE_FLAG}"
         -fno-exceptions
         -fno-rtti
-        "${TERRAX_OPTIMIZE_FLAG}"
     )
-    if(TERRAX_ENABLE_LTO)
-        list(APPEND COMMON_COMPILE_OPTIONS -flto)
-    endif()
-
     set(COMMON_LINK_OPTIONS
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
@@ -120,8 +116,16 @@ if(EMSCRIPTEN)
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
     )
+    set(COMMON_MANIFEST_FLAGS
+        "${TERRAX_OPTIMIZE_FLAG}"
+        -fno-exceptions
+        -fno-rtti
+        ${COMMON_LINK_OPTIONS}
+    )
     if(TERRAX_ENABLE_LTO)
+        list(APPEND COMMON_COMPILE_OPTIONS -flto)
         list(APPEND COMMON_LINK_OPTIONS -flto)
+        list(APPEND COMMON_MANIFEST_FLAGS -flto)
     endif()
 
     set(NODE_LINK_OPTIONS
@@ -141,7 +145,6 @@ if(EMSCRIPTEN)
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
     )
-    set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
     string(JOIN " @@ " COMMON_FLAGS_TEXT ${COMMON_MANIFEST_FLAGS})
     string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_LINK_OPTIONS})
     string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_LINK_OPTIONS})
@@ -151,6 +154,7 @@ if(EMSCRIPTEN)
     configure_terra_identity(terrax_world_wasm "node" 134217728 536870912 "${COMMON_FLAGS_TEXT}" "${NODE_FLAGS_TEXT}")
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
+        "${TERRAX_OPTIMIZE_FLAG}"
         ${COMMON_LINK_OPTIONS}
         ${NODE_LINK_OPTIONS}
     )
@@ -161,6 +165,7 @@ if(EMSCRIPTEN)
     configure_terra_identity(terrax_world_wasm_web "web" 33554432 100663296 "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}")
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
+        "${TERRAX_OPTIMIZE_FLAG}"
         ${COMMON_LINK_OPTIONS}
         ${WEB_LINK_OPTIONS}
     )

@@ -37,6 +37,10 @@ test("Node and Web targets use independent export lists", () => {
   assert.match(cmake, /TERRAX_ENABLE_LTO/);
   assert.match(cmake, /TERRAX_BUILD_COMMON_FLAGS_TEXT/);
   assert.match(cmake, /TERRAX_BUILD_TARGET_FLAGS_TEXT/);
+  assert.match(cmake, /set\(COMMON_MANIFEST_FLAGS[\s\S]*TERRAX_OPTIMIZE_FLAG/);
+  assert.doesNotMatch(cmake, /set\(COMMON_MANIFEST_FLAGS\s+\$\{COMMON_COMPILE_OPTIONS\}\s+\$\{COMMON_LINK_OPTIONS\}\)/);
+  assert.match(cmake, /target_link_options\(terrax_world_wasm[\s\S]*TERRAX_OPTIMIZE_FLAG/);
+  assert.match(cmake, /target_link_options\(terrax_world_wasm_web[\s\S]*TERRAX_OPTIMIZE_FLAG/);
 });
 
 test("artifact paths are repository-relative on every host platform", () => {
