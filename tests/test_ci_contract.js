@@ -18,6 +18,9 @@ test("CI runs the independent native, sanitizer/fuzz, and pinned Wasm release ga
   assert.match(workflow, /EMSCRIPTEN_VERSION: ["']?5\.0\.7["']?/);
   assert.match(workflow, /wasm-release:\s*\n[\s\S]*build\.ps1[\s\S]*-Target all[\s\S]*-Test/);
   assert.match(workflow, /check-artifact-size\.mjs/);
-  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.equal((workflow.match(/actions\/checkout@v7/g) || []).length, 3);
+  assert.equal((workflow.match(/actions\/setup-node@v7/g) || []).length, 1);
+  assert.equal((workflow.match(/actions\/upload-artifact@v7/g) || []).length, 1);
+  assert.match(workflow, /actions\/checkout@v7[\s\S]*fetch-depth: 0/);
   assert.doesNotMatch(workflow, /TerraX|viewer-app/);
 });

@@ -16,7 +16,7 @@ jobs:
   native:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install --yes zlib1g-dev
       - name: Configure native contracts
@@ -32,7 +32,7 @@ jobs:
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install sanitizer dependencies
         run: sudo apt-get update && sudo apt-get install --yes clang zlib1g-dev
       - name: Configure sanitizer contracts
@@ -51,10 +51,10 @@ jobs:
     env:
       EMSCRIPTEN_VERSION: "5.0.7"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Install pinned Emscripten SDK
@@ -69,7 +69,7 @@ jobs:
       - name: Enforce manifest artifact sizes
         run: node scripts/check-artifact-size.mjs build/terra.manifest.json
       - name: Upload traceable release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: terrawasm-${{ github.sha }}
           path: |
