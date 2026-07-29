@@ -86,6 +86,8 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     ["Node target artifacts", (manifest) => { manifest.targets.node.artifacts = [{ role: "wrapper", path: "build/node.js", bytes: 1, sha256: "f".repeat(64) }]; }],
     ["Web target artifacts", (manifest) => { manifest.targets.web.artifacts[0].path = "build/terrax_world_wasm_web.wasm"; }],
     ["top-level artifacts", (manifest) => { manifest.artifacts[0].path = "build/other.js"; }],
+    ["artifact path", (manifest) => { manifest.artifacts[0].path = "C:/outside/wrapper.js"; }],
+    ["artifact path", (manifest) => { manifest.targets.node.artifacts[0].path = "//server/share/wrapper.js"; }],
     ["build flags", (manifest) => { manifest.build.flags = ["-O3"]; }],
   ]) {
     const candidate = structuredClone(base);
