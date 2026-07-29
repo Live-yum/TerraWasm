@@ -1,0 +1,1 @@
+This fixture directory is reserved for malformed WLD inputs used by reader regression and fuzz smoke tests. The deterministic corrupted seed is generated in `tests/test_reader_safety.js` so the fixture remains text-only and reviewable.

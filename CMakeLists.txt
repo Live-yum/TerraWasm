@@ -4,6 +4,7 @@ project(TerraWasm C)
 include(CTest)
 option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
+option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -140,5 +141,15 @@ else()
             target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_native_contract COMMAND terra_native_contract)
+        if(TERRAWASM_FUZZ_SMOKE)
+            add_executable(terra_fuzz_smoke
+                tests/fuzz/fuzz_smoke.c
+                tests/fuzz/fuzz_wld_open.c
+                tests/fuzz/fuzz_json.c
+            )
+            target_link_libraries(terra_fuzz_smoke PRIVATE terrax_world_static)
+            target_compile_definitions(terra_fuzz_smoke PRIVATE TERRAX_STATIC)
+            add_test(NAME terra_fuzz_smoke COMMAND terra_fuzz_smoke)
+        endif()
     endif()
 endif()

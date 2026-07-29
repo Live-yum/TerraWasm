@@ -1,0 +1,1 @@
+This fixture directory is reserved for truncated WLD inputs used by reader regression and fuzz smoke tests. The deterministic truncation cases are derived from the known-good fixture in `tests/test_reader_safety.js`.
