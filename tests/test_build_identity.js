@@ -8,12 +8,6 @@ const test = require("node:test");
 const ROOT = path.resolve(__dirname, "..");
 const TerraWorldWasm = require(path.join(ROOT, "build", "terrax_world_wasm.js"));
 
-function normalizedTargetFlags(value) {
-  return value.split(" @@ ").map((flag) => flag
-    .replace(/^SHELL:/, "")
-    .replace(/@.*exported_functions_node\.json$/, "@exported_functions_node.json"));
-}
-
 test("the Node artifact reports the same source, flags, memory, and dirty identity as its manifest", async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "build", "terra.manifest.json"), "utf8"));
   const M = await TerraWorldWasm();
@@ -27,5 +21,18 @@ test("the Node artifact reports the same source, flags, memory, and dirty identi
   assert.equal(identity.initialMemory, manifest.targets.node.memory.initialBytes);
   assert.equal(identity.maxMemory, manifest.targets.node.memory.maxBytes);
   assert.deepEqual(identity.commonFlagsText.split(" @@ "), manifest.build.flags.common);
-  assert.deepEqual(normalizedTargetFlags(identity.targetFlagsText), manifest.build.flags.node);
+  assert.deepEqual(identity.targetFlagsText.split(" @@ "), manifest.build.flags.node);
+  assert.doesNotMatch(identity.targetFlagsText, /SHELL:|[A-Za-z]:[\\/]/);
+});
+
+test("Wasm build identity does not embed the checkout path", () => {
+  const checkoutPath = Buffer.from(ROOT.replaceAll("\\", "/"));
+  for (const artifactName of ["terrax_world_wasm.wasm", "terrax_world_wasm_web.wasm"]) {
+    const artifact = fs.readFileSync(path.join(ROOT, "build", artifactName));
+    assert.equal(
+      artifact.indexOf(checkoutPath),
+      -1,
+      `${artifactName} must not encode the absolute source or build directory`,
+    );
+  }
 });

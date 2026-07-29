@@ -145,9 +145,15 @@ if(EMSCRIPTEN)
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
     )
+    set(NODE_IDENTITY_FLAGS ${NODE_LINK_OPTIONS})
+    list(POP_FRONT NODE_IDENTITY_FLAGS)
+    list(PREPEND NODE_IDENTITY_FLAGS "-sEXPORTED_FUNCTIONS=@exported_functions_node.json")
+    set(WEB_IDENTITY_FLAGS ${WEB_LINK_OPTIONS})
+    list(POP_FRONT WEB_IDENTITY_FLAGS)
+    list(PREPEND WEB_IDENTITY_FLAGS "-sEXPORTED_FUNCTIONS=@exported_functions_web.json")
     string(JOIN " @@ " COMMON_FLAGS_TEXT ${COMMON_MANIFEST_FLAGS})
-    string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_LINK_OPTIONS})
-    string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_LINK_OPTIONS})
+    string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_IDENTITY_FLAGS})
+    string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_IDENTITY_FLAGS})
 
     # ---- Node target ----
     add_executable(terrax_world_wasm ${SOURCES})
