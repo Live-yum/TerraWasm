@@ -82,6 +82,32 @@ function closeWorld(M, opened) {
   M._tx_free(opened.inputPtr);
 }
 
+function installSolidMarkerIcon(M, handle, itemId, rgba = [12, 34, 56, 255]) {
+  const iconSize = 4;
+  const iconBytes = Buffer.alloc(iconSize * iconSize * 4);
+  for (let offset = 0; offset < iconBytes.length; offset += 4) iconBytes.set(rgba, offset);
+  const rgbaPtr = mustAlloc(M, iconBytes.length, "marker icon RGBA");
+  const idsPtr = mustAlloc(M, 4, "marker icon ID");
+  const xOffsetsPtr = mustAlloc(M, 4, "marker icon X offset");
+  const yOffsetsPtr = mustAlloc(M, 4, "marker icon Y offset");
+  M.HEAPU8.set(iconBytes, rgbaPtr);
+  new DataView(M.HEAPU8.buffer).setInt32(idsPtr, itemId, true);
+  new DataView(M.HEAPU8.buffer).setUint32(xOffsetsPtr, 0, true);
+  new DataView(M.HEAPU8.buffer).setUint32(yOffsetsPtr, 0, true);
+  try {
+    const status = M._txw_set_icon_atlas(
+      handle, rgbaPtr, iconSize, 1, iconSize, iconSize,
+      idsPtr, xOffsetsPtr, yOffsetsPtr,
+    );
+    assert.equal(status, 1, "marker icon atlas must accept one icon");
+  } finally {
+    M._tx_free(yOffsetsPtr);
+    M._tx_free(xOffsetsPtr);
+    M._tx_free(idsPtr);
+    M._tx_free(rgbaPtr);
+  }
+}
+
 function callStringApi(M, invoke) {
   const sizePtr = mustAlloc(M, 8, "required size");
   let outputPtr = 0;
@@ -368,6 +394,87 @@ function decodePngRgba(png) {
   return { width, height, rgba };
 }
 
+function decodePngRgb(png) {
+  assert.deepEqual(png.subarray(0, PNG_SIGNATURE.length), PNG_SIGNATURE, "PNG signature must match");
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idatChunks = [];
+  let offset = PNG_SIGNATURE.length;
+  while (offset + 12 <= png.length) {
+    const length = png.readUInt32BE(offset);
+    offset += 4;
+    const type = png.toString("ascii", offset, offset + 4);
+    offset += 4;
+    const dataEnd = offset + length;
+    const data = png.subarray(offset, dataEnd);
+    offset = dataEnd + 4;
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idatChunks.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+  }
+
+  assert.ok(width > 0 && height > 0, "PNG IHDR must describe non-zero dimensions");
+  assert.equal(bitDepth, 8, "native marked previews must use 8-bit RGB");
+  assert.equal(colorType, 2, "native marked previews must use RGB PNGs");
+  assert.equal(interlace, 0, "native marked previews must be non-interlaced");
+
+  const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
+  const stride = width * 3;
+  const rgb = Buffer.alloc(stride * height);
+  let inOffset = 0;
+  let outOffset = 0;
+  for (let row = 0; row < height; row += 1) {
+    const filter = inflated[inOffset++];
+    for (let column = 0; column < stride; column += 1) {
+      const raw = inflated[inOffset++];
+      const left = column >= 3 ? rgb[outOffset + column - 3] : 0;
+      const up = row > 0 ? rgb[outOffset + column - stride] : 0;
+      const upLeft = row > 0 && column >= 3 ? rgb[outOffset + column - stride - 3] : 0;
+      let value = raw;
+      switch (filter) {
+        case 0:
+          break;
+        case 1:
+          value = (raw + left) & 0xff;
+          break;
+        case 2:
+          value = (raw + up) & 0xff;
+          break;
+        case 3:
+          value = (raw + Math.floor((left + up) / 2)) & 0xff;
+          break;
+        case 4:
+          value = (raw + paethPredictor(left, up, upLeft)) & 0xff;
+          break;
+        default:
+          assert.fail(`unsupported PNG filter ${filter}`);
+      }
+      rgb[outOffset + column] = value;
+    }
+    outOffset += stride;
+  }
+
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    rgba[index * 4] = rgb[index * 3];
+    rgba[index * 4 + 1] = rgb[index * 3 + 1];
+    rgba[index * 4 + 2] = rgb[index * 3 + 2];
+    rgba[index * 4 + 3] = 255;
+  }
+  return { width, height, rgba };
+}
+
 function pixelAt(decoded, x, y) {
   const offset = (y * decoded.width + x) * 4;
   return decoded.rgba.subarray(offset, offset + 4);
@@ -447,6 +554,136 @@ test("marker preview returns a PNG thumbnail and paints the requested chest colo
   } finally {
     closeWorld(M, opened);
   }
+});
+
+test("native-size marker preview scans the tile stream once and keeps the original dimensions", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const header = readSection(M, opened.handle, "header");
+    const chests = readSection(M, opened.handle, "chests");
+    const chest = firstStoredChest(chests);
+    const markerItem = firstStoredItem([chest]);
+
+    const result = executeOperation(M, opened.handle, "mark_tiles_and_chests_preview", {
+      chest_markers: [{ item_id: markerItem, color: "#11CC44FF" }],
+      max_w: 0,
+      max_h: 0,
+    });
+    let nativeSizeError = {};
+    try {
+      nativeSizeError = readLastErrorJson(M);
+    } catch (error) {
+      nativeSizeError = { message: error.message };
+    }
+    assert.equal(result.status, 0, operationFailureMessage(
+      "native-size mark_tiles_and_chests_preview",
+      result.status,
+      nativeSizeError,
+    ));
+
+    const response = JSON.parse(result.value);
+    assert.equal(response.width, header.maxTilesX);
+    assert.equal(response.height, header.maxTilesY);
+    assert.ok(response.matched_chest_count > 0);
+
+    const thumbnail = getThumbnailPng(M, opened.handle);
+    assert.equal(thumbnail.width, header.maxTilesX);
+    assert.equal(thumbnail.height, header.maxTilesY);
+    const linearMemoryBytes = M.wasmMemory.buffer.byteLength;
+    const nativePeakBytes = M._tx_native_heap_peak() >>> 0;
+    // Native allocations are backed by Emscripten's linear memory; adding both
+    // counters would double-count the same WASM surface. The JS PNG copy is
+    // the extra process-side allocation that remains live across the bridge.
+    assert.ok(nativePeakBytes <= linearMemoryBytes, "native allocations must fit the linear heap");
+    const conservativePeakBytes = linearMemoryBytes + thumbnail.png.length;
+    assert.ok(
+      conservativePeakBytes <= 200_000_000,
+      `native-size preview peak estimate exceeded 200 MB: linear=${linearMemoryBytes}, ` +
+        `nativePeak=${nativePeakBytes}, png=${thumbnail.png.length}`,
+    );
+    const decoded = decodePngRgb(thumbnail.png);
+    assertRequestedColorNearChest(
+      decoded,
+      header.maxTilesX,
+      header.maxTilesY,
+      chest,
+      [0x11, 0xcc, 0x44],
+      35,
+    );
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("marker preview composites the matched item's RGBA thumbnail inside its configured radius", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const header = readSection(M, opened.handle, "header");
+    const chests = readSection(M, opened.handle, "chests");
+    const chest = firstStoredChest(chests);
+    const markerItem = firstStoredItem([chest]);
+    installSolidMarkerIcon(M, opened.handle, markerItem);
+
+    const result = executeOperation(M, opened.handle, "mark_tiles_and_chests_preview", {
+      chest_markers: [{ item_id: markerItem, color: "#FF2020FF", radius: 60, line_width: 1 }],
+      max_w: 512,
+      max_h: 256,
+    });
+    if (result.status !== 0) {
+      assert.equal(result.status, 0, operationFailureMessage("marker icon preview", result.status, readLastErrorJson(M)));
+    }
+    const response = JSON.parse(result.value);
+    assert.ok(response.matched_chest_count > 0);
+    const thumbnail = getThumbnailPng(M, opened.handle);
+    const decoded = decodePngRgba(thumbnail.png);
+    assertRequestedColorNearChest(decoded, header.maxTilesX, header.maxTilesY, chest, [12, 34, 56], 5);
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("marked map output changes when the matched item thumbnail is installed", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const chests = readSection(M, opened.handle, "chests");
+    const markerItem = firstStoredItem(chests);
+    const request = {
+      chest_markers: [{ item_id: markerItem, color: "#FF2020FF", radius: 60, line_width: 1 }],
+    };
+
+    let result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const withoutIcon = getMapBytes(M, opened.handle).map;
+
+    installSolidMarkerIcon(M, opened.handle, markerItem, [0, 255, 0, 255]);
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const withIcon = getMapBytes(M, opened.handle).map;
+    assert.notDeepEqual(withIcon, withoutIcon);
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("marker icon atlas is released when its world closes", async () => {
+  const M = await loadModule();
+  const baseline = M._tx_native_heap_used() >>> 0;
+  let opened;
+  try {
+    opened = openWorld(M);
+    const chests = readSection(M, opened.handle, "chests");
+    installSolidMarkerIcon(M, opened.handle, firstStoredItem(chests));
+    assert.ok((M._tx_native_heap_used() >>> 0) > baseline);
+  } finally {
+    closeWorld(M, opened);
+  }
+  assert.equal(M._tx_native_heap_used() >>> 0, baseline);
 });
 
 test("marked map reports scanned matches, dimensions, and a v33083 single-use payload", async () => {

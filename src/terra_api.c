@@ -472,6 +472,7 @@ terrax_world_status terra_world_close(
     if (!world) return tx_invalid_handle();
 
     uint32_t allocation_mark = world->allocation_mark;
+    if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();
     if (count > 0) tx_set_world_open_count(count - 1);

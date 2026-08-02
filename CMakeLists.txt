@@ -28,6 +28,7 @@ set(SOURCES
     "${SRC_DIR}/terra_mutators.c"
     "${SRC_DIR}/terra_render.c"
     "${SRC_DIR}/terra_map.c"
+    "${SRC_DIR}/terra_icon.c"
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
@@ -139,8 +140,8 @@ if(EMSCRIPTEN)
     )
     set(WEB_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
-        "-sINITIAL_MEMORY=33554432"
-        "-sMAXIMUM_MEMORY=100663296"
+        "-sINITIAL_MEMORY=67108864"
+        "-sMAXIMUM_MEMORY=167772160"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
@@ -168,7 +169,7 @@ if(EMSCRIPTEN)
     # ---- Web/MiniProgram target ----
     # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
     add_executable(terrax_world_wasm_web ${SOURCES})
-    configure_terra_identity(terrax_world_wasm_web "web" 33554432 100663296 "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}")
+    configure_terra_identity(terrax_world_wasm_web "web" 67108864 167772160 "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}")
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
         "${TERRAX_OPTIMIZE_FLAG}"

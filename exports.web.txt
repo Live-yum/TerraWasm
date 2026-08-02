@@ -32,6 +32,8 @@ _tx_reset_heap
 _terra_world_open_from_buffer
 _terra_world_save_to_buffer
 _txw_set_color_tables
+_txw_set_icon_atlas
+_txw_clear_icon_atlas
 _tx_memory_used
 _tx_reclaim_transients
 _txw_queue_pixel_art

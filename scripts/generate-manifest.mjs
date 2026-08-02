@@ -5,8 +5,8 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const ABI_VERSION = 1
-export const WEB_INITIAL_MEMORY = 32 * 1024 * 1024
-export const WEB_MAXIMUM_MEMORY = 96 * 1024 * 1024
+export const WEB_INITIAL_MEMORY = 64 * 1024 * 1024
+export const WEB_MAXIMUM_MEMORY = 160 * 1024 * 1024
 export const NODE_INITIAL_MEMORY = 128 * 1024 * 1024
 export const NODE_MAXIMUM_MEMORY = 512 * 1024 * 1024
 export const ID_EXPORTS = ['_terra_abi_version', '_terra_capabilities', '_terra_build_info_json']
@@ -33,8 +33,8 @@ export const DEFAULT_NODE_FLAGS = Object.freeze([
 ])
 export const DEFAULT_WEB_FLAGS = Object.freeze([
   '-sEXPORTED_FUNCTIONS=@exported_functions_web.json',
-  '-sINITIAL_MEMORY=33554432',
-  '-sMAXIMUM_MEMORY=100663296',
+  '-sINITIAL_MEMORY=67108864',
+  '-sMAXIMUM_MEMORY=167772160',
   "-sEXPORT_NAME='TerraWorldWasmWeb'",
   '-sENVIRONMENT=web,worker',
   '-sFILESYSTEM=1',

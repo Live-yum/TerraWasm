@@ -24,6 +24,7 @@
 #define TX_MAX_OPS             128u
 #define TX_MAX_HEADER_BOOL_FIELDS 128u
 #define TX_PAGE_SIZE           65536u
+#define TX_ICON_ATLAS_MAX      256u
 
 /* ---------- Tile (22 fields, matches Terraria tile binary format) ---------- */
 
@@ -66,6 +67,17 @@ typedef struct TxHeaderBoolField {
 } TxHeaderBoolField;
 
 typedef struct TxPixelArtChunk TxPixelArtChunk;
+
+typedef struct TxIconAtlas {
+    uint8_t* rgba;
+    uint32_t icon_size;
+    uint32_t icon_count;
+    uint32_t atlas_width;
+    uint32_t atlas_height;
+    uint32_t item_ids[TX_ICON_ATLAS_MAX];
+    uint32_t x_offsets[TX_ICON_ATLAS_MAX];
+    uint32_t y_offsets[TX_ICON_ATLAS_MAX];
+} TxIconAtlas;
 
 struct TxPixelArtChunk {
     int32_t cx;
@@ -372,6 +384,9 @@ typedef struct TxWorld {
     TxSectionOverride section_overrides[TX_MAX_SECTION_OVERRIDES];
     uint32_t heap_mark;
     uint32_t override_heap_mark;
+
+    /* Marker item thumbnails owned by the active world session. */
+    TxIconAtlas icon_atlas;
 
     /* Cached preview state */
     uint32_t preview_width;

@@ -13,6 +13,7 @@
 
 #include "terra_types.h"
 #include "terra_map.h"
+#include "terra_icon.h"
 #include "terra_defaults.inc"
 
 /* ---------- Extern declarations from terra_mem.c ---------- */
@@ -44,6 +45,11 @@ extern int      set_result_bytes(uint8_t* p, uint32_t len);
 
 extern void*    memset(void* dst, int value, unsigned long n);
 extern void*    memcpy(void* dst, const void* src, unsigned long n);
+
+extern const uint8_t* tx_get_tile_colors(void);
+extern uint32_t       tx_get_tile_color_count(void);
+extern const uint8_t* tx_get_wall_colors(void);
+extern uint32_t       tx_get_wall_color_count(void);
 
 /* ---------- Extern declarations from terra_wld.c ---------- */
 
@@ -521,6 +527,81 @@ static uint32_t map_value_for_tile(const TxTile* t) {
     return (type & 65535u) | (255u << 16) | ((extra & 255u) << 24);
 }
 
+typedef struct TxMapColorCacheEntry {
+    uint32_t color_key;
+    uint32_t map_value;
+} TxMapColorCacheEntry;
+
+static uint32_t map_color_distance_sq(uint8_t r0, uint8_t g0, uint8_t b0,
+                                      uint8_t r1, uint8_t g1, uint8_t b1) {
+    int32_t dr = (int32_t)r0 - (int32_t)r1;
+    int32_t dg = (int32_t)g0 - (int32_t)g1;
+    int32_t db = (int32_t)b0 - (int32_t)b1;
+    return (uint32_t)(dr * dr + dg * dg + db * db);
+}
+
+static int map_read_color(const uint8_t* table, uint32_t count, uint32_t id, uint8_t out[3]) {
+    const uint8_t* color;
+    if (!table || id >= count) return 0;
+    color = table + id * 4u;
+    if (color[0] == 0u && color[1] == 0u && color[2] == 0u) return 0;
+    out[0] = color[0];
+    out[1] = color[1];
+    out[2] = color[2];
+    return 1;
+}
+
+static uint32_t nearest_map_value_for_rgb(
+        uint8_t r, uint8_t g, uint8_t b, uint32_t fallback,
+        TxMapColorCacheEntry* cache, uint32_t* cache_count, uint32_t cache_capacity) {
+    uint32_t key = (uint32_t)r | ((uint32_t)g << 8u) | ((uint32_t)b << 16u);
+    uint32_t best_value = fallback;
+    uint32_t best_distance = UINT32_MAX;
+    const uint8_t* tile_colors = tx_get_tile_colors();
+    const uint8_t* wall_colors = tx_get_wall_colors();
+    uint32_t tile_count = tx_get_tile_color_count();
+    uint32_t wall_count = tx_get_wall_color_count();
+    uint8_t color[3];
+    TxTile tile;
+
+    if (cache && cache_count) {
+        for (uint32_t i = 0u; i < *cache_count; i++) {
+            if (cache[i].color_key == key) return cache[i].map_value;
+        }
+    }
+
+    for (uint32_t id = 0u; id < tile_count; id++) {
+        if (!map_read_color(tile_colors, tile_count, id, color)) continue;
+        {
+            uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
+            if (distance >= best_distance) continue;
+            memset(&tile, 0, sizeof(tile));
+            tile.active = 1u;
+            tile.type = (uint16_t)id;
+            best_distance = distance;
+            best_value = map_value_for_tile(&tile);
+        }
+    }
+    for (uint32_t id = 0u; id < wall_count; id++) {
+        if (!map_read_color(wall_colors, wall_count, id, color)) continue;
+        {
+            uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
+            if (distance >= best_distance) continue;
+            memset(&tile, 0, sizeof(tile));
+            tile.wall = (uint16_t)id;
+            best_distance = distance;
+            best_value = map_value_for_tile(&tile);
+        }
+    }
+
+    if (cache && cache_count && *cache_count < cache_capacity) {
+        cache[*cache_count].color_key = key;
+        cache[*cache_count].map_value = best_value;
+        (*cache_count)++;
+    }
+    return best_value;
+}
+
 typedef struct MapChunkDesc {
     uint8_t* data;
     size_t size;
@@ -530,6 +611,10 @@ typedef struct MapChestPoint {
     int32_t x;
     int32_t y;
     uint32_t map_value;
+    int32_t item_id;
+    uint8_t radius;
+    uint8_t line_width;
+    uint8_t reserved[2];
 } MapChestPoint;
 
 typedef struct MapBuildRequest {
@@ -620,6 +705,92 @@ static void set_chunk_strip_point(uint32_t* strip, uint32_t local_x, uint32_t he
     }
 }
 
+static void draw_map_marker_on_strip(
+        TxWorld* world, uint32_t* strip, uint32_t world_x_base,
+        uint32_t width, uint32_t height, const MapChestPoint* point,
+        TxMapColorCacheEntry* color_cache, uint32_t* color_cache_count) {
+    int32_t radius;
+    int32_t thickness;
+    int32_t outer_squared;
+    int32_t inner_radius;
+    int32_t inner_squared;
+    int icon_index;
+
+    if (!world || !strip || !point || !width || !height) return;
+    if (point->radius == 0u) {
+        set_chunk_strip_point(strip, (uint32_t)(point->x - (int32_t)world_x_base),
+                              height, point->y, point->map_value);
+        return;
+    }
+
+    radius = (int32_t)point->radius;
+    thickness = (int32_t)point->line_width;
+    if (thickness > radius) thickness = radius;
+    inner_radius = thickness > 0 ? radius - thickness : -1;
+    outer_squared = radius * radius;
+    inner_squared = inner_radius > 0 ? inner_radius * inner_radius : -1;
+
+    if (point->x + radius < (int32_t)world_x_base ||
+        point->x - radius >= (int32_t)(world_x_base + 64u)) return;
+
+    for (int32_t dy = -radius; dy <= radius; dy++) {
+        for (int32_t dx = -radius; dx <= radius; dx++) {
+            int32_t distance = dx * dx + dy * dy;
+            int32_t world_x = point->x + dx;
+            if (distance > outer_squared || (inner_squared >= 0 && distance < inner_squared)) continue;
+            if (world_x < (int32_t)world_x_base ||
+                world_x >= (int32_t)(world_x_base + 64u)) continue;
+            set_chunk_strip_point(strip, (uint32_t)(world_x - (int32_t)world_x_base),
+                                  height, point->y + dy, point->map_value);
+        }
+    }
+
+    if (point->item_id < 0) return;
+    icon_index = terra_icon_index_for_item(&world->icon_atlas, point->item_id);
+    if (icon_index < 0) return;
+
+    {
+        uint32_t side = terra_icon_side_for_radius(
+            (uint32_t)(radius > thickness ? radius - thickness : radius));
+        uint32_t icon_size = world->icon_atlas.icon_size;
+        uint32_t source_x0 = world->icon_atlas.x_offsets[icon_index];
+        uint32_t source_y0 = world->icon_atlas.y_offsets[icon_index];
+        const uint8_t* atlas_rgba = world->icon_atlas.rgba;
+        int32_t start_x;
+        int32_t start_y;
+
+        if (!side || !icon_size || !atlas_rgba) return;
+        start_x = point->x - (int32_t)(side / 2u);
+        start_y = point->y - (int32_t)(side / 2u);
+        for (uint32_t local_y = 0u; local_y < side; local_y++) {
+            int32_t world_y = start_y + (int32_t)local_y;
+            if (world_y < 0 || world_y >= (int32_t)height) continue;
+            {
+                uint32_t source_y = (local_y * icon_size) / side;
+                for (uint32_t local_x = 0u; local_x < side; local_x++) {
+                    int32_t world_x = start_x + (int32_t)local_x;
+                    if (world_x < (int32_t)world_x_base ||
+                        world_x >= (int32_t)(world_x_base + 64u) ||
+                        world_x < 0 || world_x >= (int32_t)width) continue;
+                    {
+                        uint32_t source_x = (local_x * icon_size) / side;
+                        const uint8_t* source = atlas_rgba +
+                            ((source_y0 + source_y) * world->icon_atlas.atlas_width +
+                             source_x0 + source_x) * 4u;
+                        if (!source[3]) continue;
+                        set_chunk_strip_point(
+                            strip, (uint32_t)(world_x - (int32_t)world_x_base), height,
+                            world_y,
+                            nearest_map_value_for_rgb(
+                                source[0], source[1], source[2], point->map_value,
+                                color_cache, color_cache_count, 512u));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /* ================================================================ */
 /*  Chest marking                                                    */
 /* ================================================================ */
@@ -636,12 +807,12 @@ static void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off) 
     *off += slen;
 }
 
-static uint32_t find_chest_marker_value(const MapMarkerEntry* markers, uint32_t count,
-                                        int32_t item_type) {
+static const MapMarkerEntry* find_chest_marker(const MapMarkerEntry* markers, uint32_t count,
+                                               int32_t item_type) {
     for (uint32_t i = 0; i < count; i++) {
-        if (markers[i].id == item_type) return markers[i].map_value;
+        if (markers[i].id == item_type) return &markers[i];
     }
-    return 0u;
+    return NULL;
 }
 
 static int collect_matching_chest_points(
@@ -695,6 +866,8 @@ static int collect_matching_chest_points(
             int32_t x = rd_i32le(p, len, &off);
             int32_t y = rd_i32le(p, len, &off);
             uint32_t matched_value = 0u;
+            int32_t matched_item_id = -1;
+            const MapMarkerEntry* matched_marker = NULL;
             int legacy_match = request->use_legacy_chest_markers && request->item_id_count == 0u;
             rd_skip_string_value(p, len, &off);
             {
@@ -706,8 +879,12 @@ static int collect_matching_chest_points(
                         int32_t item_type = rd_i32le(p, len, &off);
                         rd_u8(p, len, &off);
                         if (matched_value == 0u && request->chest_marker_count > 0u) {
-                            matched_value = find_chest_marker_value(
+                            matched_marker = find_chest_marker(
                                 request->chest_markers, request->chest_marker_count, item_type);
+                            if (matched_marker) {
+                                matched_value = matched_marker->map_value;
+                                matched_item_id = item_type;
+                            }
                         }
                         if (!legacy_match && request->use_legacy_chest_markers &&
                             int32_list_contains(request->item_ids, request->item_id_count, item_type)) {
@@ -723,6 +900,11 @@ static int collect_matching_chest_points(
                 points[matched].y = y;
                 points[matched].map_value =
                     matched_value != 0u ? matched_value : request->legacy_marker_value;
+                points[matched].item_id = matched_item_id;
+                points[matched].radius = matched_marker ? matched_marker->radius : 0u;
+                points[matched].line_width = matched_marker ? matched_marker->line_width : 0u;
+                points[matched].reserved[0] = 0u;
+                points[matched].reserved[1] = 0u;
                 matched++;
             }
         }
@@ -929,6 +1111,8 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     MapChunkDesc* descs = NULL;
     MapChestPoint* chest_points = NULL;
     uint32_t chest_point_count = 0u;
+    TxMapColorCacheEntry color_cache[512];
+    uint32_t color_cache_count = 0u;
     uint32_t* strip = NULL;
     int32_t result = -1;
 
@@ -1019,14 +1203,12 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
             }
 
             for (uint32_t i = 0; i < chest_point_count; i++) {
-                if (chest_points[i].x >= 0 && chest_points[i].y >= 0) {
-                    uint32_t ux = (uint32_t)chest_points[i].x;
-                    uint32_t uy = (uint32_t)chest_points[i].y;
-                    if (ux < width && uy < height &&
-                        ux >= world_x_base && ux < world_x_base + 64u) {
-                        set_chunk_strip_point(strip, ux - world_x_base, height,
-                                              (int32_t)uy, chest_points[i].map_value);
-                    }
+                if (chest_points[i].x >= 0 && chest_points[i].y >= 0 &&
+                    (uint32_t)chest_points[i].x < width &&
+                    (uint32_t)chest_points[i].y < height) {
+                    draw_map_marker_on_strip(
+                        w, strip, world_x_base, width, height, &chest_points[i],
+                        color_cache, &color_cache_count);
                 }
             }
 

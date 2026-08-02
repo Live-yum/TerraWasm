@@ -10,6 +10,7 @@
  */
 #include "terra_types.h"
 #include "terra_map.h"
+#include "terra_icon.h"
 #include "terra_color_data.h"
 
 /* ====================================================================
@@ -507,19 +508,11 @@ static uint32_t fast_hash3(const uint8_t* data, uint32_t pos) {
  * Fixed-Huffman zlib deflate
  * ==================================================================== */
 
-static void write_zlib_fixed(TxBuf* out, const uint8_t* data, uint32_t len) {
-  if (!len) {
-    static const uint8_t empty[7] = {0x78,0x01,0x03,0x00,0x00,0x00,0x01};
-    buf_bytes(out, empty, 7u);
-    return;
-  }
+static void write_fixed_block(TxBuf* out, uint32_t* bitbuf, uint32_t* bitcnt,
+                              const uint8_t* data, uint32_t len, uint32_t final_block) {
   for (uint32_t i = 0; i < 32768u; i++) z_head[i] = -1;
-  /* zlib header: CMF=0x78 (deflate, window=32k), FLG=0x01 (fastest) */
-  buf_u8(out, 0x78); buf_u8(out, 0x01);
-  uint32_t bitbuf = 0u, bitcnt = 0u;
-  /* BFINAL=1, BTYPE=01 (fixed Huffman) */
-  bw_bit(out, &bitbuf, &bitcnt, 1u, 1u);
-  bw_bit(out, &bitbuf, &bitcnt, 1u, 2u);
+  bw_bit(out, bitbuf, bitcnt, final_block ? 1u : 0u, 1u);
+  bw_bit(out, bitbuf, bitcnt, 1u, 2u);
   uint32_t pos = 0u;
   while (pos < len) {
     uint32_t best_len = 0u, best_dist = 0u;
@@ -541,19 +534,31 @@ static void write_zlib_fixed(TxBuf* out, const uint8_t* data, uint32_t len) {
       }
     }
     if (best_len) {
-      fixed_match(out, &bitbuf, &bitcnt, best_len, best_dist);
+      fixed_match(out, bitbuf, bitcnt, best_len, best_dist);
       uint32_t end = pos + best_len;
       if (end > len - 2u) end = len - 2u;
       for (uint32_t p = pos + 1u; p < end; p += 16u)
         z_head[fast_hash3(data, p)] = (int32_t)p;
       pos += best_len;
     } else {
-      fixed_literal(out, &bitbuf, &bitcnt, data[pos]);
+      fixed_literal(out, bitbuf, bitcnt, data[pos]);
       pos++;
     }
   }
   /* end-of-block symbol */
-  fixed_literal(out, &bitbuf, &bitcnt, 256u);
+  fixed_literal(out, bitbuf, bitcnt, 256u);
+}
+
+static void write_zlib_fixed(TxBuf* out, const uint8_t* data, uint32_t len) {
+  if (!len) {
+    static const uint8_t empty[7] = {0x78,0x01,0x03,0x00,0x00,0x00,0x01};
+    buf_bytes(out, empty, 7u);
+    return;
+  }
+  /* zlib header: CMF=0x78 (deflate, window=32k), FLG=0x01 (fastest) */
+  buf_u8(out, 0x78); buf_u8(out, 0x01);
+  uint32_t bitbuf = 0u, bitcnt = 0u;
+  write_fixed_block(out, &bitbuf, &bitcnt, data, len, 1u);
   bw_finish(out, &bitbuf, &bitcnt);
   /* adler32 checksum (big-endian) */
   uint32_t ad = adler32_bytes(data, len);
@@ -578,18 +583,24 @@ static void png_chunk(TxBuf* out, const char type[4], const uint8_t* data, uint3
  * Preview RGBA rendering (column-major tile scan)
  * ==================================================================== */
 
-static void render_preview_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph) {
+static void render_preview_rows_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph,
+                                   uint32_t row_start, uint32_t row_count) {
   uint32_t ground = (uint32_t)w->worldSurface;
   uint32_t rock   = (uint32_t)w->rockLayer;
+  uint32_t row_end = row_start + row_count;
+  if (row_start >= ph || row_count == 0u) return;
+  if (row_end < row_start || row_end > ph) row_end = ph;
+  row_count = row_end - row_start;
 
   /* Fill background colors row by row. Alpha temporarily stores the number
      of non-empty source samples accumulated into each preview pixel. */
-  for (uint32_t py = 0u; py < ph; py++) {
+  for (uint32_t local_py = 0u; local_py < row_count; local_py++) {
+    uint32_t py = row_start + local_py;
     uint8_t bg[4];
     uint32_t wy = (uint32_t)(((uint64_t)py * (uint64_t)w->maxTilesY) / ph);
     background_color(wy, (uint32_t)w->maxTilesY, ground, rock, bg);
     for (uint32_t px = 0u; px < pw; px++) {
-      uint32_t o = (py * pw + px) * 4u;
+      uint32_t o = (local_py * pw + px) * 4u;
       rgba[o] = bg[0]; rgba[o + 1u] = bg[1]; rgba[o + 2u] = bg[2]; rgba[o + 3u] = 0u;
     }
   }
@@ -630,10 +641,12 @@ static void render_preview_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t p
       uint32_t py0 = (uint32_t)(((uint64_t)y * ph) / height);
       uint32_t py1 = (uint32_t)((((uint64_t)y + run) * ph) / height);
       if (py1 <= py0) py1 = py0 + 1u;
-      if (px < pw && py0 < ph) {
+      if (px < pw && py0 < row_end && py1 > row_start) {
+        uint32_t local_py0 = py0 > row_start ? py0 - row_start : 0u;
+        uint32_t local_py1 = py1 < row_end ? py1 - row_start : row_count;
         if (py1 > ph) py1 = ph;
-        for (uint32_t py = py0; py < py1; py++) {
-          uint32_t o = (py * pw + px) * 4u;
+        for (uint32_t local_py = local_py0; local_py < local_py1; local_py++) {
+          uint32_t o = (local_py * pw + px) * 4u;
           uint32_t count = rgba[o + 3u];
           if (count == 0u) {
             rgba[o] = c[0]; rgba[o + 1u] = c[1]; rgba[o + 2u] = c[2];
@@ -657,9 +670,92 @@ static void render_preview_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t p
 render_done:
   w->file = saved_file;
   w->file_len = saved_len;
-  for (uint32_t p = 0u; p < pw * ph; p++) {
+  for (uint32_t p = 0u; p < pw * row_count; p++) {
     rgba[p * 4u + 3u] = 255u;
   }
+}
+
+static void render_preview_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph) {
+  render_preview_rows_to(w, rgba, pw, ph, 0u, ph);
+}
+
+/*
+ * Full-size marked previews use one compact RGB surface. At native dimensions
+ * every preview pixel maps to exactly one world tile, so the downsampling
+ * counters used by render_preview_rows_to are unnecessary. Keeping RGB rather
+ * than RGBA saves 25% of the large surface while preserving the final PNG's
+ * visual data. The world tile stream is decoded exactly once.
+ */
+static int render_full_preview_rgb_to(TxWorld* w, uint8_t* rgb,
+                                      uint32_t pw, uint32_t ph) {
+  uint32_t width;
+  uint32_t height;
+  uint32_t ground;
+  uint32_t rock;
+  uint8_t* saved_file;
+  uint32_t saved_len;
+  uint32_t off;
+  uint32_t end;
+
+  if (!w || !rgb || w->maxTilesX <= 0 || w->maxTilesY <= 0) return 0;
+  width = (uint32_t)w->maxTilesX;
+  height = (uint32_t)w->maxTilesY;
+  if (pw != width || ph != height) return 0;
+  ground = (uint32_t)w->worldSurface;
+  rock = (uint32_t)w->rockLayer;
+
+  for (uint32_t y = 0u; y < height; y++) {
+    uint8_t bg[4];
+    background_color(y, height, ground, rock, bg);
+    for (uint32_t x = 0u; x < width; x++) {
+      uint8_t* dst = rgb + (((uint64_t)y * width + x) * 3u);
+      dst[0] = bg[0];
+      dst[1] = bg[1];
+      dst[2] = bg[2];
+    }
+  }
+
+  saved_file = w->file;
+  saved_len = w->file_len;
+  if (w->section_overrides[1].active) {
+    w->file = w->section_overrides[1].data;
+    w->file_len = w->section_overrides[1].len;
+    off = 0u;
+    end = w->section_overrides[1].len;
+  } else {
+    off = w->starts[1];
+    end = w->ends[1];
+  }
+
+  for (uint32_t x = 0u; x < width; x++) {
+    for (uint32_t y = 0u; y < height;) {
+      TxTile tile;
+      if (!read_tile_at(w, &off, end, &tile)) {
+        w->file = saved_file;
+        w->file_len = saved_len;
+        return 0;
+      }
+
+      uint32_t run = (uint32_t)tile.same + 1u;
+      uint32_t y_end = y + run;
+      if (y_end < y || y_end > height) y_end = height;
+      if (tile_is_non_empty(&tile)) {
+        uint8_t color[4];
+        color_for_tile(&tile, y, height, ground, rock, color);
+        for (uint32_t yy = y; yy < y_end; yy++) {
+          uint8_t* dst = rgb + (((uint64_t)yy * width + x) * 3u);
+          dst[0] = color[0];
+          dst[1] = color[1];
+          dst[2] = color[2];
+        }
+      }
+      y = y_end;
+    }
+  }
+
+  w->file = saved_file;
+  w->file_len = saved_len;
+  return 1;
 }
 
 static int compute_preview_size(TxWorld* w, uint32_t max_w, uint32_t max_h,
@@ -835,11 +931,15 @@ static void blend_marker_pixel(uint8_t* dst, const uint8_t rgba[4]) {
   dst[3] = 255u;
 }
 
-static void draw_marker_ring_at_preview(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
-                                        uint32_t center_x, uint32_t center_y,
-                                        uint32_t radius, uint32_t line_width,
-                                        const uint8_t marker_rgba[4]) {
-  if (!rgba || !marker_rgba || preview_w == 0u || preview_h == 0u) return;
+static void draw_marker_ring_at_preview_rows(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
+                                             uint32_t row_start, uint32_t row_count,
+                                             uint32_t center_x, uint32_t center_y,
+                                             uint32_t radius, uint32_t line_width,
+                                             const uint8_t marker_rgba[4]) {
+  if (!rgba || !marker_rgba || preview_w == 0u || preview_h == 0u ||
+      row_start >= preview_h || row_count == 0u) return;
+  uint32_t row_end = row_start + row_count;
+  if (row_end < row_start || row_end > preview_h) row_end = preview_h;
   if (radius == 0u) radius = 1u;
   if (line_width == 0u) line_width = 1u;
   if (line_width > radius) line_width = radius;
@@ -853,9 +953,9 @@ static void draw_marker_ring_at_preview(uint8_t* rgba, uint32_t preview_w, uint3
     int32_t min_y = (int32_t)center_y - (int32_t)radius;
     int32_t max_y = (int32_t)center_y + (int32_t)radius;
     if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
+    if (min_y < (int32_t)row_start) min_y = (int32_t)row_start;
     if (max_x >= (int32_t)preview_w) max_x = (int32_t)preview_w - 1;
-    if (max_y >= (int32_t)preview_h) max_y = (int32_t)preview_h - 1;
+    if (max_y >= (int32_t)row_end) max_y = (int32_t)row_end - 1;
 
     for (int32_t py = min_y; py <= max_y; py++) {
       int64_t dy = (int64_t)py - (int64_t)center_y;
@@ -863,19 +963,34 @@ static void draw_marker_ring_at_preview(uint8_t* rgba, uint32_t preview_w, uint3
         int64_t dx = (int64_t)px - (int64_t)center_x;
         uint64_t dist2 = (uint64_t)(dx * dx + dy * dy);
         if (dist2 > outer2 || dist2 < inner2) continue;
-        blend_marker_pixel(rgba + (((uint32_t)py * preview_w + (uint32_t)px) * 4u), marker_rgba);
+        blend_marker_pixel(
+            rgba + ((((uint32_t)py - row_start) * preview_w + (uint32_t)px) * 4u),
+            marker_rgba);
       }
     }
   }
 }
 
-static void draw_marker_span_at_preview(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
-                                        uint32_t center_x, uint32_t py0_inclusive,
-                                        uint32_t py1_exclusive, uint32_t radius,
-                                        uint32_t line_width, const uint8_t marker_rgba[4]) {
-  if (!rgba || !marker_rgba || preview_w == 0u || preview_h == 0u || py1_exclusive <= py0_inclusive) {
+static void draw_marker_ring_at_preview(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
+                                        uint32_t center_x, uint32_t center_y,
+                                        uint32_t radius, uint32_t line_width,
+                                        const uint8_t marker_rgba[4]) {
+  draw_marker_ring_at_preview_rows(
+      rgba, preview_w, preview_h, 0u, preview_h,
+      center_x, center_y, radius, line_width, marker_rgba);
+}
+
+static void draw_marker_span_at_preview_rows(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
+                                             uint32_t row_start, uint32_t row_count,
+                                             uint32_t center_x, uint32_t py0_inclusive,
+                                             uint32_t py1_exclusive, uint32_t radius,
+                                             uint32_t line_width, const uint8_t marker_rgba[4]) {
+  if (!rgba || !marker_rgba || preview_w == 0u || preview_h == 0u ||
+      row_start >= preview_h || row_count == 0u || py1_exclusive <= py0_inclusive) {
     return;
   }
+  uint32_t row_end = row_start + row_count;
+  if (row_end < row_start || row_end > preview_h) row_end = preview_h;
   if (radius == 0u) radius = 1u;
   if (line_width == 0u) line_width = 1u;
   if (line_width > radius) line_width = radius;
@@ -890,9 +1005,9 @@ static void draw_marker_span_at_preview(uint8_t* rgba, uint32_t preview_w, uint3
     int32_t min_y = (int32_t)py0_inclusive - (int32_t)radius;
     int32_t max_y = (int32_t)segment_y1 + (int32_t)radius;
     if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
+    if (min_y < (int32_t)row_start) min_y = (int32_t)row_start;
     if (max_x >= (int32_t)preview_w) max_x = (int32_t)preview_w - 1;
-    if (max_y >= (int32_t)preview_h) max_y = (int32_t)preview_h - 1;
+    if (max_y >= (int32_t)row_end) max_y = (int32_t)row_end - 1;
 
     for (int32_t py = min_y; py <= max_y; py++) {
       int32_t nearest_y = py;
@@ -905,11 +1020,22 @@ static void draw_marker_span_at_preview(uint8_t* rgba, uint32_t preview_w, uint3
           uint64_t dist2 = (uint64_t)(dx * dx + dy * dy);
           if (dist2 > outer2) continue;
           if (inner_radius > 0u && dist2 < inner2) continue;
-          blend_marker_pixel(rgba + (((uint32_t)py * preview_w + (uint32_t)px) * 4u), marker_rgba);
+          blend_marker_pixel(
+              rgba + ((((uint32_t)py - row_start) * preview_w + (uint32_t)px) * 4u),
+              marker_rgba);
         }
       }
     }
   }
+}
+
+static void draw_marker_span_at_preview(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
+                                        uint32_t center_x, uint32_t py0_inclusive,
+                                        uint32_t py1_exclusive, uint32_t radius,
+                                        uint32_t line_width, const uint8_t marker_rgba[4]) {
+  draw_marker_span_at_preview_rows(
+      rgba, preview_w, preview_h, 0u, preview_h,
+      center_x, py0_inclusive, py1_exclusive, radius, line_width, marker_rgba);
 }
 
 static void draw_marker_ring(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
@@ -931,6 +1057,241 @@ static void draw_marker_ring(uint8_t* rgba, uint32_t preview_w, uint32_t preview
   }
 }
 
+static void draw_marker_ring_rows(uint8_t* rgba, uint32_t preview_w, uint32_t preview_h,
+                                  uint32_t row_start, uint32_t row_count,
+                                  uint32_t world_w, uint32_t world_h,
+                                  int32_t world_x, int32_t world_y,
+                                  const MapMarkerEntry* marker) {
+  if (!rgba || !marker || preview_w == 0u || preview_h == 0u ||
+      world_w == 0u || world_h == 0u) {
+    return;
+  }
+
+  {
+    uint32_t center_x = clamp_preview_coord(world_x, world_w, preview_w);
+    uint32_t center_y = clamp_preview_coord(world_y, world_h, preview_h);
+    uint32_t radius = scale_marker_measure(marker->radius, world_w, world_h, preview_w, preview_h);
+    uint32_t line_width = scale_marker_measure(marker->line_width, world_w, world_h, preview_w, preview_h);
+    draw_marker_ring_at_preview_rows(
+        rgba, preview_w, preview_h, row_start, row_count,
+        center_x, center_y, radius, line_width, marker->rgba);
+  }
+}
+
+static void draw_marker_icon_rows(TxWorld* w, uint8_t* rgba,
+                                  uint32_t preview_w, uint32_t preview_h,
+                                  uint32_t row_start, uint32_t row_count,
+                                  uint32_t world_w, uint32_t world_h,
+                                  int32_t world_x, int32_t world_y,
+                                  int32_t item_id, const MapMarkerEntry* marker) {
+  const TxIconAtlas* atlas;
+  int icon_index;
+  uint32_t center_x;
+  uint32_t center_y;
+  uint32_t radius;
+  uint32_t line_width;
+  uint32_t inner_radius;
+  uint32_t side;
+  uint32_t icon_size;
+  uint32_t source_x0;
+  uint32_t source_y0;
+  uint32_t row_end;
+  int32_t start_x;
+  int32_t start_y;
+
+  if (!w || !rgba || !marker || !world_w || !world_h ||
+      !preview_w || !preview_h || row_start >= preview_h || !row_count) return;
+  atlas = &w->icon_atlas;
+  icon_index = terra_icon_index_for_item(atlas, item_id);
+  if (icon_index < 0) return;
+
+  center_x = clamp_preview_coord(world_x, world_w, preview_w);
+  center_y = clamp_preview_coord(world_y, world_h, preview_h);
+  radius = scale_marker_measure(marker->radius, world_w, world_h, preview_w, preview_h);
+  line_width = scale_marker_measure(marker->line_width, world_w, world_h, preview_w, preview_h);
+  inner_radius = radius > line_width ? radius - line_width : radius;
+  side = terra_icon_side_for_radius(inner_radius);
+  if (!side) return;
+
+  icon_size = atlas->icon_size;
+  source_x0 = atlas->x_offsets[icon_index];
+  source_y0 = atlas->y_offsets[icon_index];
+  start_x = (int32_t)center_x - (int32_t)(side / 2u);
+  start_y = (int32_t)center_y - (int32_t)(side / 2u);
+  row_end = row_start + row_count;
+  if (row_end < row_start || row_end > preview_h) row_end = preview_h;
+
+  for (uint32_t local_y = 0u; local_y < side; local_y++) {
+    int32_t py = start_y + (int32_t)local_y;
+    if (py < (int32_t)row_start || py >= (int32_t)row_end ||
+        py < 0 || py >= (int32_t)preview_h) continue;
+    {
+      uint32_t source_y = (local_y * icon_size) / side;
+      for (uint32_t local_x = 0u; local_x < side; local_x++) {
+        int32_t px = start_x + (int32_t)local_x;
+        if (px < 0 || px >= (int32_t)preview_w) continue;
+        {
+          uint32_t source_x = (local_x * icon_size) / side;
+          const uint8_t* source = (const uint8_t*)(uintptr_t)atlas->rgba +
+              ((source_y0 + source_y) * atlas->atlas_width + source_x0 + source_x) * 4u;
+          if (!source[3]) continue;
+          blend_marker_pixel(
+              rgba + ((((uint32_t)py - row_start) * preview_w + (uint32_t)px) * 4u),
+              source);
+        }
+      }
+    }
+  }
+}
+
+static void blend_marker_pixel_rgb(uint8_t* dst, const uint8_t rgba[4]) {
+  uint32_t alpha = rgba[3];
+  uint32_t inv = 255u - alpha;
+  dst[0] = (uint8_t)((rgba[0] * alpha + dst[0] * inv + 127u) / 255u);
+  dst[1] = (uint8_t)((rgba[1] * alpha + dst[1] * inv + 127u) / 255u);
+  dst[2] = (uint8_t)((rgba[2] * alpha + dst[2] * inv + 127u) / 255u);
+}
+
+static void draw_marker_ring_at_rgb(uint8_t* rgb, uint32_t preview_w,
+                                    uint32_t preview_h, uint32_t center_x,
+                                    uint32_t center_y, uint32_t radius,
+                                    uint32_t line_width,
+                                    const uint8_t marker_rgba[4]) {
+  if (!rgb || !marker_rgba || preview_w == 0u || preview_h == 0u) return;
+  if (radius == 0u) radius = 1u;
+  if (line_width == 0u) line_width = 1u;
+  if (line_width > radius) line_width = radius;
+
+  {
+    uint32_t inner_radius = radius > line_width ? radius - line_width : 0u;
+    uint64_t outer2 = (uint64_t)radius * radius;
+    uint64_t inner2 = (uint64_t)inner_radius * inner_radius;
+    int32_t min_x = (int32_t)center_x - (int32_t)radius;
+    int32_t max_x = (int32_t)center_x + (int32_t)radius;
+    int32_t min_y = (int32_t)center_y - (int32_t)radius;
+    int32_t max_y = (int32_t)center_y + (int32_t)radius;
+    if (min_x < 0) min_x = 0;
+    if (min_y < 0) min_y = 0;
+    if (max_x >= (int32_t)preview_w) max_x = (int32_t)preview_w - 1;
+    if (max_y >= (int32_t)preview_h) max_y = (int32_t)preview_h - 1;
+
+    for (int32_t py = min_y; py <= max_y; py++) {
+      int64_t dy = (int64_t)py - (int64_t)center_y;
+      for (int32_t px = min_x; px <= max_x; px++) {
+        int64_t dx = (int64_t)px - (int64_t)center_x;
+        uint64_t distance = (uint64_t)(dx * dx + dy * dy);
+        if (distance > outer2 || distance < inner2) continue;
+        blend_marker_pixel_rgb(
+            rgb + (((uint64_t)(uint32_t)py * preview_w + (uint32_t)px) * 3u),
+            marker_rgba);
+      }
+    }
+  }
+}
+
+static void draw_marker_span_at_rgb(uint8_t* rgb, uint32_t preview_w,
+                                    uint32_t preview_h, uint32_t center_x,
+                                    uint32_t py0_inclusive, uint32_t py1_exclusive,
+                                    uint32_t radius, uint32_t line_width,
+                                    const uint8_t marker_rgba[4]) {
+  if (!rgb || !marker_rgba || preview_w == 0u || preview_h == 0u ||
+      py1_exclusive <= py0_inclusive) return;
+  if (radius == 0u) radius = 1u;
+  if (line_width == 0u) line_width = 1u;
+  if (line_width > radius) line_width = radius;
+
+  {
+    uint32_t inner_radius = line_width >= radius ? 0u : radius - line_width;
+    uint64_t outer2 = (uint64_t)radius * radius;
+    uint64_t inner2 = (uint64_t)inner_radius * inner_radius;
+    uint32_t segment_y1 = py1_exclusive - 1u;
+    int32_t min_x = (int32_t)center_x - (int32_t)radius;
+    int32_t max_x = (int32_t)center_x + (int32_t)radius;
+    int32_t min_y = (int32_t)py0_inclusive - (int32_t)radius;
+    int32_t max_y = (int32_t)segment_y1 + (int32_t)radius;
+    if (min_x < 0) min_x = 0;
+    if (min_y < 0) min_y = 0;
+    if (max_x >= (int32_t)preview_w) max_x = (int32_t)preview_w - 1;
+    if (max_y >= (int32_t)preview_h) max_y = (int32_t)preview_h - 1;
+
+    for (int32_t py = min_y; py <= max_y; py++) {
+      int32_t nearest_y = py;
+      if (nearest_y < (int32_t)py0_inclusive) nearest_y = (int32_t)py0_inclusive;
+      if (nearest_y > (int32_t)segment_y1) nearest_y = (int32_t)segment_y1;
+      {
+        int64_t dy = (int64_t)py - (int64_t)nearest_y;
+        for (int32_t px = min_x; px <= max_x; px++) {
+          int64_t dx = (int64_t)px - (int64_t)center_x;
+          uint64_t distance = (uint64_t)(dx * dx + dy * dy);
+          if (distance > outer2 || (inner_radius > 0u && distance < inner2)) continue;
+          blend_marker_pixel_rgb(
+              rgb + (((uint64_t)(uint32_t)py * preview_w + (uint32_t)px) * 3u),
+              marker_rgba);
+        }
+      }
+    }
+  }
+}
+
+static void draw_marker_icon_rgb(TxWorld* w, uint8_t* rgb,
+                                 uint32_t preview_w, uint32_t preview_h,
+                                 uint32_t world_w, uint32_t world_h,
+                                 int32_t world_x, int32_t world_y,
+                                 int32_t item_id, const MapMarkerEntry* marker) {
+  const TxIconAtlas* atlas;
+  int icon_index;
+  uint32_t center_x;
+  uint32_t center_y;
+  uint32_t radius;
+  uint32_t line_width;
+  uint32_t inner_radius;
+  uint32_t side;
+  uint32_t icon_size;
+  uint32_t source_x0;
+  uint32_t source_y0;
+  int32_t start_x;
+  int32_t start_y;
+
+  if (!w || !rgb || !marker || !world_w || !world_h || !preview_w || !preview_h) return;
+  atlas = &w->icon_atlas;
+  icon_index = terra_icon_index_for_item(atlas, item_id);
+  if (icon_index < 0) return;
+
+  center_x = clamp_preview_coord(world_x, world_w, preview_w);
+  center_y = clamp_preview_coord(world_y, world_h, preview_h);
+  radius = scale_marker_measure(marker->radius, world_w, world_h, preview_w, preview_h);
+  line_width = scale_marker_measure(marker->line_width, world_w, world_h, preview_w, preview_h);
+  inner_radius = radius > line_width ? radius - line_width : radius;
+  side = terra_icon_side_for_radius(inner_radius);
+  if (!side) return;
+
+  icon_size = atlas->icon_size;
+  source_x0 = atlas->x_offsets[icon_index];
+  source_y0 = atlas->y_offsets[icon_index];
+  start_x = (int32_t)center_x - (int32_t)(side / 2u);
+  start_y = (int32_t)center_y - (int32_t)(side / 2u);
+  for (uint32_t local_y = 0u; local_y < side; local_y++) {
+    int32_t py = start_y + (int32_t)local_y;
+    if (py < 0 || py >= (int32_t)preview_h) continue;
+    {
+      uint32_t source_y = (local_y * icon_size) / side;
+      for (uint32_t local_x = 0u; local_x < side; local_x++) {
+        int32_t px = start_x + (int32_t)local_x;
+        if (px < 0 || px >= (int32_t)preview_w) continue;
+        {
+          uint32_t source_x = (local_x * icon_size) / side;
+          const uint8_t* source = (const uint8_t*)(uintptr_t)atlas->rgba +
+              ((source_y0 + source_y) * atlas->atlas_width + source_x0 + source_x) * 4u;
+          if (!source[3]) continue;
+          blend_marker_pixel_rgb(
+              rgb + (((uint64_t)(uint32_t)py * preview_w + (uint32_t)px) * 3u),
+              source);
+        }
+      }
+    }
+  }
+}
+
 static const MapMarkerEntry* find_marker_by_id(const MapMarkerEntry* markers,
                                                uint32_t marker_count,
                                                int32_t id) {
@@ -940,10 +1301,12 @@ static const MapMarkerEntry* find_marker_by_id(const MapMarkerEntry* markers,
   return NULL;
 }
 
-static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
-                                                    uint32_t preview_w, uint32_t preview_h,
-                                                    const MapMarkerEntry* chest_markers,
-                                                    uint32_t chest_marker_count) {
+static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rgba,
+                                                         uint32_t preview_w, uint32_t preview_h,
+                                                         uint32_t row_start, uint32_t row_count,
+                                                         const MapMarkerEntry* chest_markers,
+                                                         uint32_t chest_marker_count,
+                                                         uint32_t count_matches) {
   if (!w || !rgba || chest_marker_count == 0u ||
       w->pointer_count <= 2u || w->starts[2] >= w->ends[2]) {
     return 0u;
@@ -966,7 +1329,7 @@ static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
     }
 
     {
-      int32_t chest_count = (int16_t)rd_u16le(w->file, w->file_len, &off);
+        int32_t chest_count = (int16_t)rd_u16le(w->file, w->file_len, &off);
       int32_t slots_per_chest = 0;
       if (w->version < 294u) slots_per_chest = (int16_t)rd_u16le(w->file, w->file_len, &off);
       if (chest_count < 0) chest_count = 0;
@@ -977,6 +1340,7 @@ static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
         rd_skip_string_value(w->file, w->file_len, &off);
         int32_t max_items = w->version >= 294u ? rd_i32le(w->file, w->file_len, &off) : slots_per_chest;
         const MapMarkerEntry* matched_marker = NULL;
+        int32_t matched_item_id = -1;
         if (max_items < 0) max_items = 0;
 
         for (int32_t item_index = 0; item_index < max_items && off < end; item_index++) {
@@ -986,15 +1350,21 @@ static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
             rd_u8(w->file, w->file_len, &off);
             if (!matched_marker) {
               matched_marker = find_marker_by_id(chest_markers, chest_marker_count, item_type);
+              if (matched_marker) matched_item_id = item_type;
             }
           }
         }
 
         if (matched_marker) {
-          draw_marker_ring(rgba, preview_w, preview_h,
-                           (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
-                           chest_x, chest_y, matched_marker);
-          matched++;
+          draw_marker_ring_rows(
+              rgba, preview_w, preview_h, row_start, row_count,
+              (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
+              chest_x, chest_y, matched_marker);
+          draw_marker_icon_rows(
+              w, rgba, preview_w, preview_h, row_start, row_count,
+              (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
+              chest_x, chest_y, matched_item_id, matched_marker);
+          if (count_matches) matched++;
         }
       }
     }
@@ -1005,10 +1375,21 @@ static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
   }
 }
 
-static uint32_t draw_matching_tile_markers_preview(TxWorld* w, uint8_t* rgba,
-                                                   uint32_t preview_w, uint32_t preview_h,
-                                                   const MapMarkerEntry* tile_markers,
-                                                   uint32_t tile_marker_count) {
+static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,
+                                                    uint32_t preview_w, uint32_t preview_h,
+                                                    const MapMarkerEntry* chest_markers,
+                                                    uint32_t chest_marker_count) {
+  return draw_matching_chest_markers_preview_rows(
+      w, rgba, preview_w, preview_h, 0u, preview_h,
+      chest_markers, chest_marker_count, 1u);
+}
+
+static uint32_t draw_matching_tile_markers_preview_rows(TxWorld* w, uint8_t* rgba,
+                                                        uint32_t preview_w, uint32_t preview_h,
+                                                        uint32_t row_start, uint32_t row_count,
+                                                        const MapMarkerEntry* tile_markers,
+                                                        uint32_t tile_marker_count,
+                                                        uint32_t count_matches) {
   if (!w || !rgba || tile_marker_count == 0u) return 0u;
 
   {
@@ -1048,10 +1429,13 @@ static uint32_t draw_matching_tile_markers_preview(TxWorld* w, uint8_t* rgba,
               uint32_t py1 = (uint32_t)((((uint64_t)y + run) * preview_h) / height);
               if (py1 <= py0) py1 = py0 + 1u;
               if (py1 > preview_h) py1 = preview_h;
-              if (UINT32_MAX - matched < run) matched = UINT32_MAX;
-              else matched += run;
-              draw_marker_span_at_preview(
-                  rgba, preview_w, preview_h, px, py0, py1,
+              if (count_matches) {
+                if (UINT32_MAX - matched < run) matched = UINT32_MAX;
+                else matched += run;
+              }
+              draw_marker_span_at_preview_rows(
+                  rgba, preview_w, preview_h, row_start, row_count,
+                  px, py0, py1,
                   scale_marker_measure(matched_marker->radius, width, height, preview_w, preview_h),
                   scale_marker_measure(matched_marker->line_width, width, height, preview_w, preview_h),
                   matched_marker->rgba);
@@ -1066,6 +1450,479 @@ static uint32_t draw_matching_tile_markers_preview(TxWorld* w, uint8_t* rgba,
     w->file_len = saved_len;
     return matched;
   }
+}
+
+static uint32_t draw_matching_tile_markers_preview(TxWorld* w, uint8_t* rgba,
+                                                   uint32_t preview_w, uint32_t preview_h,
+                                                   const MapMarkerEntry* tile_markers,
+                                                   uint32_t tile_marker_count) {
+  return draw_matching_tile_markers_preview_rows(
+      w, rgba, preview_w, preview_h, 0u, preview_h,
+      tile_markers, tile_marker_count, 1u);
+}
+
+static uint32_t draw_matching_chest_markers_rgb(
+    TxWorld* w, uint8_t* rgb, uint32_t preview_w, uint32_t preview_h,
+    const MapMarkerEntry* chest_markers, uint32_t chest_marker_count) {
+  if (!w || !rgb || chest_marker_count == 0u ||
+      w->pointer_count <= 2u || w->starts[2] >= w->ends[2]) return 0u;
+
+  {
+    const uint8_t* saved_file = w->file;
+    uint32_t saved_len = w->file_len;
+    uint32_t off = 0u;
+    uint32_t end = 0u;
+    uint32_t matched = 0u;
+
+    if (w->section_overrides[2].active) {
+      w->file = w->section_overrides[2].data;
+      w->file_len = w->section_overrides[2].len;
+      end = w->section_overrides[2].len;
+    } else {
+      off = w->starts[2];
+      end = w->ends[2];
+    }
+
+    {
+      int32_t chest_count = (int16_t)rd_u16le(w->file, w->file_len, &off);
+      int32_t slots_per_chest = 0;
+      if (w->version < 294u) slots_per_chest = (int16_t)rd_u16le(
+          w->file, w->file_len, &off);
+      if (chest_count < 0) chest_count = 0;
+
+      for (int32_t chest_index = 0;
+           chest_index < chest_count && off < end; chest_index++) {
+        int32_t chest_x = rd_i32le(w->file, w->file_len, &off);
+        int32_t chest_y = rd_i32le(w->file, w->file_len, &off);
+        rd_skip_string_value(w->file, w->file_len, &off);
+        int32_t max_items = w->version >= 294u
+            ? rd_i32le(w->file, w->file_len, &off)
+            : slots_per_chest;
+        const MapMarkerEntry* matched_marker = NULL;
+        int32_t matched_item_id = -1;
+        if (max_items < 0) max_items = 0;
+
+        for (int32_t item_index = 0;
+             item_index < max_items && off < end; item_index++) {
+          int16_t stack = (int16_t)rd_u16le(w->file, w->file_len, &off);
+          if (stack != 0) {
+            int32_t item_type = rd_i32le(w->file, w->file_len, &off);
+            rd_u8(w->file, w->file_len, &off);
+            if (!matched_marker) {
+              matched_marker = find_marker_by_id(
+                  chest_markers, chest_marker_count, item_type);
+              if (matched_marker) matched_item_id = item_type;
+            }
+          }
+        }
+
+        if (matched_marker) {
+          uint32_t center_x = clamp_preview_coord(
+              chest_x, (uint32_t)w->maxTilesX, preview_w);
+          uint32_t center_y = clamp_preview_coord(
+              chest_y, (uint32_t)w->maxTilesY, preview_h);
+          uint32_t radius = scale_marker_measure(
+              matched_marker->radius, (uint32_t)w->maxTilesX,
+              (uint32_t)w->maxTilesY, preview_w, preview_h);
+          uint32_t line_width = scale_marker_measure(
+              matched_marker->line_width, (uint32_t)w->maxTilesX,
+              (uint32_t)w->maxTilesY, preview_w, preview_h);
+          draw_marker_ring_at_rgb(
+              rgb, preview_w, preview_h, center_x, center_y,
+              radius, line_width, matched_marker->rgba);
+          draw_marker_icon_rgb(
+              w, rgb, preview_w, preview_h,
+              (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
+              chest_x, chest_y, matched_item_id, matched_marker);
+          matched++;
+        }
+      }
+    }
+
+    w->file = (uint8_t*)saved_file;
+    w->file_len = saved_len;
+    return matched;
+  }
+}
+
+static uint32_t draw_matching_tile_markers_rgb(
+    TxWorld* w, uint8_t* rgb, uint32_t preview_w, uint32_t preview_h,
+    const MapMarkerEntry* tile_markers, uint32_t tile_marker_count) {
+  if (!w || !rgb || tile_marker_count == 0u) return 0u;
+
+  {
+    uint8_t* saved_file = w->file;
+    uint32_t saved_len = w->file_len;
+    uint32_t off = 0u;
+    uint32_t end = 0u;
+    uint32_t matched = 0u;
+    uint32_t width = (uint32_t)w->maxTilesX;
+    uint32_t height = (uint32_t)w->maxTilesY;
+
+    if (w->section_overrides[1].active) {
+      w->file = w->section_overrides[1].data;
+      w->file_len = w->section_overrides[1].len;
+      end = w->section_overrides[1].len;
+    } else {
+      off = w->starts[1];
+      end = w->ends[1];
+    }
+
+    for (uint32_t x = 0u; x < width; x++) {
+      for (uint32_t y = 0u; y < height;) {
+        TxTile tile;
+        if (!read_tile_at(w, &off, end, &tile)) {
+          w->file = saved_file;
+          w->file_len = saved_len;
+          return matched;
+        }
+        {
+          uint32_t run = (uint32_t)tile.same + 1u;
+          uint32_t y_end = y + run;
+          if (y_end < y || y_end > height) y_end = height;
+          if (tile.active) {
+            const MapMarkerEntry* marker = find_marker_by_id(
+                tile_markers, tile_marker_count, (int32_t)tile.type);
+            if (marker) {
+              uint32_t px = clamp_preview_coord((int32_t)x, width, preview_w);
+              uint32_t radius = scale_marker_measure(
+                  marker->radius, width, height, preview_w, preview_h);
+              uint32_t line_width = scale_marker_measure(
+                  marker->line_width, width, height, preview_w, preview_h);
+              draw_marker_span_at_rgb(
+                  rgb, preview_w, preview_h, px, y, y_end,
+                  radius, line_width, marker->rgba);
+              if (UINT32_MAX - matched < run) matched = UINT32_MAX;
+              else matched += run;
+            }
+          }
+          y = y_end;
+        }
+      }
+    }
+
+    w->file = saved_file;
+    w->file_len = saved_len;
+    return matched;
+  }
+}
+
+/*
+ * Native marked previews keep one compact RGB surface and stream only the PNG
+ * scanlines. The world tile stream is never rescanned for each output strip.
+ */
+#define MARKED_PREVIEW_STRIP_ROWS 128u
+#define MAX_MARKED_PREVIEW_RGB_BYTES (64u * 1024u * 1024u)
+
+typedef struct TxPngDeflateStream {
+  TxBuf* out;
+  uint32_t bitbuf;
+  uint32_t bitcnt;
+  uint32_t adler_a;
+  uint32_t adler_b;
+} TxPngDeflateStream;
+
+static void png_deflate_adler_update(TxPngDeflateStream* stream,
+                                     const uint8_t* data, uint32_t len) {
+  for (uint32_t i = 0u; i < len; i++) {
+    stream->adler_a += data[i];
+    if (stream->adler_a >= 65521u) stream->adler_a -= 65521u;
+    stream->adler_b += stream->adler_a;
+    if (stream->adler_b >= 65521u) stream->adler_b %= 65521u;
+  }
+}
+
+static void png_deflate_init(TxPngDeflateStream* stream, TxBuf* out) {
+  stream->out = out;
+  stream->bitbuf = 0u;
+  stream->bitcnt = 0u;
+  stream->adler_a = 1u;
+  stream->adler_b = 0u;
+  buf_u8(out, 0x78u);
+  buf_u8(out, 0x01u);
+}
+
+static void png_deflate_write_block(TxPngDeflateStream* stream,
+                                    const uint8_t* data, uint32_t len,
+                                    uint32_t final_block) {
+  write_fixed_block(
+      stream->out, &stream->bitbuf, &stream->bitcnt,
+      data, len, final_block);
+  png_deflate_adler_update(stream, data, len);
+}
+
+static void png_deflate_finish(TxPngDeflateStream* stream) {
+  bw_finish(stream->out, &stream->bitbuf, &stream->bitcnt);
+  {
+    uint32_t adler = (stream->adler_b << 16u) | stream->adler_a;
+    buf_u8(stream->out, (uint8_t)(adler >> 24u));
+    buf_u8(stream->out, (uint8_t)(adler >> 16u));
+    buf_u8(stream->out, (uint8_t)(adler >> 8u));
+    buf_u8(stream->out, (uint8_t)adler);
+  }
+}
+
+static void write_u32be_at(uint8_t* p, uint32_t value) {
+  p[0] = (uint8_t)(value >> 24u);
+  p[1] = (uint8_t)(value >> 16u);
+  p[2] = (uint8_t)(value >> 8u);
+  p[3] = (uint8_t)value;
+}
+
+static int begin_streamed_png(TxBuf* out, uint32_t pw, uint32_t ph,
+                              uint8_t color_type,
+                              uint32_t* idat_length_pos,
+                              uint32_t* idat_type_pos,
+                              uint32_t* idat_data_pos) {
+  static const uint8_t sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+  uint8_t ihdr[13];
+  buf_bytes(out, sig, 8u);
+  ihdr[0] = (uint8_t)(pw >> 24u); ihdr[1] = (uint8_t)(pw >> 16u);
+  ihdr[2] = (uint8_t)(pw >> 8u);  ihdr[3] = (uint8_t)pw;
+  ihdr[4] = (uint8_t)(ph >> 24u); ihdr[5] = (uint8_t)(ph >> 16u);
+  ihdr[6] = (uint8_t)(ph >> 8u);  ihdr[7] = (uint8_t)ph;
+  ihdr[8] = 8u;
+  ihdr[9] = color_type;
+  ihdr[10] = 0u;
+  ihdr[11] = 0u;
+  ihdr[12] = 0u;
+  png_chunk(out, "IHDR", ihdr, 13u);
+
+  *idat_length_pos = out->len;
+  buf_u32be(out, 0u);
+  *idat_type_pos = out->len;
+  buf_bytes(out, "IDAT", 4u);
+  *idat_data_pos = out->len;
+  return out->ok;
+}
+
+static int encode_marked_preview_png_stream(
+    TxWorld* w, uint32_t pw, uint32_t ph, uint32_t stride,
+    const MapMarkerEntry* chest_markers, uint32_t chest_count,
+    const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
+  uint32_t strip_rows = ph < MARKED_PREVIEW_STRIP_ROWS ? ph : MARKED_PREVIEW_STRIP_ROWS;
+  uint64_t rgba_cap64 = (uint64_t)stride * strip_rows;
+  uint64_t raw_stride64 = (uint64_t)stride + 1u;
+  uint64_t raw_cap64 = raw_stride64 * strip_rows;
+  uint8_t* rgba = NULL;
+  uint8_t* raw = NULL;
+  TxBuf out;
+  uint32_t idat_length_pos = 0u;
+  uint32_t idat_type_pos = 0u;
+  uint32_t idat_data_pos = 0u;
+  TxPngDeflateStream stream;
+
+  if (rgba_cap64 > UINT32_MAX || raw_cap64 > UINT32_MAX) {
+    tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "preview strip exceeds WASM limits");
+    return -1;
+  }
+
+  rgba = tx_alloc((uint32_t)rgba_cap64);
+  raw = tx_alloc((uint32_t)raw_cap64);
+  if (!rgba || !raw) {
+    if (raw) tx_internal_free(raw);
+    if (rgba) tx_internal_free(rgba);
+    tx_set_error("TERRAX_WASM_OOM", "preview strip allocation failed");
+    return -1;
+  }
+
+  buf_init(&out, 1024u);
+  if (!out.ok || !begin_streamed_png(
+      &out, pw, ph, 6u, &idat_length_pos, &idat_type_pos, &idat_data_pos)) {
+    if (out.data) tx_internal_free(out.data);
+    tx_internal_free(raw);
+    tx_internal_free(rgba);
+    tx_set_error("TERRAX_WASM_OOM", "PNG output allocation failed");
+    return -1;
+  }
+  png_deflate_init(&stream, &out);
+
+  *matched_chest_count = 0u;
+  *matched_tile_count = 0u;
+  for (uint32_t row_start = 0u; row_start < ph; row_start += strip_rows) {
+    uint32_t rows = ph - row_start;
+    if (rows > strip_rows) rows = strip_rows;
+    render_preview_rows_to(w, rgba, pw, ph, row_start, rows);
+
+    if (chest_count > 0u) {
+      uint32_t matched = draw_matching_chest_markers_preview_rows(
+          w, rgba, pw, ph, row_start, rows,
+          chest_markers, chest_count, row_start == 0u);
+      if (row_start == 0u) *matched_chest_count = matched;
+    }
+    if (tile_count > 0u) {
+      uint32_t matched = draw_matching_tile_markers_preview_rows(
+          w, rgba, pw, ph, row_start, rows,
+          tile_markers, tile_count, row_start == 0u);
+      if (row_start == 0u) *matched_tile_count = matched;
+    }
+
+    {
+      uint32_t raw_len = 0u;
+      for (uint32_t local_row = 0u; local_row < rows; local_row++) {
+        raw[raw_len++] = 0u;
+        memcpy(raw + raw_len, rgba + local_row * stride, stride);
+        raw_len += stride;
+      }
+      png_deflate_write_block(
+          &stream, raw, raw_len, row_start + rows >= ph);
+    }
+    if (!out.ok) {
+      tx_internal_free(out.data);
+      tx_internal_free(raw);
+      tx_internal_free(rgba);
+      tx_set_error("TERRAX_WASM_OOM", "PNG compression failed");
+      return -1;
+    }
+  }
+
+  png_deflate_finish(&stream);
+  if (!out.ok || out.len < idat_data_pos ||
+      out.len - idat_data_pos > UINT32_MAX - 12u) {
+    if (out.data) tx_internal_free(out.data);
+    tx_internal_free(raw);
+    tx_internal_free(rgba);
+    tx_set_error("TERRAX_WASM_OOM", "PNG compression failed");
+    return -1;
+  }
+
+  {
+    uint32_t idat_len = out.len - idat_data_pos;
+    uint32_t crc = crc32_bytes(out.data + idat_type_pos, idat_len + 4u);
+    write_u32be_at(out.data + idat_length_pos, idat_len);
+    buf_u32be(&out, crc);
+  }
+  png_chunk(&out, "IEND", (const uint8_t*)0, 0u);
+
+  tx_internal_free(raw);
+  tx_internal_free(rgba);
+  if (!out.ok) {
+    if (out.data) tx_internal_free(out.data);
+    tx_set_error("TERRAX_WASM_OOM", "PNG assembly failed");
+    return -1;
+  }
+
+  tx_last_width = pw;
+  tx_last_height = ph;
+  tx_last_stride = stride;
+  return set_result_buf(&out);
+}
+
+static int encode_full_preview_rgb_png(
+    TxWorld* w, uint32_t pw, uint32_t ph,
+    const MapMarkerEntry* chest_markers, uint32_t chest_count,
+    const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
+  uint64_t rgb_len64 = (uint64_t)pw * ph * 3u;
+  uint32_t stride = pw * 3u;
+  uint32_t strip_rows = ph < MARKED_PREVIEW_STRIP_ROWS ? ph : MARKED_PREVIEW_STRIP_ROWS;
+  uint64_t raw_cap64 = ((uint64_t)stride + 1u) * strip_rows;
+  uint8_t* rgb = NULL;
+  uint8_t* raw = NULL;
+  TxBuf out;
+  uint32_t idat_length_pos = 0u;
+  uint32_t idat_type_pos = 0u;
+  uint32_t idat_data_pos = 0u;
+  TxPngDeflateStream stream;
+
+  if (rgb_len64 == 0u || rgb_len64 > MAX_MARKED_PREVIEW_RGB_BYTES ||
+      rgb_len64 > UINT32_MAX || raw_cap64 > UINT32_MAX) {
+    tx_set_error(
+        "TERRAX_BAD_PREVIEW_SIZE",
+        "full marked preview exceeds the low-memory image budget");
+    return -1;
+  }
+
+  rgb = tx_alloc((uint32_t)rgb_len64);
+  raw = tx_alloc((uint32_t)raw_cap64);
+  if (!rgb || !raw) {
+    if (raw) tx_internal_free(raw);
+    if (rgb) tx_internal_free(rgb);
+    tx_set_error("TERRAX_WASM_OOM", "full marked preview allocation failed");
+    return -1;
+  }
+
+  if (!render_full_preview_rgb_to(w, rgb, pw, ph)) {
+    tx_internal_free(raw);
+    tx_internal_free(rgb);
+    tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "full marked preview rendering failed");
+    return -1;
+  }
+
+  {
+    uint32_t matched_chests = draw_matching_chest_markers_rgb(
+        w, rgb, pw, ph, chest_markers, chest_count);
+    uint32_t matched_tiles = draw_matching_tile_markers_rgb(
+        w, rgb, pw, ph, tile_markers, tile_count);
+    if (matched_chest_count) *matched_chest_count = matched_chests;
+    if (matched_tile_count) *matched_tile_count = matched_tiles;
+  }
+
+  buf_init(&out, 1024u);
+  if (!out.ok || !begin_streamed_png(
+      &out, pw, ph, 2u, &idat_length_pos, &idat_type_pos, &idat_data_pos)) {
+    if (out.data) tx_internal_free(out.data);
+    tx_internal_free(raw);
+    tx_internal_free(rgb);
+    tx_set_error("TERRAX_WASM_OOM", "full marked PNG output allocation failed");
+    return -1;
+  }
+  png_deflate_init(&stream, &out);
+
+  for (uint32_t row_start = 0u; row_start < ph; row_start += strip_rows) {
+    uint32_t rows = ph - row_start;
+    if (rows > strip_rows) rows = strip_rows;
+    uint32_t raw_len = 0u;
+    for (uint32_t local_row = 0u; local_row < rows; local_row++) {
+      raw[raw_len++] = 0u;
+      memcpy(
+          raw + raw_len,
+          rgb + ((uint64_t)(row_start + local_row) * stride),
+          stride);
+      raw_len += stride;
+    }
+    png_deflate_write_block(
+        &stream, raw, raw_len, row_start + rows >= ph);
+    if (!out.ok) {
+      tx_internal_free(out.data);
+      tx_internal_free(raw);
+      tx_internal_free(rgb);
+      tx_set_error("TERRAX_WASM_OOM", "full marked PNG compression failed");
+      return -1;
+    }
+  }
+
+  png_deflate_finish(&stream);
+  if (!out.ok || out.len < idat_data_pos ||
+      out.len - idat_data_pos > UINT32_MAX - 12u) {
+    if (out.data) tx_internal_free(out.data);
+    tx_internal_free(raw);
+    tx_internal_free(rgb);
+    tx_set_error("TERRAX_WASM_OOM", "full marked PNG compression failed");
+    return -1;
+  }
+
+  {
+    uint32_t idat_len = out.len - idat_data_pos;
+    uint32_t crc = crc32_bytes(out.data + idat_type_pos, idat_len + 4u);
+    write_u32be_at(out.data + idat_length_pos, idat_len);
+    buf_u32be(&out, crc);
+  }
+  png_chunk(&out, "IEND", (const uint8_t*)0, 0u);
+
+  tx_internal_free(raw);
+  tx_internal_free(rgb);
+  if (!out.ok) {
+    if (out.data) tx_internal_free(out.data);
+    tx_set_error("TERRAX_WASM_OOM", "full marked PNG assembly failed");
+    return -1;
+  }
+
+  tx_last_width = pw;
+  tx_last_height = ph;
+  tx_last_stride = 0u;
+  return set_result_buf(&out);
 }
 
 /* ====================================================================
@@ -1118,33 +1975,19 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
   uint32_t pw = 0u;
   uint32_t ph = 0u;
   uint32_t stride = 0u;
-  uint32_t rgba_len = 0u;
-  uint8_t* rgba = NULL;
 
   if (matched_chest_count) *matched_chest_count = 0u;
   if (matched_tile_count) *matched_tile_count = 0u;
   if (!compute_preview_size(w, max_w, max_h, &pw, &ph, &stride)) return -1;
 
-  rgba_len = stride * ph;
-  rgba = tx_alloc(rgba_len);
-  if (!rgba) {
-    tx_set_error("TERRAX_WASM_OOM", "preview allocation failed");
-    return -1;
+  if (max_w == 0u && max_h == 0u) {
+    return encode_full_preview_rgb_png(
+        w, pw, ph, chest_markers, chest_count, tile_markers, tile_count,
+        matched_chest_count, matched_tile_count);
   }
 
-  render_preview_to(w, rgba, pw, ph);
-  if (chest_count > 0u && matched_chest_count) {
-    *matched_chest_count = draw_matching_chest_markers_preview(
-        w, rgba, pw, ph, chest_markers, chest_count);
-  } else if (chest_count > 0u) {
-    (void)draw_matching_chest_markers_preview(w, rgba, pw, ph, chest_markers, chest_count);
-  }
-  if (tile_count > 0u && matched_tile_count) {
-    *matched_tile_count = draw_matching_tile_markers_preview(
-        w, rgba, pw, ph, tile_markers, tile_count);
-  } else if (tile_count > 0u) {
-    (void)draw_matching_tile_markers_preview(w, rgba, pw, ph, tile_markers, tile_count);
-  }
-
-  return encode_png_from_owned_rgba(rgba, pw, ph);
+  return encode_marked_preview_png_stream(
+      w, pw, ph, stride,
+      chest_markers, chest_count, tile_markers, tile_count,
+      matched_chest_count, matched_tile_count);
 }

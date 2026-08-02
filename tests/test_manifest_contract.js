@@ -39,13 +39,13 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
       requiredExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
       exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
     },
-    memory: { initialBytes: 33554432, maxBytes: 100663296 },
+    memory: { initialBytes: 67108864, maxBytes: 167772160 },
     build: {
       compiler: "test-compiler",
       flags: {
         common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
         node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
       },
     },
     targets: {
@@ -59,7 +59,7 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
         ],
       },
       web: {
-        memory: { initialBytes: 33554432, maxBytes: 100663296 },
+        memory: { initialBytes: 67108864, maxBytes: 167772160 },
         exports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
         exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
         artifacts: [
@@ -116,7 +116,7 @@ test("manifest artifact hashes match the files on disk", async () => {
       buildFlags: {
         common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
         node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
       },
       webWrapper: "wrapper.js",
       webWasm: "module.wasm",
@@ -128,7 +128,7 @@ test("manifest artifact hashes match the files on disk", async () => {
     assert.equal(manifest.artifacts[0].bytes, Buffer.byteLength(webWrapperText));
     assert.equal(manifest.artifacts[0].sha256, sha256(Buffer.from(webWrapperText)));
     assert.equal(manifest.artifacts[1].sha256, sha256(Buffer.from([0, 97, 115, 109])));
-    assert.equal(manifest.memory.maxBytes, 100663296);
+    assert.equal(manifest.memory.maxBytes, 167772160);
     assert.equal(manifest.targets.node.memory.maxBytes, 536870912);
     assert.deepEqual(manifest.artifacts, manifest.targets.web.artifacts);
     assert.equal(manifest.targets.node.artifacts[0].sha256, sha256(Buffer.from(nodeWrapperText)));
@@ -156,7 +156,7 @@ test("createManifest rejects wrappers that do not expose build identity exports"
       buildFlags: {
         common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
         node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
       },
       webWrapper: "web-wrapper.js",
       webWasm: "module.wasm",

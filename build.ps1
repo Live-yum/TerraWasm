@@ -46,8 +46,8 @@ $NodeFlags = @(
 )
 $WebFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
-    "-sINITIAL_MEMORY=33554432",
-    "-sMAXIMUM_MEMORY=100663296",
+    "-sINITIAL_MEMORY=67108864",
+    "-sMAXIMUM_MEMORY=167772160",
     "-sEXPORT_NAME='TerraWorldWasmWeb'",
     "-sENVIRONMENT=web,worker",
     "-sFILESYSTEM=1"

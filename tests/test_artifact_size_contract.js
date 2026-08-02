@@ -37,13 +37,13 @@ test("artifact size gate rejects manifest byte drift and oversized web artifacts
         requiredExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
         exportHash: exportHash(["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"]),
       },
-      memory: { initialBytes: 33554432, maxBytes: 100663296 },
+      memory: { initialBytes: 67108864, maxBytes: 167772160 },
       build: {
         compiler: "test-compiler",
         flags: {
           common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
           node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-          web: ["-sINITIAL_MEMORY=33554432", "-sMAXIMUM_MEMORY=100663296", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
+          web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
         },
       },
       targets: {
@@ -57,7 +57,7 @@ test("artifact size gate rejects manifest byte drift and oversized web artifacts
           ],
         },
         web: {
-          memory: { initialBytes: 33554432, maxBytes: 100663296 },
+          memory: { initialBytes: 67108864, maxBytes: 167772160 },
           exports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
           exportHash: exportHash(["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"]),
           artifacts: [
