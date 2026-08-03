@@ -47,7 +47,7 @@ int terra_fuzz_json(const uint8_t* data, size_t size) {
 
     int count = json_array_count(json, jlen, 0);
     if (count > 0) {
-        int index = data && size ? (int)(data[0] % (uint8_t)count) : 0;
+        int index = data && size ? (int)((uint32_t)data[0] % (uint32_t)count) : 0;
         (void)json_array_element(json, jlen, 0, index);
     }
     return 0;
