@@ -519,6 +519,7 @@ static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
 }
 
 static int tx_world_has_overrides(TxWorld* world) {
+    if (world->format_dirty) return 1;
     for (uint32_t i = 0; i < TX_MAX_SECTION_OVERRIDES; i++) {
         if (world->section_overrides[i].active) return 1;
     }
@@ -612,9 +613,24 @@ static terrax_world_status tx_serialize_world_into(
     uint32_t ptr_table_size  = 2u + world->pointer_count * 4u;
     uint32_t new_format_len  = ptr_table_start + ptr_table_size + 2u + world->important_len;
 
-    /* 1. Format header (before pointer table) */
-    if (!tx_world_output_bytes(
-        output, output_size, &offset, world->file, ptr_table_start)) goto write_failed;
+    /* 1. Format header (before pointer table). Rebuild this metadata instead
+     * of copying it so a format-only patch is independent from section edits. */
+    if (!tx_world_output_u32le(
+        output, output_size, &offset, world->version)) goto write_failed;
+    if (world->version >= 135u) {
+        uint8_t file_type = world->file_type;
+        uint8_t favorite[8];
+        for (uint32_t i = 0; i < 8u; i++)
+            favorite[i] = (uint8_t)(world->favorite >> (i * 8u));
+        if (!tx_world_output_bytes(
+            output, output_size, &offset, (const uint8_t*)world->magic, 7u) ||
+            !tx_world_output_bytes(
+                output, output_size, &offset, &file_type, 1u) ||
+            !tx_world_output_u32le(
+                output, output_size, &offset, world->revision) ||
+            !tx_world_output_bytes(
+                output, output_size, &offset, favorite, 8u)) goto write_failed;
+    }
 
     /* 2. Recalculated pointer table */
     if (!tx_world_output_u16le(
@@ -626,16 +642,11 @@ static terrax_world_status tx_serialize_world_into(
         pos += new_sizes[i];
     }
 
-    /* 3. Tile type count + importance bitmap (from original) */
-    uint32_t importance_start = ptr_table_start + ptr_table_size;
-    uint32_t importance_end = world->format_len;
-    if (importance_end > world->file_len) importance_end = world->file_len;
-    if (importance_end > importance_start && !tx_world_output_bytes(
-        output,
-        output_size,
-        &offset,
-        world->file + importance_start,
-        importance_end - importance_start)) goto write_failed;
+    /* 3. Tile type count + importance bitmap */
+    if (!tx_world_output_u16le(
+        output, output_size, &offset, world->tile_type_count) ||
+        !tx_world_output_bytes(
+            output, output_size, &offset, world->important, world->important_len)) goto write_failed;
 
     /* 4. Section data */
     for (uint32_t i = 0; i < world->pointer_count && i < TX_MAX_SECTIONS; i++) {
@@ -841,7 +852,7 @@ terrax_world_status terra_info_get_section_schema_json(
     if (tx_streq_c(section_name, "tiles")) {
         buf_cstr(&b, "\"writable\":false,\"note\":\"use batch_update_tiles for tile modifications\"");
     } else if (tx_streq_c(section_name, "header")) {
-        buf_cstr(&b, "\"writable\":false,\"note\":\"use header_patch for whitelisted boolean fields\"");
+        buf_cstr(&b, "\"writable\":false,\"note\":\"use header_patch for unified header metadata updates\"");
     } else if (tx_streq_c(section_name, "chests")) {
         buf_cstr(&b, "\"writable\":false,\"note\":\"use replace_chests for verified WLD binary encoding\"");
     } else if (tx_streq_c(section_name, "bestiary")) {

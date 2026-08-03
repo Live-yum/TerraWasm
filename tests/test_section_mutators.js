@@ -193,6 +193,174 @@ test("header_patch changes only whitelisted booleans and survives save/reopen", 
   }
 });
 
+test("header_patch accepts a magic-only string patch and preserves it after reopen", async () => {
+  const M = await TerraWorldWasm();
+  let opened;
+  let reopened;
+  try {
+    opened = openBytes(M, TEST_BYTES);
+    const before = getSection(M, opened.handle, "format");
+    const magic = before.magic === "relogic" ? "xindong" : "relogic";
+
+    assert.deepEqual(
+      executeOperation(M, opened.handle, "header_patch", { patch: { magic } }),
+      { status: "ok", updated: 1 },
+    );
+    assert.equal(getSection(M, opened.handle, "format").magic, magic);
+
+    const saved = saveBytes(M, opened.handle);
+    closeBytes(M, opened);
+    opened = null;
+    reopened = openBytes(M, saved);
+
+    assert.equal(getSection(M, reopened.handle, "format").magic, magic);
+  } finally {
+    closeBytes(M, reopened);
+    closeBytes(M, opened);
+  }
+});
+
+test("header_patch updates editable metadata and format magic through one patch", async () => {
+  const M = await TerraWorldWasm();
+  let opened;
+  let reopened;
+  try {
+    opened = openBytes(M, TEST_BYTES);
+    const beforeHeader = getSection(M, opened.handle, "header");
+    const beforeFormat = getSection(M, opened.handle, "format");
+    const patch = {
+      worldName: "Edited World 名称",
+      seed: "987654321",
+      uniqueId: "12345678-1234-4abc-8def-1234567890ab",
+      creationTime: "9862443092335741120",
+      worldId: beforeHeader.worldId + 1,
+      maxTilesX: beforeHeader.maxTilesX - 1,
+      maxTilesY: beforeHeader.maxTilesY - 1,
+      gameMode: beforeHeader.gameMode === 2 ? 1 : 2,
+      spawnTileX: Math.min(beforeHeader.maxTilesX - 1, beforeHeader.spawnTileX + 1),
+      spawnTileY: Math.min(beforeHeader.maxTilesY - 1, beforeHeader.spawnTileY + 1),
+      crimson: !beforeHeader.crimson,
+      magic: beforeFormat.magic === "relogic" ? "xindong" : "relogic",
+      version: beforeFormat.version,
+    };
+    assert.deepEqual(executeOperation(M, opened.handle, "header_patch", { patch }), {
+      status: "ok",
+      updated: Object.keys(patch).length,
+    });
+
+    const inMemoryHeader = getSection(M, opened.handle, "header");
+    const inMemoryFormat = getSection(M, opened.handle, "format");
+    assert.equal(inMemoryHeader.worldName, patch.worldName);
+    assert.equal(inMemoryHeader.seed, patch.seed);
+    assert.equal(inMemoryHeader.uniqueId, patch.uniqueId);
+    assert.equal(inMemoryHeader.creationTime, Number(patch.creationTime));
+    assert.equal(inMemoryHeader.worldId, patch.worldId);
+    assert.equal(inMemoryHeader.maxTilesX, patch.maxTilesX);
+    assert.equal(inMemoryHeader.maxTilesY, patch.maxTilesY);
+    assert.equal(inMemoryHeader.gameMode, patch.gameMode);
+    assert.equal(inMemoryHeader.spawnTileX, patch.spawnTileX);
+    assert.equal(inMemoryHeader.spawnTileY, patch.spawnTileY);
+    assert.equal(inMemoryHeader.crimson, patch.crimson);
+    assert.equal(inMemoryFormat.magic, patch.magic);
+
+    const saved = saveBytes(M, opened.handle);
+    closeBytes(M, opened);
+    opened = null;
+    reopened = openBytes(M, saved);
+    assert.deepEqual(getSection(M, reopened.handle, "header"), inMemoryHeader);
+    assert.equal(getSection(M, reopened.handle, "format").magic, patch.magic);
+  } finally {
+    closeBytes(M, reopened);
+    closeBytes(M, opened);
+  }
+});
+
+test("header_patch re-encodes the complete current-version header model without field-kind routing", async () => {
+  const M = await TerraWorldWasm();
+  let opened;
+  let reopened;
+  try {
+    opened = openBytes(M, TEST_BYTES);
+    const beforeHeader = getSection(M, opened.handle, "header");
+    const beforeFormat = getSection(M, opened.handle, "format");
+    const patch = structuredClone(beforeHeader);
+    delete patch.creationTimeDate;
+    delete patch.lastPlayedDate;
+    delete patch.legacySkip;
+
+    Object.assign(patch, {
+      worldName: "Complete Header 世界",
+      seed: "1357924680",
+      worldGeneratorVersion: "777389080577",
+      uniqueId: "87654321-4321-4abc-8def-ba0987654321",
+      creationTime: "638712864000000000",
+      lastPlayed: "638713728000000000",
+      hardMode: !beforeHeader.hardMode,
+      gameMode: beforeHeader.gameMode === 3 ? 2 : 3,
+      treeX: beforeHeader.treeX.map((value, index) => value + index + 1),
+      treeStyle: beforeHeader.treeStyle.map((value, index) => value + index + 1),
+      caveBackX: beforeHeader.caveBackX.map((value, index) => value + index + 1),
+      caveBackStyle: beforeHeader.caveBackStyle.map((value, index) => value + index + 1),
+      worldSurface: beforeHeader.worldSurface + 0.25,
+      rockLayer: beforeHeader.rockLayer + 0.5,
+      time: beforeHeader.time + 1.25,
+      anglerWhoFinishedTodayCount: 2,
+      anglerWhoFinishedToday: ["Guide", "渔夫"],
+      killCountLength: 4,
+      killCount: [1, 2, 3, 4],
+      claimableBannersLength: 3,
+      claimableBanners: [5, 6, 7],
+      partyCelebratingNpcCount: 3,
+      partyCelebratingNpcNetIds: [17, 18, 19],
+      treeTopVariationCount: 4,
+      treeTopVariations: [20, 21, 22, 23],
+      spawnPointCount: 2,
+      spawnPoints: [{ x: 10, y: 20 }, { x: -30, y: 40 }],
+      manifestJson: '{"source":"header_patch","完整":true}',
+      magic: beforeFormat.magic === "relogic" ? "xindong" : "relogic",
+      version: beforeFormat.version + 1,
+      type: beforeFormat.type,
+      revision: beforeFormat.revision + 1,
+      favoriteFlags: "3",
+      tileTypeCount: beforeFormat.tileTypeCount,
+      tileFrameImportantBitmap: beforeFormat.tileFrameImportantBitmap,
+    });
+
+    assert.deepEqual(executeOperation(M, opened.handle, "header_patch", { patch }), {
+      status: "ok",
+      updated: Object.keys(patch).length,
+    });
+
+    const inMemoryHeader = getSection(M, opened.handle, "header");
+    const inMemoryFormat = getSection(M, opened.handle, "format");
+    for (const [key, expected] of Object.entries(patch)) {
+      if (key in beforeFormat) continue;
+      const normalized = typeof expected === "string" && /^(?:worldGeneratorVersion|creationTime|lastPlayed)$/.test(key)
+        ? Number(expected)
+        : expected;
+      assert.deepEqual(inMemoryHeader[key], normalized, `header field did not update: ${key}`);
+    }
+    assert.equal(inMemoryFormat.magic, patch.magic);
+    assert.equal(inMemoryFormat.version, patch.version);
+    assert.equal(inMemoryFormat.type, patch.type);
+    assert.equal(inMemoryFormat.revision, patch.revision);
+    assert.equal(inMemoryFormat.favoriteFlags, Number(patch.favoriteFlags));
+    assert.equal(inMemoryFormat.tileTypeCount, patch.tileTypeCount);
+    assert.deepEqual(inMemoryFormat.tileFrameImportantBitmap, patch.tileFrameImportantBitmap);
+
+    const saved = saveBytes(M, opened.handle);
+    closeBytes(M, opened);
+    opened = null;
+    reopened = openBytes(M, saved);
+
+    assert.deepEqual(getSection(M, reopened.handle, "header"), inMemoryHeader);
+    assert.deepEqual(getSection(M, reopened.handle, "format"), inMemoryFormat);
+  } finally {
+    closeBytes(M, reopened);
+    closeBytes(M, opened);
+  }
+});
+
 test("three mutators share one open world and produce one reopenable output without touching other sections", async () => {
   const M = await TerraWorldWasm();
   const chests = [

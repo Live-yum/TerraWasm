@@ -142,11 +142,10 @@ function Build-Target {
     }
 }
 
-$buildTargets = switch ($Target) {
-    "node" { @("terrax_world_wasm") }
-    "web"  { @("terrax_world_wasm_web") }
-    "all"  { @("terrax_world_wasm", "terrax_world_wasm_web") }
-}
+# The provenance manifest records both targets, even when the caller only
+# consumes one of them. Always refresh the pair so a clean build never reuses
+# a missing or stale sibling artifact.
+$buildTargets = @("terrax_world_wasm", "terrax_world_wasm_web")
 
 foreach ($t in $buildTargets) {
     Build-Target -Name $t
@@ -239,7 +238,19 @@ if ($DeployDir) {
         $deployWebArtifact = @($deployManifest.targets.web.artifacts | Where-Object { $_.role -eq $artifact.role })[0]
         $deployWebArtifact.path = $manifestPath
     }
-    $deployManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $DeployDir "terra.manifest.json") -Encoding utf8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $deployJson = $deployManifest | ConvertTo-Json -Depth 20
+    [System.IO.File]::WriteAllText(
+        (Join-Path $DeployDir "terra.manifest.json"),
+        "$deployJson`n",
+        $utf8NoBom
+    )
+    if ($useViewerRelativePaths) {
+        $browserManifestPath = Join-Path $boundaryDir "terra-manifest-browser.mjs"
+        $browserJson = $deployManifest | ConvertTo-Json -Depth 20 -Compress
+        $browserModule = "const manifest = $browserJson`n`nexport default manifest`n"
+        [System.IO.File]::WriteAllText($browserManifestPath, $browserModule, $utf8NoBom)
+    }
     Write-Host "=== Copied to $DeployDir ===" -ForegroundColor Cyan
 }
 

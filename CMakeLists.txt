@@ -77,6 +77,14 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
+    # Header/format patching is a cold administrative path.  Keep the global
+    # release profile at -O3, but size-optimize this schema-heavy encoder so
+    # the Web artifact remains inside the Mini Program budget.
+    set_source_files_properties(
+        "${SRC_DIR}/terra_mutators.c"
+        PROPERTIES COMPILE_OPTIONS "-Oz"
+    )
+
     set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
     set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.web.txt")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

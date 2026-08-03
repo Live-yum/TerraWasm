@@ -1,5 +1,6 @@
 /* Verified WLD section encoders used by explicit mutating operations. */
 #include "terra_types.h"
+#include <float.h>
 #include <limits.h>
 
 extern uint32_t tx_strlen(const char *s);
@@ -11,17 +12,23 @@ extern void buf_init(TxBuf *b,uint32_t cap);
 extern void buf_u8(TxBuf *b,uint8_t v);
 extern void buf_u16le(TxBuf *b,uint32_t v);
 extern void buf_u32le(TxBuf *b,uint32_t v);
+extern void buf_u64le(TxBuf *b,uint64_t v);
 extern void buf_bytes(TxBuf *b,const void *p,uint32_t n);
 extern void buf_cstr(TxBuf *b,const char *s);
 extern void json_u32(TxBuf *b,uint32_t v);
 extern int set_result_buf(TxBuf *b);
 extern int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t len);
 extern void *memcpy(void *dst,const void *src,unsigned long n);
+extern void *memset(void *dst,int value,unsigned long n);
 extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
+extern uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok);
+extern uint8_t *tx_alloc(uint32_t size);
+extern int parse_header(TxWorld *w);
 
 #define TX_MUTATOR_MAX_JSON_BYTES (1024u * 1024u)
 #define TX_MUTATOR_MAX_STRING_BYTES 255u
+#define TX_MAX_HEADER_PATCH_FIELDS 256u
 #define TX_MUTATOR_MAX_CHESTS 1000u
 #define TX_MUTATOR_MAX_CHEST_ITEMS 504u
 #define TX_MUTATOR_MAX_BESTIARY_ENTRIES 4096u
@@ -34,10 +41,18 @@ typedef struct TxJsonParser {
     uint32_t pos;
 } TxJsonParser;
 
-typedef struct TxHeaderEdit {
-    uint32_t field_index;
-    uint8_t value;
-} TxHeaderEdit;
+typedef struct TxPatchField {
+    char name[96];
+    uint32_t name_len;
+    uint32_t value_start;
+    uint32_t value_end;
+    uint8_t used;
+} TxPatchField;
+
+typedef struct TxSpawnPoint {
+    int16_t x;
+    int16_t y;
+} TxSpawnPoint;
 
 static int mut_fail(const char *code,const char *message){
     tx_set_error(code,message);
@@ -248,6 +263,40 @@ static int jp_integer(TxJsonParser *p,int64_t min_value,int64_t max_value,int64_
     return 1;
     }
 
+static int decimal_u64(const char *text,uint32_t length,uint64_t max_value,uint64_t *out){
+    if (!text||!length||!out)return mut_fail("TERRAX_VALIDATION_ERROR","expected a non-empty unsigned integer");
+    uint64_t value=0u;
+    for (uint32_t i=0;i<length;i++){
+        if (text[i]<'0'||text[i]>'9')return mut_fail("TERRAX_VALIDATION_ERROR","expected an unsigned integer");
+        uint32_t digit=(uint32_t)(text[i]-'0');
+        if (value>(max_value-digit)/10u)return mut_fail("TERRAX_VALIDATION_ERROR","unsigned integer overflow");
+        value=value*10u+digit;
+        }
+    *out=value;
+    return 1;
+    }
+
+static int uuid_text_to_bytes(const char *text,uint32_t length,uint8_t *out){
+    static const uint8_t order[16]={3u,2u,1u,0u,5u,4u,7u,6u,8u,9u,10u,11u,12u,13u,14u,15u};
+    uint8_t display[16];
+    uint32_t digit=0u;
+    if (!text||!out||length!=36u)return mut_fail("TERRAX_VALIDATION_ERROR","uniqueId must be a canonical UUID");
+    for (uint32_t i=0;i<36u;i++){
+        if (i==8u||i==13u||i==18u||i==23u){
+            if (text[i]!='-')return mut_fail("TERRAX_VALIDATION_ERROR","uniqueId must be a canonical UUID");
+            continue;
+            }
+        uint32_t nibble=0u;
+        if (!jp_hex(text[i],&nibble)||digit>=32u)return mut_fail("TERRAX_VALIDATION_ERROR","uniqueId must be a canonical UUID");
+        if ((digit&1u)==0u)display[digit>>1u]=(uint8_t)(nibble<<4u);
+        else display[digit>>1u]=(uint8_t)(display[digit>>1u]|nibble);
+        digit++;
+        }
+    if (digit!=32u)return mut_fail("TERRAX_VALIDATION_ERROR","uniqueId must be a canonical UUID");
+    for (uint32_t i=0;i<16u;i++)out[order[i]]=display[i];
+    return 1;
+    }
+
 static int jp_member_next(TxJsonParser *p,int *first,int *done){
     jp_ws(p);
     if (p->pos<p->len&&p->text[p->pos]=='}'){p->pos++;*done=1;return 1;}
@@ -281,7 +330,88 @@ static void buf_7bit(TxBuf *b,uint32_t value){
         }while(value);
     }
 
-static int parse_header_patch(TxWorld *w,TxJsonParser *p,TxHeaderEdit *edits,uint32_t *edit_count){
+static int jp_skip_string_token(TxJsonParser *p){
+    if (!jp_take(p,'"'))return 0;
+    while (p->pos<p->len){
+        uint8_t c=(uint8_t)p->text[p->pos++];
+        if (c=='"')return 1;
+        if (c<0x20u)return mut_fail("TERRAX_PARSE_ERROR","unescaped control character in JSON string");
+        if (c!='\\')continue;
+        if (p->pos>=p->len)return mut_fail("TERRAX_PARSE_ERROR","unterminated JSON escape");
+        c=(uint8_t)p->text[p->pos++];
+        if (c=='"'||c=='\\'||c=='/'||c=='b'||c=='f'||c=='n'||c=='r'||c=='t')continue;
+        if (c!='u'||p->pos+4u>p->len)return mut_fail("TERRAX_PARSE_ERROR","invalid JSON escape");
+        for (uint32_t i=0;i<4u;i++){
+            uint32_t nibble=0u;
+            if (!jp_hex(p->text[p->pos++],&nibble))
+                return mut_fail("TERRAX_PARSE_ERROR","invalid JSON unicode escape");
+            }
+        }
+    return mut_fail("TERRAX_PARSE_ERROR","unterminated JSON string");
+    }
+
+static int jp_skip_number(TxJsonParser *p){
+    jp_ws(p);
+    uint32_t start=p->pos;
+    if (p->pos<p->len&&p->text[p->pos]=='-')p->pos++;
+    if (p->pos>=p->len)return mut_fail("TERRAX_PARSE_ERROR","truncated JSON number");
+    if (p->text[p->pos]=='0')p->pos++;
+    else{
+        if (p->text[p->pos]<'1'||p->text[p->pos]>'9')
+            return mut_fail("TERRAX_PARSE_ERROR","invalid JSON number");
+        while (p->pos<p->len&&p->text[p->pos]>='0'&&p->text[p->pos]<='9')p->pos++;
+        }
+    if (p->pos<p->len&&p->text[p->pos]=='.'){
+        p->pos++;
+        if (p->pos>=p->len||p->text[p->pos]<'0'||p->text[p->pos]>'9')
+            return mut_fail("TERRAX_PARSE_ERROR","invalid JSON fraction");
+        while (p->pos<p->len&&p->text[p->pos]>='0'&&p->text[p->pos]<='9')p->pos++;
+        }
+    if (p->pos<p->len&&(p->text[p->pos]=='e'||p->text[p->pos]=='E')){
+        p->pos++;
+        if (p->pos<p->len&&(p->text[p->pos]=='+'||p->text[p->pos]=='-'))p->pos++;
+        if (p->pos>=p->len||p->text[p->pos]<'0'||p->text[p->pos]>'9')
+            return mut_fail("TERRAX_PARSE_ERROR","invalid JSON exponent");
+        while (p->pos<p->len&&p->text[p->pos]>='0'&&p->text[p->pos]<='9')p->pos++;
+        }
+    return p->pos>start;
+    }
+
+static int jp_skip_value(TxJsonParser *p,uint32_t depth){
+    if (depth>32u)return mut_fail("TERRAX_VALIDATION_ERROR","JSON nesting is too deep");
+    jp_ws(p);
+    if (p->pos>=p->len)return mut_fail("TERRAX_PARSE_ERROR","missing JSON value");
+    char c=p->text[p->pos];
+    if (c=='"')return jp_skip_string_token(p);
+    if (c=='{'||c=='['){
+        char close=c=='{'?'}':']';
+        p->pos++;
+        int first=1;
+        for (;;){
+            jp_ws(p);
+            if (p->pos<p->len&&p->text[p->pos]==close){p->pos++;return 1;}
+            if (!first&&!jp_take(p,','))return 0;
+            first=0;
+            if (c=='{'){
+                if (!jp_skip_string_token(p)||!jp_take(p,':'))return 0;
+                }
+            if (!jp_skip_value(p,depth+1u))return 0;
+            }
+        }
+    if (c=='t'||c=='f'){int value=0;return jp_bool(p,&value);}
+    if (c=='n'){
+        if (!jp_null(p))return mut_fail("TERRAX_PARSE_ERROR","malformed JSON null");
+        return 1;
+        }
+    return jp_skip_number(p);
+    }
+
+static int patch_field_duplicate(TxPatchField *fields,uint32_t count,const char *name){
+    for (uint32_t i=0;i<count;i++)if (tx_streq_c(fields[i].name,name))return 1;
+    return 0;
+    }
+
+static int parse_patch_fields(TxJsonParser *p,TxPatchField *fields,uint32_t *field_count){
     int first=1,done=0,seen_patch=0;
     if (!jp_take(p,'{'))return 0;
     while (!done){
@@ -289,82 +419,554 @@ static int parse_header_patch(TxWorld *w,TxJsonParser *p,TxHeaderEdit *edits,uin
         if (!jp_member_next(p,&first,&done))return 0;
         if (done)break;
         if (!jp_string(p,key,sizeof(key),&key_len)||!jp_take(p,':'))return 0;
-        (void)key_len;
-        if (!tx_streq_c(key,"patch"))return mut_fail("TERRAX_VALIDATION_ERROR","header_patch accepts only the patch field");
+        if (!tx_streq_c(key,"patch"))
+            return mut_fail("TERRAX_VALIDATION_ERROR","header_patch accepts only the patch field");
         if (seen_patch)return mut_fail("TERRAX_VALIDATION_ERROR","duplicate patch field");
         seen_patch=1;
         if (!jp_take(p,'{'))return 0;
         int patch_first=1,patch_done=0;
         while (!patch_done){
-            char field_name[96];uint32_t field_name_len=0u;int value=0;
             if (!jp_member_next(p,&patch_first,&patch_done))return 0;
             if (patch_done)break;
-            if (!jp_string(p,field_name,sizeof(field_name),&field_name_len)||!jp_take(p,':')||!jp_bool(p,&value))return 0;
-            (void)field_name_len;
-            uint32_t field_index=UINT32_MAX;
-            for (uint32_t i=0;i<w->header_bool_field_count;i++){
-                if (tx_streq_c(field_name,w->header_bool_fields[i].json_name)){field_index=i;break;}
-                }
-            if (field_index==UINT32_MAX)
-                return mut_fail("TERRAX_NOT_SUPPORTED","header field is not a whitelisted boolean for this world version");
-            for (uint32_t i=0;i<*edit_count;i++)if (edits[i].field_index==field_index)
-                return mut_fail("TERRAX_VALIDATION_ERROR","duplicate header patch field");
-            if (*edit_count>=TX_MAX_HEADER_BOOL_FIELDS)
+            if (*field_count>=TX_MAX_HEADER_PATCH_FIELDS)
                 return mut_fail("TERRAX_VALIDATION_ERROR","too many header patch fields");
-            edits[*edit_count].field_index=field_index;
-            edits[*edit_count].value=(uint8_t)value;
-            (*edit_count)++;
+            TxPatchField *field=&fields[*field_count];
+            if (!jp_string(p,field->name,sizeof(field->name),&field->name_len)||!jp_take(p,':'))return 0;
+            if (patch_field_duplicate(fields,*field_count,field->name))
+                return mut_fail("TERRAX_VALIDATION_ERROR","duplicate header patch field");
+            jp_ws(p);
+            field->value_start=p->pos;
+            if (!jp_skip_value(p,0u))return 0;
+            field->value_end=p->pos;
+            field->used=0u;
+            (*field_count)++;
             }
         }
-    if (!seen_patch||*edit_count==0u)return mut_fail("TERRAX_VALIDATION_ERROR","header patch must not be empty");
+    if (!seen_patch||*field_count==0u)
+        return mut_fail("TERRAX_VALIDATION_ERROR","header patch must not be empty");
     return jp_end(p);
     }
 
-int tx_mutate_header_patch(TxWorld *w,const char *request,uint32_t request_len,TxBuf *response){
-    if (!w||!request||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)
-        return mut_error("TERRAX_INVALID_ARGUMENT","invalid header_patch request");
-    if (w->pointer_count<1u)
-        return mut_error("TERRAX_NOT_SUPPORTED","world has no header section");
-    TxJsonParser parser={request,request_len,0u};
-    TxHeaderEdit edits[TX_MAX_HEADER_BOOL_FIELDS];
-    uint32_t edit_count=0u;
-    if (!parse_header_patch(w,&parser,edits,&edit_count))return -1;
+static TxPatchField *patch_find(TxPatchField *fields,uint32_t count,const char *name){
+    for (uint32_t i=0;i<count;i++)if (tx_streq_c(fields[i].name,name)){
+        fields[i].used=1u;
+        return &fields[i];
+        }
+    return NULL;
+    }
 
-    const uint8_t *source;
-    uint32_t source_len;
-    if (w->section_overrides[0].active){source=w->section_overrides[0].data;source_len=w->section_overrides[0].len;}
+static void patch_parser(const TxJsonParser *request,const TxPatchField *field,TxJsonParser *value){
+    value->text=request->text+field->value_start;
+    value->len=field->value_end-field->value_start;
+    value->pos=0u;
+    }
+
+static int patch_bool(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                      const char *name,uint8_t current,uint8_t *out){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){*out=current;return 1;}
+    TxJsonParser value;int parsed=0;
+    patch_parser(request,field,&value);
+    if (!jp_bool(&value,&parsed)||!jp_end(&value))return 0;
+    *out=(uint8_t)parsed;
+    return 1;
+    }
+
+static int patch_i64(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                     const char *name,int64_t current,int64_t min_value,int64_t max_value,int64_t *out){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){*out=current;return 1;}
+    TxJsonParser value;
+    patch_parser(request,field,&value);
+    return jp_integer(&value,min_value,max_value,out)&&jp_end(&value);
+    }
+
+static int patch_u64(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                     const char *name,uint64_t current,uint64_t *out){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){*out=current;return 1;}
+    TxJsonParser value;
+    patch_parser(request,field,&value);
+    jp_ws(&value);
+    if (value.pos<value.len&&value.text[value.pos]=='"'){
+        char decimal[32];uint32_t decimal_len=0u;
+        if (!jp_string(&value,decimal,sizeof(decimal),&decimal_len)||
+            !decimal_u64(decimal,decimal_len,UINT64_MAX,out))return 0;
+        }
     else{
-        if (w->ends[0]<w->starts[0]||w->ends[0]>w->file_len)
-            return mut_error("TERRAX_STATE_ERROR","header section bounds are invalid");
-        source=w->file+w->starts[0];source_len=w->ends[0]-w->starts[0];
+        uint32_t start=value.pos;
+        if (value.pos<value.len&&value.text[value.pos]=='-')
+            return mut_fail("TERRAX_VALIDATION_ERROR","expected an unsigned integer");
+        while (value.pos<value.len&&value.text[value.pos]>='0'&&value.text[value.pos]<='9')value.pos++;
+        if (value.pos==start||!decimal_u64(value.text+start,value.pos-start,UINT64_MAX,out))return 0;
         }
-    TxBuf encoded;
-    buf_init(&encoded,source_len);
-    if (!encoded.ok)return mut_error("TERRAX_WASM_OOM","failed to allocate header encoder");
-    buf_bytes(&encoded,source,source_len);
-    if (!encoded.ok){tx_internal_free(encoded.data);return mut_error("TERRAX_WASM_OOM","failed to copy header section");}
-    for (uint32_t i=0;i<edit_count;i++){
-        TxHeaderBoolField *field=&w->header_bool_fields[edits[i].field_index];
-        if (field->section_offset>=encoded.len){
-            tx_internal_free(encoded.data);
-            return mut_error("TERRAX_STATE_ERROR","header field offset is outside the section");
+    return jp_end(&value);
+    }
+
+static int patch_double(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                        const char *name,double current,double *out){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){*out=current;return 1;}
+    TxJsonParser value;patch_parser(request,field,&value);jp_ws(&value);
+    int negative=0;if(value.pos<value.len&&value.text[value.pos]=='-'){negative=1;value.pos++;}
+    double parsed=0.0;uint32_t digits=0u;
+    while(value.pos<value.len&&value.text[value.pos]>='0'&&value.text[value.pos]<='9'){
+        uint32_t digit=(uint32_t)(value.text[value.pos++]-'0');
+        if(parsed>(DBL_MAX-(double)digit)/10.0)return mut_fail("TERRAX_VALIDATION_ERROR","floating point value is outside the supported range");
+        parsed=parsed*10.0+(double)digit;digits++;
+        }
+    if(!digits)return mut_fail("TERRAX_VALIDATION_ERROR","expected a finite JSON number");
+    if(value.pos<value.len&&value.text[value.pos]=='.'){
+        value.pos++;double place=0.1;uint32_t fraction_digits=0u;
+        while(value.pos<value.len&&value.text[value.pos]>='0'&&value.text[value.pos]<='9'){
+            parsed+=(double)(value.text[value.pos++]-'0')*place;place*=0.1;fraction_digits++;
             }
-        encoded.data[field->section_offset]=edits[i].value;
+        if(!fraction_digits)return mut_fail("TERRAX_VALIDATION_ERROR","expected digits after the decimal point");
         }
-    uint32_t override_mark=tx_mark();
-    buf_cstr(response,"{\"status\":\"ok\",\"updated\":");
-    json_u32(response,edit_count);
-    buf_u8(response,'}');
-    int result=set_result_buf(response);
-    if (result<0){tx_internal_free(encoded.data);return -1;}
-    if (!set_section_override_data(w,0,encoded.data,encoded.len)){
-        tx_internal_free(encoded.data);discard_response(response);return -1;
+    int exponent=0;
+    if(value.pos<value.len&&(value.text[value.pos]=='e'||value.text[value.pos]=='E')){
+        value.pos++;int exponent_negative=0;
+        if(value.pos<value.len&&(value.text[value.pos]=='+'||value.text[value.pos]=='-'))exponent_negative=value.text[value.pos++]=='-';
+        uint32_t exponent_digits=0u;
+        while(value.pos<value.len&&value.text[value.pos]>='0'&&value.text[value.pos]<='9'){
+            if(exponent<1000)exponent=exponent*10+(value.text[value.pos]-'0');
+            value.pos++;exponent_digits++;
+            }
+        if(!exponent_digits||exponent>400)return mut_fail("TERRAX_VALIDATION_ERROR","floating point exponent is outside the supported range");
+        if(exponent_negative)exponent=-exponent;
         }
-    w->heap_mark=override_mark;
-    for (uint32_t i=0;i<edit_count;i++){
-        TxHeaderBoolField *field=&w->header_bool_fields[edits[i].field_index];
-        *((uint8_t*)w+field->world_member_offset)=edits[i].value;
+    while(exponent>0){if(parsed>DBL_MAX/10.0)return mut_fail("TERRAX_VALIDATION_ERROR","floating point value is outside the supported range");parsed*=10.0;exponent--;}
+    while(exponent<0){parsed/=10.0;exponent++;}
+    if(!jp_end(&value))return 0;
+    *out=negative?-parsed:parsed;return 1;
+    }
+
+static int patch_string(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                        const char *name,const char *current,char *out,uint32_t cap,uint32_t *out_len){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){
+        uint32_t length=tx_strlen(current);
+        if (length>=cap)return mut_fail("TERRAX_STATE_ERROR","current header string exceeds the encoder limit");
+        memcpy(out,current,length+1u);
+        if (out_len)*out_len=length;
+        return 1;
         }
+    TxJsonParser value;
+    patch_parser(request,field,&value);
+    return jp_string(&value,out,cap,out_len)&&jp_end(&value);
+    }
+
+static void buf_i32le(TxBuf *b,int32_t value){buf_u32le(b,(uint32_t)value);}
+static void buf_f32le(TxBuf *b,float value){union{float f;uint32_t u;}bits;bits.f=value;buf_u32le(b,bits.u);}
+static void buf_f64le(TxBuf *b,double value){union{double f;uint64_t u;}bits;bits.f=value;buf_u64le(b,bits.u);}
+
+static int write_bool_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                            const char *name,uint8_t current){
+    uint8_t value=0u;if(!patch_bool(request,fields,count,name,current,&value))return 0;buf_u8(b,value);return b->ok;
+    }
+static int write_u8_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                          const char *name,uint8_t current){
+    int64_t value=0;if(!patch_i64(request,fields,count,name,current,0,UINT8_MAX,&value))return 0;buf_u8(b,(uint8_t)value);return b->ok;
+    }
+static int write_u16_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,uint16_t current){
+    int64_t value=0;if(!patch_i64(request,fields,count,name,current,0,UINT16_MAX,&value))return 0;buf_u16le(b,(uint16_t)value);return b->ok;
+    }
+static int write_u32_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,uint32_t current){
+    int64_t value=0;if(!patch_i64(request,fields,count,name,current,0,UINT32_MAX,&value))return 0;buf_u32le(b,(uint32_t)value);return b->ok;
+    }
+static int write_i32_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,int32_t current,int32_t *out){
+    int64_t value=0;if(!patch_i64(request,fields,count,name,current,INT32_MIN,INT32_MAX,&value))return 0;
+    buf_i32le(b,(int32_t)value);if(out)*out=(int32_t)value;return b->ok;
+    }
+static int write_u64_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,uint64_t current){
+    uint64_t value=0u;if(!patch_u64(request,fields,count,name,current,&value))return 0;buf_u64le(b,value);return b->ok;
+    }
+static int write_f32_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,float current){
+    double value=0.0;if(!patch_double(request,fields,count,name,current,&value))return 0;
+    if(value>3.402823466e38||value<-3.402823466e38)return mut_fail("TERRAX_VALIDATION_ERROR","float is outside the supported range");
+    buf_f32le(b,(float)value);return b->ok;
+    }
+static int write_f64_field(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                           const char *name,double current){
+    double value=0.0;if(!patch_double(request,fields,count,name,current,&value))return 0;buf_f64le(b,value);return b->ok;
+    }
+
+static int write_fixed_u32_array(TxBuf *b,TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                                 const char *name,const uint32_t *current,uint32_t expected){
+    TxPatchField *field=patch_find(fields,count,name);
+    if (!field){for(uint32_t i=0;i<expected;i++)buf_u32le(b,current[i]);return b->ok;}
+    TxJsonParser value;patch_parser(request,field,&value);
+    if(!jp_take(&value,'['))return 0;
+    int first=1,done=0;uint32_t index=0u;
+    while(!done){
+        if(!jp_array_next(&value,&first,&done))return 0;
+        if(done)break;
+        if(index>=expected)return mut_fail("TERRAX_VALIDATION_ERROR","fixed header array has too many values");
+        int64_t item=0;if(!jp_integer(&value,0,UINT32_MAX,&item))return 0;
+        buf_u32le(b,(uint32_t)item);index++;
+        }
+    if(index!=expected)return mut_fail("TERRAX_VALIDATION_ERROR","fixed header array has the wrong length");
+    return jp_end(&value)&&b->ok;
+    }
+
+static void header_source_view(TxWorld *w,const uint8_t **data,uint32_t *len,uint32_t *base){
+    if(w->section_overrides[0].active){*data=w->section_overrides[0].data;*len=w->section_overrides[0].len;*base=w->starts[0];}
+    else{*data=w->file;*len=w->file_len;*base=0u;}
+    }
+
+static int patch_expected_count(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                                const char *name,uint32_t actual,uint32_t max_value){
+    TxPatchField *field=patch_find(fields,count,name);
+    if(!field)return 1;
+    TxJsonParser value;int64_t expected=0;patch_parser(request,field,&value);
+    if(!jp_integer(&value,0,max_value,&expected)||!jp_end(&value))return 0;
+    if((uint32_t)expected!=actual)return mut_fail("TERRAX_VALIDATION_ERROR","dynamic header count does not match its array");
+    return 1;
+    }
+
+static int encode_string_array(TxBuf *header,TxWorld *w,TxJsonParser *request,
+                               TxPatchField *fields,uint32_t count){
+    TxPatchField *field=patch_find(fields,count,"anglerWhoFinishedToday");
+    TxBuf values={0};uint32_t actual=0u;
+    if(field){
+        buf_init(&values,256u);if(!values.ok)return 0;
+        TxJsonParser value;patch_parser(request,field,&value);
+        if(!jp_take(&value,'[')){tx_internal_free(values.data);return 0;}
+        int first=1,done=0;
+        while(!done){
+            if(!jp_array_next(&value,&first,&done)){tx_internal_free(values.data);return 0;}
+            if(done)break;
+            char item[TX_MUTATOR_MAX_STRING_BYTES+1u];uint32_t length=0u;
+            if(!jp_string(&value,item,sizeof(item),&length)){tx_internal_free(values.data);return 0;}
+            buf_7bit(&values,length);buf_bytes(&values,item,length);actual++;
+            if(actual>65535u){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","angler array is too large");}
+            }
+        if(!jp_end(&value)||!values.ok){tx_internal_free(values.data);return 0;}
+        }else{
+        const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
+        uint32_t offset=w->anglersOff-base;actual=w->anglerFinishedSize;
+        for(uint32_t i=0;i<actual;i++){
+            int ok=0;uint32_t length=rd_7bit(source,source_len,&offset,&ok);
+            if(!ok||offset>source_len||length>source_len-offset){tx_internal_free(values.data);return mut_fail("TERRAX_STATE_ERROR","angler data is outside the active header");}
+            if(!values.data)buf_init(&values,length+16u);
+            buf_7bit(&values,length);buf_bytes(&values,source+offset,length);offset+=length;
+            }
+        }
+    if(!patch_expected_count(request,fields,count,"anglerWhoFinishedTodayCount",actual,UINT32_MAX)){tx_internal_free(values.data);return 0;}
+    buf_u32le(header,actual);if(values.len)buf_bytes(header,values.data,values.len);tx_internal_free(values.data);return header->ok;
+    }
+
+static int encode_numeric_array(TxBuf *header,TxWorld *w,TxJsonParser *request,
+                                TxPatchField *fields,uint32_t count,const char *array_name,
+                                const char *count_name,uint32_t current_count,uint32_t absolute_offset,
+                                uint32_t width,int signed_values,uint32_t max_count){
+    TxPatchField *field=patch_find(fields,count,array_name);
+    TxBuf values={0};uint32_t actual=0u;
+    if(field){
+        buf_init(&values,64u);if(!values.ok)return 0;
+        TxJsonParser value;patch_parser(request,field,&value);
+        if(!jp_take(&value,'[')){tx_internal_free(values.data);return 0;}
+        int first=1,done=0;
+        while(!done){
+            if(!jp_array_next(&value,&first,&done)){tx_internal_free(values.data);return 0;}
+            if(done)break;
+            int64_t item=0;
+            int64_t min_value=signed_values?(width==2u?INT16_MIN:INT32_MIN):0;
+            int64_t max_value=signed_values?(width==2u?INT16_MAX:INT32_MAX):(width==2u?UINT16_MAX:UINT32_MAX);
+            if(!jp_integer(&value,min_value,max_value,&item)){tx_internal_free(values.data);return 0;}
+            if(width==2u)buf_u16le(&values,(uint16_t)item);else buf_u32le(&values,(uint32_t)item);
+            actual++;
+            if(actual>max_count){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","dynamic header array is too large");}
+            }
+        if(!jp_end(&value)||!values.ok){tx_internal_free(values.data);return 0;}
+        }else{
+        const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
+        uint32_t offset=absolute_offset-base;uint64_t bytes=(uint64_t)current_count*width;
+        if(offset>source_len||bytes>source_len-offset)return mut_fail("TERRAX_STATE_ERROR","dynamic array is outside the active header");
+        actual=current_count;if(bytes){buf_init(&values,(uint32_t)bytes);buf_bytes(&values,source+offset,(uint32_t)bytes);}
+        }
+    if(!patch_expected_count(request,fields,count,count_name,actual,max_count)){tx_internal_free(values.data);return 0;}
+    if(max_count==UINT16_MAX)buf_u16le(header,actual);else buf_u32le(header,actual);
+    if(values.len)buf_bytes(header,values.data,values.len);tx_internal_free(values.data);return header->ok;
+    }
+
+static int encode_spawn_points(TxBuf *header,TxWorld *w,TxJsonParser *request,
+                               TxPatchField *fields,uint32_t count){
+    TxPatchField *field=patch_find(fields,count,"spawnPoints");
+    TxBuf values={0};uint32_t actual=0u;
+    if(field){
+        buf_init(&values,32u);if(!values.ok)return 0;
+        TxJsonParser value;patch_parser(request,field,&value);
+        if(!jp_take(&value,'[')){tx_internal_free(values.data);return 0;}
+        int first=1,done=0;
+        while(!done){
+            if(!jp_array_next(&value,&first,&done)){tx_internal_free(values.data);return 0;}
+            if(done)break;
+            if(!jp_take(&value,'{')){tx_internal_free(values.data);return 0;}
+            int object_first=1,object_done=0;uint32_t seen=0u;int64_t x=0,y=0;
+            while(!object_done){
+                char name[8];uint32_t name_len=0u;
+                if(!jp_member_next(&value,&object_first,&object_done)){tx_internal_free(values.data);return 0;}
+                if(object_done)break;
+                if(!jp_string(&value,name,sizeof(name),&name_len)||!jp_take(&value,':')){tx_internal_free(values.data);return 0;}
+                uint32_t bit=0u;
+                if(tx_streq_c(name,"x")){bit=1u;if(!jp_integer(&value,INT16_MIN,INT16_MAX,&x)){tx_internal_free(values.data);return 0;}}
+                else if(tx_streq_c(name,"y")){bit=2u;if(!jp_integer(&value,INT16_MIN,INT16_MAX,&y)){tx_internal_free(values.data);return 0;}}
+                else{tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","unknown spawn point field");}
+                if(seen&bit){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","duplicate spawn point field");}
+                seen|=bit;
+                }
+            if(seen!=3u){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","spawn point requires x and y");}
+            buf_u16le(&values,(uint16_t)x);buf_u16le(&values,(uint16_t)y);actual++;
+            if(actual>UINT8_MAX){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","spawn point array is too large");}
+            }
+        if(!jp_end(&value)||!values.ok){tx_internal_free(values.data);return 0;}
+        }else{
+        const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
+        uint32_t offset=w->extradSpawnPointManagerOff-base;actual=w->numExtradSpawnPointManager;uint32_t bytes=actual*4u;
+        if(offset>source_len||bytes>source_len-offset)return mut_fail("TERRAX_STATE_ERROR","spawn point data is outside the active header");
+        if(bytes){buf_init(&values,bytes);buf_bytes(&values,source+offset,bytes);}
+        }
+    if(!patch_expected_count(request,fields,count,"spawnPointCount",actual,UINT8_MAX)){tx_internal_free(values.data);return 0;}
+    buf_u8(header,(uint8_t)actual);if(values.len)buf_bytes(header,values.data,values.len);tx_internal_free(values.data);return header->ok;
+    }
+
+static int encode_manifest(TxBuf *header,TxWorld *w,TxJsonParser *request,
+                           TxPatchField *fields,uint32_t count){
+    TxPatchField *field=patch_find(fields,count,"manifestJson");
+    if(field){
+        uint32_t cap=field->value_end-field->value_start+1u;char *text=(char*)tx_alloc(cap);uint32_t length=0u;
+        if(!text)return mut_fail("TERRAX_WASM_OOM","failed to allocate manifest string");
+        TxJsonParser value;patch_parser(request,field,&value);int ok=jp_string(&value,text,cap,&length)&&jp_end(&value);
+        if(ok){buf_7bit(header,length);buf_bytes(header,text,length);}tx_internal_free(text);return ok&&header->ok;
+        }
+    const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
+    uint32_t offset=w->maniFestOff-base;int ok=0;uint32_t length=rd_7bit(source,source_len,&offset,&ok);
+    if(!ok||offset>source_len||length>source_len-offset)return mut_fail("TERRAX_STATE_ERROR","manifest is outside the active header");
+    buf_7bit(header,length);buf_bytes(header,source+offset,length);return header->ok;
+    }
+
+static int header_versions_compatible(uint32_t current,uint32_t next){
+    static const uint16_t gates[]={95u,99u,101u,104u,107u,108u,109u,112u,113u,118u,128u,131u,135u,140u,141u,170u,174u,178u,179u,180u,181u,195u,201u,204u,207u,208u,209u,211u,212u,215u,216u,217u,222u,223u,227u,238u,239u,240u,241u,249u,250u,251u,257u,259u,260u,261u,264u,266u,267u,284u,287u,288u,291u,296u,297u,299u,302u,304u,313u};
+    if(next<88u||next>400u)return 0;
+    for(uint32_t i=0;i<sizeof(gates)/sizeof(gates[0]);i++)if((current<gates[i])!=(next<gates[i]))return 0;
+    return 1;
+    }
+
+static int encode_header_model(TxWorld *w,TxJsonParser *request,TxPatchField *fields,
+                               uint32_t field_count,uint32_t version,TxBuf *header){
+#define WB(name,member) do{if(!write_bool_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WU8(name,member) do{if(!write_u8_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WU16(name,member) do{if(!write_u16_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WU32(name,member) do{if(!write_u32_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WI32(name,member) do{if(!write_i32_field(header,request,fields,field_count,name,w->member,NULL))return 0;}while(0)
+#define WU64(name,member) do{if(!write_u64_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WF32(name,member) do{if(!write_f32_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+#define WF64(name,member) do{if(!write_f64_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
+    char text[TX_MAX_NAME];uint32_t length=0u;
+    if(!patch_string(request,fields,field_count,"worldName",w->worldName,text,sizeof(text),&length))return 0;
+    buf_7bit(header,length);buf_bytes(header,text,length);
+    if(version>=179u){
+        if(!patch_string(request,fields,field_count,"seed",w->seed,text,sizeof(text),&length))return 0;
+        if(version==179u){uint64_t seed=0u;if(!decimal_u64(text,length,UINT32_MAX,&seed))return 0;buf_u32le(header,(uint32_t)seed);}
+        else{buf_7bit(header,length);buf_bytes(header,text,length);}
+        WU64("worldGeneratorVersion",worldGeneratorVersion);
+        }
+    if(version>=181u){
+        if(!patch_string(request,fields,field_count,"uniqueId",w->uuid,text,sizeof(text),&length))return 0;
+        uint8_t uuid[16];if(!uuid_text_to_bytes(text,length,uuid))return 0;buf_bytes(header,uuid,16u);
+        }
+    WI32("worldId",worldId);WI32("leftWorld",leftWorld);WI32("rightWorld",rightWorld);WI32("topWorld",topWorld);WI32("bottomWorld",bottomWorld);
+    int32_t max_y=0,max_x=0,spawn_x=0,spawn_y=0;
+    if(!write_i32_field(header,request,fields,field_count,"maxTilesY",w->maxTilesY,&max_y)||
+       !write_i32_field(header,request,fields,field_count,"maxTilesX",w->maxTilesX,&max_x))return 0;
+    if(max_x<=0||max_y<=0)return mut_fail("TERRAX_VALIDATION_ERROR","world dimensions must be positive");
+    if(version>=209u){
+        int32_t game_mode=0;if(!write_i32_field(header,request,fields,field_count,"gameMode",w->gameMode,&game_mode))return 0;
+        if(game_mode<0||game_mode>3)return mut_fail("TERRAX_VALIDATION_ERROR","gameMode must be between 0 and 3");
+        if(version>=222u)WB("drunkWorld",drunkWorld);if(version>=227u)WB("getGoodWorld",ftwWorld);
+        if(version>=238u)WB("tenthAnniversaryWorld",tenthAnniversaryWorld);if(version>=239u)WB("dontStarveWorld",dontStarveWorld);
+        if(version>=241u)WB("notTheBeesWorld",notTheBeesWorld);if(version>=249u)WB("remixWorld",remixWorld);
+        if(version>=266u)WB("noTrapsWorld",noTrapsWorld);if(version>=267u)WB("zenithWorld",zenithWorld);
+        if(version>=302u)WB("skyblockWorld",skyblockWorld);
+        }else if(version==208u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,2,&mode))return 0;buf_u8(header,mode==2?1u:0u);}
+    else if(version>=112u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,1,&mode))return 0;buf_u8(header,(uint8_t)mode);}
+    if(version>=141u)WU64("creationTime",creationTime);if(version>=284u)WU64("lastPlayed",lastPlayed);
+    WU8("moonType",moonType);
+    if(!write_fixed_u32_array(header,request,fields,field_count,"treeX",w->treeX,3u)||
+       !write_fixed_u32_array(header,request,fields,field_count,"treeStyle",w->treeStyle,4u)||
+       !write_fixed_u32_array(header,request,fields,field_count,"caveBackX",w->caveBackX,3u)||
+       !write_fixed_u32_array(header,request,fields,field_count,"caveBackStyle",w->caveBackStyle,4u))return 0;
+    WU32("iceBackStyle",iceBackStyle);WU32("jungleBackStyle",jungleBackStyle);WU32("hellBackStyle",hellBackStyle);
+    if(!write_i32_field(header,request,fields,field_count,"spawnTileX",w->spawnTileX,&spawn_x)||
+       !write_i32_field(header,request,fields,field_count,"spawnTileY",w->spawnTileY,&spawn_y))return 0;
+    if(spawn_x<0||spawn_x>=max_x||spawn_y<0||spawn_y>=max_y)return mut_fail("TERRAX_VALIDATION_ERROR","spawn coordinates are outside the world bounds");
+    WF64("worldSurface",worldSurface);WF64("rockLayer",rockLayer);WF64("time",gameTime);
+    WB("dayTime",isDayTime);WU32("moonPhase",moonPhase);WB("bloodMoon",isBloodMoon);WB("eclipse",isEclipse);
+    WI32("dungeonX",dungeonX);WI32("dungeonY",dungeonY);WB("crimson",isCrimson);
+    WB("downedEyeOfCthulhu",downedEye);WB("downedEaterOfWorldsOrBrainOfCthulhu",downedEaterBrain);
+    WB("downedSkeletron",downedSkeletron);WB("downedQueenBee",downedQueenBee);WB("downedDestroyer",downedDestroyer);
+    WB("downedTwins",downedTwins);WB("downedSkeletronPrime",downedSkeletronPrime);WB("downedAnyMechBoss",downedAnyMech);
+    WB("downedPlantera",downedPlantera);WB("downedGolem",downedGolem);if(version>=118u)WB("downedKingSlime",downedKingSlime);
+    WB("savedGoblin",savedGoblin);WB("savedWizard",savedWizard);WB("savedMech",savedMech);WB("downedGoblins",downedGoblins);
+    WB("downedClown",downedClown);WB("downedFrost",downedFrost);WB("downedPirates",downedPirates);
+    WB("shadowOrbSmashed",shadowOrbSmashed);WB("spawnMeteor",spawnMeteor);WU8("shadowOrbCount",shadowOrbCount);
+    WU32("altarCount",altarCount);WB("hardMode",hardMode);if(version>=257u)WB("afterPartyOfDoom",afterPartyOfDoom);
+    WU32("invasionDelay",invasionDelay);WU32("invasionSize",invasionSize);WU32("invasionType",invasionType);WF64("invasionX",invasionX);
+    if(version>=118u)WF64("slimeRainTime",slimeRainTime);if(version>=113u)WU8("sundialCooldown",sundialCooldown);
+    WB("raining",isRaining);WU32("rainTime",rainTime);WF32("maxRain",maxRain);
+    WI32("oreTierCobalt",oreTierCobalt);WI32("oreTierMythril",oreTierMythril);WI32("oreTierAdamantite",oreTierAdamantite);
+    WU8("treeBG1",bgTree);WU8("corruptBG",bgCorruption);WU8("jungleBG",bgJungle);WU8("snowBG",bgSnow);
+    WU8("hallowBG",bgHallow);WU8("crimsonBG",bgCrimson);WU8("desertBG",bgDesert);WU8("oceanBG",bgOcean);
+    WI32("cloudBGActive",cloudBgActive);WU16("numClouds",numClouds);WF32("windSpeedTarget",windSpeedSet);
+    if(version>=95u&&!encode_string_array(header,w,request,fields,field_count))return 0;
+    if(version>=99u)WB("savedAngler",savedAngler);if(version>=101u)WU32("anglerQuest",anglerQuest);
+    if(version>=104u)WB("savedStylist",savedStylist);if(version>=140u)WB("savedTaxCollector",savedTaxCollector);
+    if(version>=201u)WB("savedGolfer",savedGolfer);if(version>=107u)WU32("invasionSizeStart",invasionSizeStart);
+    if(version>=108u)WU32("cultistDelay",cultistDelay);
+    if(version>=109u){
+        if(!encode_numeric_array(header,w,request,fields,field_count,"killCount","killCountLength",w->numMobs,w->mobsOff,4u,0,UINT16_MAX)||
+           !encode_numeric_array(header,w,request,fields,field_count,"claimableBanners","claimableBannersLength",w->numClaimableBanners,w->claimableBannersOff,2u,0,UINT16_MAX))return 0;
+        }
+    if(version>=128u){
+        if(version>=140u)WB("fastForwardTimeToDawn",fastForwardTime);
+        if(version>=131u){
+            WB("downedFishron",downedFishron);
+            if(version>=140u){WB("downedMartians",downedMartians);WB("downedAncientCultist",downedLunaticCultist);WB("downedMoonlord",downedMoonlord);}
+            WB("downedHalloweenKing",downedHalloweenKing);WB("downedHalloweenTree",downedHalloweenTree);
+            WB("downedChristmasIceQueen",downedChristmasIceQueen);WB("downedChristmasSantank",downedSanta);WB("downedChristmasTree",downedChristmasTree);
+            }
+        }
+    if(version>=140u){
+        WB("downedTowerSolar",downedCelestialSolar);WB("downedTowerVortex",downedCelestialVortex);
+        WB("downedTowerNebula",downedCelestialNebula);WB("downedTowerStardust",downedCelestialStardust);
+        WB("towerActiveSolar",downedTowerSolar);WB("towerActiveVortex",downedTowerVortex);
+        WB("towerActiveNebula",downedTowerNebula);WB("towerActiveStardust",downedTowerStardust);WB("lunarApocalypseIsUp",downedTowerAncient);
+        }
+    if(version>=170u){
+        WB("partyManual",partyManual);WB("partyGenuine",partyGenuine);WU32("partyCooldown",partyCooldown);
+        if(!encode_numeric_array(header,w,request,fields,field_count,"partyCelebratingNpcNetIds","partyCelebratingNpcCount",w->partyCelebratingNPCSize,w->partyCelebratingNPCsOff,4u,1,UINT32_MAX))return 0;
+        }
+    if(version>=174u){WB("sandstormHappening",sandstormHappening);WU32("sandstormTimeLeft",sandStormTime);WF32("sandstormSeverity",sandStormSeverity);WF32("sandstormIntendedSeverity",sandstormIntendedSeverity);}
+    if(version>=178u){WB("savedBartender",savedBartender);WB("dd2DownedT1",downedInvasionT1);WB("dd2DownedT2",downedInvasionT2);WB("dd2DownedT3",downedInvasionT3);}
+    if(version>194u)WU8("mushroomBG",mushroomBg);if(version>=215u)WU8("underworldBG",undergroundDesertBg);
+    if(version>=195u){WU8("treeBG2",bgTree2);WU8("treeBG3",bgTree3);WU8("treeBG4",bgTree4);}
+    if(version>=204u)WB("combatBookWasUsed",combatBookUsed);
+    if(version>=207u){WU32("lanternNightCooldown",lanternNightCooldown);WB("lanternNightGenuine",lanternNightGenuine);WB("lanternNightManual",lanternNightManual);WB("lanternNightNextNightIsGenuine",lanternNightNextNightIsGenuine);}
+    if(version>=211u&&!encode_numeric_array(header,w,request,fields,field_count,"treeTopVariations","treeTopVariationCount",w->treetopSize,w->treeTopVariationsOff,4u,1,UINT32_MAX))return 0;
+    if(version>=212u){WB("forceHalloweenForToday",forceHalloweenForToday);WB("forceXMasForToday",forceXMasForToday);}
+    if(version>=216u){WU32("oreTierCopper",savedOreTiersCopper);WU32("oreTierIron",savedOreTiersIron);WU32("oreTierSilver",savedOreTiersSilver);WU32("oreTierGold",savedOreTiersGold);}
+    if(version>=217u){WB("boughtCat",boughtCat);WB("boughtDog",boughtDog);WB("boughtBunny",boughtBunny);}
+    if(version>=223u){WB("downedEmpressOfLight",downedEmpressOfLight);WB("downedQueenSlime",downedQueenSlime);}
+    if(version>=240u)WB("downedDeerclops",downedDeerclops);if(version>=250u)WB("unlockedSlimeBlueSpawn",unlockedSlimeBlueSpawn);
+    if(version>=251u){
+        WB("unlockedMerchantSpawn",unlockedMerchantSpawn);WB("unlockedDemolitionistSpawn",unlockedDemolitionistSpawn);
+        WB("unlockedPartyGirlSpawn",unlockedPartyGirlSpawn);WB("unlockedDyeTraderSpawn",unlockedDyeTraderSpawn);
+        WB("unlockedTruffleSpawn",unlockedTruffleSpawn);WB("unlockedArmsDealerSpawn",unlockedArmsDealerSpawn);
+        WB("unlockedNurseSpawn",unlockedNurseSpawn);WB("unlockedPrincessSpawn",unlockedPrincessSpawn);
+        }
+    if(version>=259u)WB("combatBookVolumeTwoWasUsed",combatBookVolumeTwoWasUsed);if(version>=260u)WB("peddlersSatchelWasUsed",peddlersSatchelWasUsed);
+    if(version>=261u){
+        WB("unlockedSlimeGreenSpawn",unlockedSlimeGreenSpawn);WB("unlockedSlimeOldSpawn",unlockedSlimeOldSpawn);
+        WB("unlockedSlimePurpleSpawn",unlockedSlimePurpleSpawn);WB("unlockedSlimeRainbowSpawn",unlockedSlimeRainbowSpawn);
+        WB("unlockedSlimeRedSpawn",unlockedSlimeRedSpawn);WB("unlockedSlimeYellowSpawn",unlockedSlimeYellowSpawn);WB("unlockedSlimeCopperSpawn",unlockedSlimeCopperSpawn);
+        }
+    if(version>=264u){WB("fastForwardTimeToDusk",fastForwardTimeToDusk);WU8("moondialCooldown",moondialCooldown);}
+    if(version>=287u){WB("forceHalloweenForever",forceHalloweenForever);WB("forceXMasForever",forcexmasForever);}
+    if(version>=288u)WB("vampireSeed",vampireSeed);if(version>=296u)WB("infectedSeed",infectedSeed);
+    if(version>=291u){WU32("meteorShowerCount",tempmeteorShowerCount);WU32("coinRain",tempcoinRain);}
+    if(version>=297u){WB("teamBasedSpawnsSeed",teambasedSpawnsSeed);if(!encode_spawn_points(header,w,request,fields,field_count))return 0;}
+    if(version>=304u)WB("dualDungeonsSeed",dualdungeonsSeed);if(version>=299u&&version<313u)WU32("legacySkip",legacySkip);
+    if(version>=299u&&!encode_manifest(header,w,request,fields,field_count))return 0;
+#undef WB
+#undef WU8
+#undef WU16
+#undef WU32
+#undef WI32
+#undef WU64
+#undef WF32
+#undef WF64
+    return header->ok;
+    }
+
+static int parse_format_bitmap(TxJsonParser *request,TxPatchField *fields,uint32_t count,
+                               uint16_t tile_type_count,const uint8_t *current,uint32_t current_len,
+                               TxBuf *bitmap,int *changed){
+    TxPatchField *field=patch_find(fields,count,"tileFrameImportantBitmap");
+    if(!field){*changed=0;return 1;}
+    uint32_t byte_count=((uint32_t)tile_type_count+7u)/8u;buf_init(bitmap,byte_count?byte_count:1u);
+    if(!bitmap->ok)return 0;for(uint32_t i=0;i<byte_count;i++)buf_u8(bitmap,0u);
+    TxJsonParser value;patch_parser(request,field,&value);if(!jp_take(&value,'['))return 0;
+    int first=1,done=0;uint32_t index=0u;
+    while(!done){
+        if(!jp_array_next(&value,&first,&done))return 0;if(done)break;
+        if(index>=tile_type_count)return mut_fail("TERRAX_VALIDATION_ERROR","tile bitmap has too many values");
+        int bit=0;if(!jp_bool(&value,&bit))return 0;if(bit)bitmap->data[index>>3u]|=(uint8_t)(1u<<(index&7u));index++;
+        }
+    if(index!=tile_type_count)return mut_fail("TERRAX_VALIDATION_ERROR","tile bitmap length must equal tileTypeCount");
+    if(!jp_end(&value))return 0;*changed=bitmap->len!=current_len;
+    if(!*changed)for(uint32_t i=0;i<bitmap->len;i++)if(bitmap->data[i]!=current[i]){*changed=1;break;}
+    return 1;
+    }
+
+static void refresh_format_positions(TxWorld *w){
+    uint32_t pointer_table_start=w->version>=135u?24u:4u;
+    uint32_t position=pointer_table_start+2u+(uint32_t)w->pointer_count*4u+2u+w->important_len;
+    for(uint32_t i=0;i<w->pointer_count&&i<TX_MAX_SECTIONS;i++){
+        w->positions[i]=position;
+        if(i<TX_MAX_SECTION_OVERRIDES&&w->section_overrides[i].active)
+            position+=w->section_overrides[i].len;
+        else position+=w->ends[i]-w->starts[i];
+        }
+    }
+
+int tx_mutate_header_patch(TxWorld *w,const char *request_text,uint32_t request_len,TxBuf *response){
+    if(!w||!request_text||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)return mut_error("TERRAX_INVALID_ARGUMENT","invalid header_patch request");
+    if(w->pointer_count<1u)return mut_error("TERRAX_NOT_SUPPORTED","world has no header section");
+    TxJsonParser request={request_text,request_len,0u};TxPatchField fields[TX_MAX_HEADER_PATCH_FIELDS];uint32_t field_count=0u;
+    if(!parse_patch_fields(&request,fields,&field_count))return -1;
+    int64_t version_value=w->version,type_value=w->file_type,revision_value=w->revision,tile_count_value=w->tile_type_count;uint64_t favorite=w->favorite;
+    if(!patch_i64(&request,fields,field_count,"version",w->version,88,400,&version_value)||
+       !patch_i64(&request,fields,field_count,"type",w->file_type,0,UINT8_MAX,&type_value)||
+       !patch_i64(&request,fields,field_count,"revision",w->revision,0,UINT32_MAX,&revision_value)||
+       !patch_u64(&request,fields,field_count,"favoriteFlags",w->favorite,&favorite)||
+       !patch_i64(&request,fields,field_count,"tileTypeCount",w->tile_type_count,0,UINT16_MAX,&tile_count_value))return -1;
+    uint32_t next_version=(uint32_t)version_value;
+    if(!header_versions_compatible(w->version,next_version))return mut_error("TERRAX_NOT_SUPPORTED","version change crosses an unsupported header layout boundary");
+    char magic[8];uint32_t magic_len=0u;
+    if(!patch_string(&request,fields,field_count,"magic",w->magic[0]?w->magic:"relogic",magic,sizeof(magic),&magic_len))return -1;
+    if(next_version>=135u&&(!tx_streq_c(magic,"relogic")&&!tx_streq_c(magic,"xindong")))return mut_error("TERRAX_VALIDATION_ERROR","magic must be relogic or xindong");
+    TxBuf bitmap={0};int bitmap_changed=0;
+    if(!parse_format_bitmap(&request,fields,field_count,(uint16_t)tile_count_value,w->important,w->important_len,&bitmap,&bitmap_changed)){tx_internal_free(bitmap.data);return -1;}
+    if((uint16_t)tile_count_value!=w->tile_type_count&&!patch_find(fields,field_count,"tileFrameImportantBitmap")){
+        tx_internal_free(bitmap.data);return mut_error("TERRAX_VALIDATION_ERROR","changing tileTypeCount requires tileFrameImportantBitmap");
+        }
+    uint32_t source_len=w->section_overrides[0].active?w->section_overrides[0].len:w->ends[0]-w->starts[0];
+    TxBuf encoded;buf_init(&encoded,source_len+4096u);
+    if(!encoded.ok){tx_internal_free(bitmap.data);return mut_error("TERRAX_WASM_OOM","failed to allocate header encoder");}
+    if(!encode_header_model(w,&request,fields,field_count,next_version,&encoded)){tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
+    for(uint32_t i=0;i<field_count;i++)if(!fields[i].used){
+        tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return mut_error("TERRAX_NOT_SUPPORTED","header or format field is not writable in this WLD version");
+        }
+    TxWorld candidate=*w;candidate.version=next_version;candidate.section_overrides[0].active=1u;
+    candidate.section_overrides[0].data=encoded.data;candidate.section_overrides[0].len=encoded.len;
+    if(!parse_header(&candidate)){tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
+    buf_cstr(response,"{\"status\":\"ok\",\"updated\":");json_u32(response,field_count);buf_u8(response,'}');
+    int result=set_result_buf(response);if(result<0){tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
+    if(!set_section_override_data(w,0,encoded.data,encoded.len)){discard_response(response);tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
+    w->version=next_version;memset(w->magic,0,sizeof(w->magic));memcpy(w->magic,magic,magic_len);
+    w->file_type=(uint8_t)type_value;w->revision=(uint32_t)revision_value;w->favorite=favorite;w->tile_type_count=(uint16_t)tile_count_value;
+    if(bitmap.data&&bitmap_changed){
+        if(w->important_override)tx_internal_free(w->important_override);
+        w->important_override=bitmap.data;w->important=bitmap.data;w->important_len=bitmap.len;bitmap.data=NULL;
+        }
+    tx_internal_free(bitmap.data);w->format_dirty=1u;refresh_format_positions(w);
+    if(!parse_header(w)){discard_response(response);return mut_error("TERRAX_STATE_ERROR","encoded header could not be reopened");}
     return result;
     }
 

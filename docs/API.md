@@ -573,11 +573,19 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 #### `header_patch`
 
-只修改当前 WLD 版本中有明确字节位置的 header 布尔字段。请求只允许一个 `patch` 对象；字段名必须与 `terra_section_get_json("header")` 返回的布尔字段名完全一致。允许的分组包括特殊种子、Boss/事件进度、已救 NPC、节日、宠物和已解锁 NPC/史莱姆；数字、字符串、未知字段、重复字段和空补丁均拒绝。未修改的 header 字节保持原样。
+通过一个 `patch` 对象统一修改当前 WLD 的完整 header/format 可编码模型，不再按页面用途拆分字段类别。header 可写字段以当前版本 `terra_section_get_json("header")` 返回值为准，包括标量、布尔值、固定数组、动态字符串/数字数组、出生点列表和 `manifestJson`；派生的 `creationTimeDate`、`lastPlayedDate` 不单独写入。format 支持 `version`、`magic`、`type`、`revision`、`favoriteFlags`、`tileTypeCount` 和 `tileFrameImportantBitmap`；`pointerCount`、`positions` 由保存器重新计算。跨越 header 布局门槛的版本变更会被拒绝，修改 `tileTypeCount` 时必须同时提供等长位图。
+
+`magic` 只能是 `relogic` 或 `xindong`，`uniqueId` 必须是标准 UUID，64 位整数可传 JSON 整数或十进制字符串，动态数组的 count 必须与数组长度一致，出生点必须位于目标世界边界内。未知字段、当前版本不存在的字段、重复字段和空 patch 都会原子拒绝。调用方可以只提交所需字段；页面层是否开放尺寸、种子和版本编辑不影响 WASM 接口能力。
 
 ```json
 {
   "patch": {
+    "worldName": "新世界名称",
+    "gameMode": 1,
+    "spawnTileX": 4201,
+    "spawnTileY": 2254,
+    "crimson": true,
+    "magic": "xindong",
     "drunkWorld": true,
     "downedEyeOfCthulhu": true,
     "savedGoblin": true,
@@ -586,7 +594,7 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 }
 ```
 
-响应：`{"status":"ok","updated":4}`。
+响应中的 `updated` 是本次 patch 字段数；上例为 `{"status":"ok","updated":10}`。
 
 #### `replace_chests`
 

@@ -122,6 +122,7 @@ typedef struct TxWorld {
     /* Format metadata (parsed from binary) */
     uint32_t version;
     char     magic[8];          /* "relogic" or "xindong" */
+    uint8_t  format_dirty;      /* version/magic changed and must be serialized */
     uint8_t  file_type;
     uint32_t revision;
     uint64_t favorite;
@@ -132,6 +133,7 @@ typedef struct TxWorld {
     uint32_t format_len;                  /* byte length of format section */
     uint16_t tile_type_count;
     uint8_t* important;         /* pointer into file[] for tile importance bitmap */
+    uint8_t* important_override;/* owned replacement for a patched format bitmap */
     uint32_t important_len;
 
     /* Header metadata (parsed from binary) */

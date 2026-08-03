@@ -25,6 +25,19 @@ test("local builds deploy only when an explicit destination is supplied", () => 
   assert.match(buildScript, /check-artifact-size\.mjs/);
 });
 
+test("clean deployments refresh both manifest surfaces without a UTF-8 BOM", () => {
+  assert.match(buildScript, /UTF8Encoding\(\$false\)/);
+  assert.match(buildScript, /terra-manifest-browser\.mjs/);
+  assert.match(buildScript, /WriteAllText/);
+  assert.match(buildScript, /terrax_world_wasm["']?,\s*["']terrax_world_wasm_web/);
+  assert.doesNotMatch(buildScript, /terra\.manifest\.json[^\n]*Set-Content[^\n]*-Encoding\s+utf8/i);
+});
+
+test("the schema-heavy metadata encoder is size-optimized without changing the global release profile", () => {
+  assert.match(cmake, /terra_mutators\.c[\s\S]*PROPERTIES\s+COMPILE_OPTIONS\s+"-Oz"/);
+  assert.match(cmake, /set\(TERRAX_OPTIMIZE_FLAG\s+"-O3"/);
+});
+
 test("changing exports.txt automatically invalidates CMake configuration", () => {
   assert.match(cmake, /CMAKE_CONFIGURE_DEPENDS[\s\S]*NODE_EXPORTS_FILE/);
 });

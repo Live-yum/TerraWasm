@@ -229,14 +229,21 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     }
 
 #define TX_RD_HEADER_BOOL(member,json_name) do { \
-    tx_record_header_bool(w,json_name,off,(uint32_t)((uint8_t*)&w->member-(uint8_t*)w)); \
+    tx_record_header_bool(w,json_name,off+header_offset_base,(uint32_t)((uint8_t*)&w->member-(uint8_t*)w)); \
     w->member=rd_u8(p,len,&off); \
     } while(0)
 
 /* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */int parse_header(TxWorld *w){
+    uint32_t header_offset_base=0u;
     uint32_t off=w->starts[0];
     uint32_t len=w->file_len;
     uint8_t *p=w->file;
+    if (w->section_overrides[0].active){
+        p=w->section_overrides[0].data;
+        len=w->section_overrides[0].len;
+        off=0u;
+        header_offset_base=w->starts[0];
+        }
     int ok;
     w->header_bool_field_count=0u;
     /* name */rd_string_copy(p,len,&off,w->worldName,TX_MAX_NAME);
@@ -375,7 +382,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     w->windSpeedSet=rd_f32le(p,len,&off);
     /* Angler (>=95) */if (w->version>=95u){
         w->anglerFinishedSize=rd_u32le(p,len,&off);
-        w->anglersOff=off;
+        w->anglersOff=off+header_offset_base;
         for (uint32_t i=0;
         i<w->anglerFinishedSize;
         i++)rd_skip_string_value(p,len,&off);
@@ -389,7 +396,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     if (w->version>=108u)w->cultistDelay=rd_u32le(p,len,&off);
     /* Kill counts (>=109) */if (w->version>=109u){
         w->numMobs=rd_u16le(p,len,&off);
-        w->mobsOff=off;
+        w->mobsOff=off+header_offset_base;
         if (!terra_reader_take_count(&off,w->numMobs,4u,len)) {
             tx_set_error("TERRAX_TRUNCATED_HEADER","mob data exceeds section bounds");
             return 0;
@@ -397,7 +404,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     /* Banners */if (w->version>=109u){
         w->numClaimableBanners=rd_u16le(p,len,&off);
-        w->claimableBannersOff=off;
+        w->claimableBannersOff=off+header_offset_base;
         if (!terra_reader_take_count(&off,w->numClaimableBanners,2u,len)) {
             tx_set_error("TERRAX_TRUNCATED_HEADER","banner data exceeds section bounds");
             return 0;
@@ -435,7 +442,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         TX_RD_HEADER_BOOL(partyGenuine,"partyGenuine");
         w->partyCooldown=rd_u32le(p,len,&off);
         w->partyCelebratingNPCSize=rd_u32le(p,len,&off);
-        w->partyCelebratingNPCsOff=off;
+        w->partyCelebratingNPCsOff=off+header_offset_base;
         if (!terra_reader_take_count(&off,w->partyCelebratingNPCSize,4u,len)) {
             tx_set_error("TERRAX_TRUNCATED_HEADER","party data exceeds section bounds");
             return 0;
@@ -469,7 +476,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     /* treeTopVariations (>=211) */if (w->version>=211u){
         w->treetopSize=rd_u32le(p,len,&off);
-        w->treeTopVariationsOff=off;
+        w->treeTopVariationsOff=off+header_offset_base;
         if (!terra_reader_take_count(&off,w->treetopSize,4u,len)) {
             tx_set_error("TERRAX_TRUNCATED_HEADER","tree data exceeds section bounds");
             return 0;
@@ -534,7 +541,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     /* teamBasedSpawnsSeed + spawnPointManager (>=297) */if (w->version>=297u){
         TX_RD_HEADER_BOOL(teambasedSpawnsSeed,"teamBasedSpawnsSeed");
         w->numExtradSpawnPointManager=rd_u8(p,len,&off);
-        w->extradSpawnPointManagerOff=off;
+        w->extradSpawnPointManagerOff=off+header_offset_base;
         if (!terra_reader_take_count(&off,(uint32_t)w->numExtradSpawnPointManager,4u,len)) {
             tx_set_error("TERRAX_TRUNCATED_HEADER","spawn point data exceeds section bounds");
             return 0;
@@ -543,7 +550,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     /* dualDungeonsSeed (>=304) */if (w->version>=304u)TX_RD_HEADER_BOOL(dualdungeonsSeed,"dualDungeonsSeed");
     /* legacySkip (>=299 && <313) */if (w->version>=299u&&w->version<313u)w->legacySkip=rd_u32le(p,len,&off);
     /* manifestJson (>=299) */if (w->version>=299u){
-        w->maniFestOff=off;
+        w->maniFestOff=off+header_offset_base;
         uint32_t slen=0;
         ok=0;
         slen=rd_7bit(p,len,&off,&ok);
@@ -786,6 +793,12 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
 /* --- header section (all fields, matching buildHeaderJson order) --- */void serialize_header_json(TxWorld *w,TxBuf *b){
     uint8_t *p=w->file;
     uint32_t flen=w->file_len;
+    uint32_t header_base=0u;
+    if (w->section_overrides[0].active){
+        p=w->section_overrides[0].data;
+        flen=w->section_overrides[0].len;
+        header_base=w->starts[0];
+        }
     buf_cstr(b," { \"worldName\":");
     json_string(b,w->worldName);
     buf_cstr(b,",\"seed\":");
@@ -994,7 +1007,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->anglerFinishedSize);
     buf_cstr(b,",\"anglerWhoFinishedToday\":[");
     {
-        uint32_t aoff=w->anglersOff;
+        uint32_t aoff=w->anglersOff-header_base;
         for (uint32_t i=0;
         i<w->anglerFinishedSize;
         i++){
@@ -1022,7 +1035,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->numMobs);
     buf_cstr(b,",\"killCount\":[");
     {
-        uint32_t moff=w->mobsOff;
+        uint32_t moff=w->mobsOff-header_base;
         for (uint32_t i=0;
         i<w->numMobs;
         i++){
@@ -1034,7 +1047,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->numClaimableBanners);
     buf_cstr(b,",\"claimableBanners\":[");
     {
-        uint32_t boff=w->claimableBannersOff;
+        uint32_t boff=w->claimableBannersOff-header_base;
         for (uint32_t i=0;
         i<w->numClaimableBanners;
         i++){
@@ -1090,7 +1103,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->partyCelebratingNPCSize);
     buf_cstr(b,",\"partyCelebratingNpcNetIds\":[");
     {
-        uint32_t poff=w->partyCelebratingNPCsOff;
+        uint32_t poff=w->partyCelebratingNPCsOff-header_base;
         for (uint32_t i=0;
         i<w->partyCelebratingNPCSize;
         i++){
@@ -1138,7 +1151,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->treetopSize);
     buf_cstr(b,",\"treeTopVariations\":[");
     {
-        uint32_t toff=w->treeTopVariationsOff;
+        uint32_t toff=w->treeTopVariationsOff-header_base;
         for (uint32_t i=0;
         i<w->treetopSize;
         i++){
@@ -1228,7 +1241,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->numExtradSpawnPointManager);
     buf_cstr(b,",\"spawnPoints\":[");
     {
-        uint32_t soff=w->extradSpawnPointManagerOff;
+        uint32_t soff=w->extradSpawnPointManagerOff-header_base;
         for (uint8_t i=0;
         i<w->numExtradSpawnPointManager;
         i++){
@@ -1247,7 +1260,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->legacySkip);
     /* manifestJson */buf_cstr(b,",\"manifestJson\":");
     {
-        uint32_t moff=w->maniFestOff;
+        uint32_t moff=w->maniFestOff-header_base;
         char manifest_buf[4096];
         uint32_t cap=w->maniFestLen<4095u?w->maniFestLen+1u:4096u;
         rd_string_copy(p,flen,&moff,manifest_buf,cap);
