@@ -121,6 +121,49 @@ static int expect(int condition, const char* message) {
     return 0;
 }
 
+static void write_u16le(unsigned char* data, size_t offset, uint16_t value) {
+    data[offset] = (unsigned char)value;
+    data[offset + 1u] = (unsigned char)(value >> 8u);
+}
+
+static void write_u32le(unsigned char* data, size_t offset, uint32_t value) {
+    data[offset] = (unsigned char)value;
+    data[offset + 1u] = (unsigned char)(value >> 8u);
+    data[offset + 2u] = (unsigned char)(value >> 16u);
+    data[offset + 3u] = (unsigned char)(value >> 24u);
+}
+
+static int test_header_section_bounds(void) {
+    unsigned char candidate[32] = {0};
+    char error[256] = {0};
+    uint32_t handle = 0;
+    uint64_t required = 0;
+
+    write_u32le(candidate, 0u, 88u);
+    write_u16le(candidate, 4u, 2u);
+    write_u32le(candidate, 6u, 16u);
+    write_u32le(candidate, 10u, 18u);
+    write_u16le(candidate, 14u, 0u);
+    candidate[16] = 2u;
+    candidate[17] = 'A';
+    candidate[18] = 'B';
+
+    if (!expect(
+        terra_world_open_from_buffer(candidate, sizeof(candidate), &handle) == TERRAX_WORLD_STATUS_PARSE_ERROR,
+        "native header contract: cross-section string was accepted")) return 0;
+    if (!expect(handle == 0u, "native header contract: failed open returned a handle")) return 0;
+    if (!expect(
+        terra_info_get_last_error_json(error, sizeof(error), &required) == TERRAX_WORLD_STATUS_OK,
+        "native header contract: failed to read parser error")) return 0;
+    if (!expect(
+        strstr(error, "\"code\":\"TERRAX_TRUNCATED_HEADER\"") != NULL &&
+        strstr(error, "world name exceeds section bounds") != NULL,
+        "native header contract: wrong parser error")) return 0;
+
+    puts("native header contract: section bounds enforced");
+    return 1;
+}
+
 static int test_native_abi_contract(void) {
     const char* capabilities = terra_capabilities();
     const char* build = terra_build_info_json();
@@ -213,6 +256,7 @@ cleanup:
 
 int main(void) {
     if (!test_native_abi_contract()) return 1;
-    if (!test_failed_save_preserves_destination()) return 2;
+    if (!test_header_section_bounds()) return 2;
+    if (!test_failed_save_preserves_destination()) return 3;
     return 0;
 }

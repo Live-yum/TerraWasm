@@ -23,6 +23,7 @@ set(SOURCES
     "${SRC_DIR}/terra_mem.c"
     "${SRC_DIR}/terra_json.c"
     "${SRC_DIR}/terra_wld.c"
+    "${SRC_DIR}/terra_wld_guard.c"
     "${SRC_DIR}/terra_api.c"
     "${SRC_DIR}/terra_ops.c"
     "${SRC_DIR}/terra_mutators.c"
@@ -33,6 +34,12 @@ set(SOURCES
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_hash.c"
+)
+
+# Keep the established decoder internal and expose only the guarded entry point.
+set_source_files_properties(
+    "${SRC_DIR}/terra_wld.c"
+    PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
 )
 
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
@@ -207,6 +214,14 @@ else()
             target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_native_contract COMMAND terra_native_contract)
+        add_executable(terra_error_json_contract tests/error_json_contract.c)
+        target_link_libraries(terra_error_json_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_error_json_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_error_json_contract COMMAND terra_error_json_contract)
         if(TERRAWASM_FUZZ_SMOKE)
             add_executable(terra_fuzz_smoke
                 tests/fuzz/fuzz_smoke.c

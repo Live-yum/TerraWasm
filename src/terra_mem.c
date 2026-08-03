@@ -144,6 +144,16 @@ static void tx_unlink_root(TxAllocHeader* header, uint32_t domain) {
     else *tail = header->root.prev;
 }
 
+static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
+    if (!header) return;
+    tx_unlink_root(header, domain);
+    if (domain == TX_DOMAIN_NATIVE) tx_native_live_bytes -= header->root.size;
+    else tx_bridge_live_bytes -= header->root.size;
+    header->root.magic = 0;
+    header->root.self = 0;
+    free(header);
+}
+
 static void* tx_new_root(uint32_t size, uint32_t domain) {
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
@@ -181,13 +191,7 @@ uint32_t tx_malloc(uint32_t size) {
 
 void tx_free(uint32_t ptr) {
     void* payload = (void*)(uintptr_t)ptr;
-    TxAllocHeader* header = tx_find_root(payload, TX_DOMAIN_BRIDGE);
-    if (!header) return;
-    tx_unlink_root(header, TX_DOMAIN_BRIDGE);
-    tx_bridge_live_bytes -= header->root.size;
-    header->root.magic = 0;
-    header->root.self = 0;
-    free(header);
+    tx_release_root(tx_find_root(payload, TX_DOMAIN_BRIDGE), TX_DOMAIN_BRIDGE);
 }
 
 uint32_t tx_bridge_allocation_size(uint32_t ptr) {
@@ -201,13 +205,7 @@ uint8_t* tx_alloc(uint32_t size) {
 }
 
 void tx_internal_free(void* payload) {
-    TxAllocHeader* header = tx_find_root(payload, TX_DOMAIN_NATIVE);
-    if (!header) return;
-    tx_unlink_root(header, TX_DOMAIN_NATIVE);
-    tx_native_live_bytes -= header->root.size;
-    header->root.magic = 0;
-    header->root.self = 0;
-    free(header);
+    tx_release_root(tx_find_root(payload, TX_DOMAIN_NATIVE), TX_DOMAIN_NATIVE);
 }
 
 void* tx_internal_realloc(void* payload, uint32_t size) {
@@ -275,8 +273,10 @@ uint32_t tx_mark(void) {
 }
 
 void tx_rewind(uint32_t mark) {
-    while (tx_native_tail && tx_native_tail->root.sequence > mark)
-        tx_internal_free((uint8_t*)tx_native_tail + sizeof(TxAllocHeader));
+    while (tx_native_tail && tx_native_tail->root.sequence > mark) {
+        TxAllocHeader* tail = tx_native_tail;
+        tx_release_root(tail, TX_DOMAIN_NATIVE);
+    }
     if (!tx_native_head && mark == 0u) tx_native_sequence = 0u;
 }
 
@@ -374,54 +374,65 @@ void tx_clear_error(void) {
     tx_last_error[0] = 0;
 }
 
+static int tx_error_append_raw(const char* text, uint32_t* position) {
+    if (!text || !position) return 0;
+    while (*text) {
+        if (*position + 1u >= sizeof(tx_last_error)) return 0;
+        tx_last_error[(*position)++] = *text++;
+    }
+    return 1;
+}
+
+static uint32_t tx_error_escape_char(unsigned char ch, char encoded[6]) {
+    static const char hex[] = "0123456789abcdef";
+    switch (ch) {
+        case '"': encoded[0] = '\\'; encoded[1] = '"'; return 2u;
+        case '\\': encoded[0] = '\\'; encoded[1] = '\\'; return 2u;
+        case '\b': encoded[0] = '\\'; encoded[1] = 'b'; return 2u;
+        case '\f': encoded[0] = '\\'; encoded[1] = 'f'; return 2u;
+        case '\n': encoded[0] = '\\'; encoded[1] = 'n'; return 2u;
+        case '\r': encoded[0] = '\\'; encoded[1] = 'r'; return 2u;
+        case '\t': encoded[0] = '\\'; encoded[1] = 't'; return 2u;
+        default:
+            if (ch < 0x20u) {
+                encoded[0] = '\\'; encoded[1] = 'u'; encoded[2] = '0'; encoded[3] = '0';
+                encoded[4] = hex[ch >> 4u]; encoded[5] = hex[ch & 0x0fu];
+                return 6u;
+            }
+            encoded[0] = (char)ch;
+            return 1u;
+    }
+}
+
+static void tx_error_append_json_text(const char* text, uint32_t* position, uint32_t reserve) {
+    const unsigned char* cursor = (const unsigned char*)(text ? text : "");
+    while (*cursor) {
+        char encoded[6];
+        uint32_t encoded_len = tx_error_escape_char(*cursor++, encoded);
+        if (*position + encoded_len + reserve + 1u > sizeof(tx_last_error)) return;
+        for (uint32_t i = 0; i < encoded_len; i++) tx_last_error[(*position)++] = encoded[i];
+    }
+}
+
 void tx_set_error(const char* code, const char* message) {
-    /* Preserve the public NOT_SUPPORTED status through operation dispatch.
-     * Other legacy errors retain the negative sentinel and are surfaced as
-     * INTERNAL_ERROR by terra_op_execute_json. */
+    /* Preserve the public NOT_SUPPORTED status through operation dispatch. */
     tx_last_status = tx_streq_c(code, "TERRAX_NOT_SUPPORTED")
         ? TERRAX_WORLD_STATUS_NOT_SUPPORTED
         : -1;
-    uint32_t p = 0;
+
     const char* prefix = "{\"code\":\"";
-    const char* mid = "\",\"message\":\"";
+    const char* middle = "\",\"message\":\"";
     const char* suffix = "\"}";
-
-    for (uint32_t i = 0; prefix[i] && p + 1u < sizeof(tx_last_error); i++)
-        tx_last_error[p++] = prefix[i];
-
-    const char* c = code ? code : "TERRAX_WASM_ERROR";
-    for (uint32_t i = 0; c[i] && p + 1u < sizeof(tx_last_error); i++) {
-        char ch = c[i];
-        if (ch == '\\') {
-            if (p + 2u < sizeof(tx_last_error)) {
-                tx_last_error[p++] = '\\';
-                tx_last_error[p++] = '\\';
-            }
-        } else {
-            tx_last_error[p++] = ch;
-        }
-    }
-
-    for (uint32_t i = 0; mid[i] && p + 1u < sizeof(tx_last_error); i++)
-        tx_last_error[p++] = mid[i];
-
-    const char* m = message ? message : "error";
-    for (uint32_t i = 0; m[i] && p + 1u < sizeof(tx_last_error); i++) {
-        char ch = m[i];
-        if (ch == '\\') {
-            if (p + 2u < sizeof(tx_last_error)) {
-                tx_last_error[p++] = '\\';
-                tx_last_error[p++] = '\\';
-            }
-        } else {
-            tx_last_error[p++] = ch;
-        }
-    }
-
-    for (uint32_t i = 0; suffix[i] && p + 1u < sizeof(tx_last_error); i++)
-        tx_last_error[p++] = suffix[i];
-
-    tx_last_error[p] = 0;
+    uint32_t position = 0;
+    (void)tx_error_append_raw(prefix, &position);
+    tx_error_append_json_text(
+        code ? code : "TERRAX_WASM_ERROR",
+        &position,
+        tx_strlen(middle) + tx_strlen(suffix));
+    (void)tx_error_append_raw(middle, &position);
+    tx_error_append_json_text(message ? message : "error", &position, tx_strlen(suffix));
+    (void)tx_error_append_raw(suffix, &position);
+    tx_last_error[position] = 0;
 }
 
 /* ---------- Result helpers ---------- */
