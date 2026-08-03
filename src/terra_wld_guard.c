@@ -49,15 +49,24 @@ static int validate_header_prefix(TxWorld* world) {
     uint32_t length;
     uint32_t offset;
 
-    if (!world || !world->file || world->pointer_count == 0u) return 0;
-    data = world->file;
-    length = world->file_len;
-    offset = world->starts[0];
+    if (!world || world->pointer_count == 0u) {
+        tx_set_error("TERRAX_BAD_POINTERS", "world has no header section");
+        return 0;
+    }
 
     if (world->section_overrides[0].active) {
         data = world->section_overrides[0].data;
         length = world->section_overrides[0].len;
         offset = 0u;
+    } else {
+        if (!world->file || world->starts[0] > world->ends[0] ||
+            world->ends[0] > world->file_len) {
+            tx_set_error("TERRAX_BAD_POINTERS", "header section bounds are invalid");
+            return 0;
+        }
+        data = world->file;
+        length = world->ends[0];
+        offset = world->starts[0];
     }
 
     if (!data || offset > length || !guard_skip_string(data, length, &offset)) {

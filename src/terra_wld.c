@@ -235,14 +235,28 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
 
 /* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */int parse_header(TxWorld *w){
     uint32_t header_offset_base=0u;
-    uint32_t off=w->starts[0];
-    uint32_t len=w->file_len;
-    uint8_t *p=w->file;
+    uint32_t off=0u;
+    uint32_t len=0u;
+    uint8_t *p=NULL;
+    if (!w) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT","null world");
+        return 0;
+        }
     if (w->section_overrides[0].active){
         p=w->section_overrides[0].data;
         len=w->section_overrides[0].len;
         off=0u;
         header_offset_base=w->starts[0];
+        }
+    else{
+        if (!w->file||w->pointer_count==0u||w->starts[0]>w->ends[0]||
+            w->ends[0]>w->file_len){
+            tx_set_error("TERRAX_BAD_POINTERS","header section bounds are invalid");
+            return 0;
+            }
+        p=w->file;
+        off=w->starts[0];
+        len=w->ends[0];
         }
     int ok;
     w->header_bool_field_count=0u;

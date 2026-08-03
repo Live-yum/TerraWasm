@@ -20,6 +20,39 @@ function alloc(M, bytes) {
   return ptr;
 }
 
+function readLastError(M) {
+  const requiredPtr = M._tx_malloc(8);
+  assert.notEqual(requiredPtr, 0);
+  let outputPtr = 0;
+  try {
+    assert.equal(M._terra_info_get_last_error_json(0, 0n, requiredPtr), 0);
+    const required = Number(new DataView(M.wasmMemory.buffer).getBigUint64(requiredPtr, true));
+    outputPtr = M._tx_malloc(required);
+    assert.notEqual(outputPtr, 0);
+    assert.equal(
+      M._terra_info_get_last_error_json(outputPtr, BigInt(required), requiredPtr),
+      0,
+    );
+    return JSON.parse(M.UTF8ToString(outputPtr));
+  } finally {
+    if (outputPtr) M._tx_free(outputPtr);
+    M._tx_free(requiredPtr);
+  }
+}
+
+function makeCrossSectionHeader() {
+  const candidate = Buffer.alloc(32);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(2, 4);
+  candidate.writeUInt32LE(16, 6);
+  candidate.writeUInt32LE(18, 10);
+  candidate.writeUInt16LE(0, 14);
+  candidate[16] = 2;
+  candidate[17] = 0x41;
+  candidate[18] = 0x42;
+  return candidate;
+}
+
 test("truncated and corrupted world buffers fail as statuses without crashing", async () => {
   const M = await TerraWorldWasm();
   const candidates = [
@@ -58,4 +91,24 @@ test("an overlong header string is rejected without reading beyond the world buf
   assert.equal(M._terra_world_task_get_world_handle(task), 0);
   assert.equal(M._terra_world_task_close(task), 0);
   M._tx_free(inputPtr);
+});
+
+test("a header string cannot cross into the next WLD section", async () => {
+  const M = await TerraWorldWasm();
+  const candidate = makeCrossSectionHeader();
+  const inputPtr = alloc(M, candidate);
+  const handlePtr = M._tx_malloc(4);
+  assert.notEqual(handlePtr, 0);
+  try {
+    const status = M._terra_world_open_from_buffer(inputPtr, candidate.length, handlePtr);
+    assert.equal(status, 5);
+    assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
+    assert.deepEqual(readLastError(M), {
+      code: "TERRAX_TRUNCATED_HEADER",
+      message: "world name exceeds section bounds",
+    });
+  } finally {
+    M._tx_free(handlePtr);
+    M._tx_free(inputPtr);
+  }
 });
