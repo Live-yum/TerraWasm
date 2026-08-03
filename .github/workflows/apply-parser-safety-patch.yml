@@ -1,0 +1,38 @@
+name: Apply parser safety patch
+
+on:
+  push:
+    branches:
+      - agent/parser-safety-hardening
+    paths:
+      - scripts/apply-parser-safety-patch.py
+      - .github/workflows/apply-parser-safety-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/parser-safety-hardening
+          fetch-depth: 0
+      - name: Patch bounded string reader
+        run: python scripts/apply-parser-safety-patch.py
+      - name: Validate source diff
+        run: git diff --check
+      - name: Commit patched source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- src/terra_wld.c; then
+            echo "Source already patched"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/terra_wld.c
+          git commit -m "fix: stop truncated string reads"
+          git push origin HEAD:agent/parser-safety-hardening
