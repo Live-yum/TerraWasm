@@ -208,13 +208,13 @@ static int validate_chest_strings(TxWorld* world) {
     uint16_t legacy_slots = 0u;
 
     if (world->pointer_count <= 2u) return 1;
-    if (!guard_section_view(world, 2u, &data, &offset, &length)
-            || !guard_read_u16(data, length, &offset, &chest_count)) {
-        tx_set_error("TERRAX_TRUNCATED_CHESTS", "chest section count is truncated");
+    if (!guard_section_view(world, 2u, &data, &offset, &length)) {
+        tx_set_error("TERRAX_TRUNCATED_CHESTS", "chest section bounds are invalid");
         return 0;
     }
-    if (chest_count > 8192u) {
-        tx_set_error("TERRAX_BAD_CHESTS", "chest count exceeds the supported limit");
+    if (offset == length) return 1;
+    if (!guard_read_u16(data, length, &offset, &chest_count)) {
+        tx_set_error("TERRAX_TRUNCATED_CHESTS", "chest section count is truncated");
         return 0;
     }
     if (world->version < 294u
@@ -258,8 +258,12 @@ static int validate_sign_strings(TxWorld* world) {
     uint16_t sign_count;
 
     if (world->pointer_count <= 3u) return 1;
-    if (!guard_section_view(world, 3u, &data, &offset, &length)
-            || !guard_read_u16(data, length, &offset, &sign_count)) {
+    if (!guard_section_view(world, 3u, &data, &offset, &length)) {
+        tx_set_error("TERRAX_TRUNCATED_SIGNS", "sign section bounds are invalid");
+        return 0;
+    }
+    if (offset == length) return 1;
+    if (!guard_read_u16(data, length, &offset, &sign_count)) {
         tx_set_error("TERRAX_TRUNCATED_SIGNS", "sign section count is truncated");
         return 0;
     }
@@ -283,6 +287,7 @@ static int validate_npc_strings(TxWorld* world) {
         tx_set_error("TERRAX_TRUNCATED_NPCS", "NPC section bounds are invalid");
         return 0;
     }
+    if (offset == length) return 1;
 
     if (world->version >= 268u) {
         uint32_t shimmered_count;
