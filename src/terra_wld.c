@@ -233,7 +233,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     w->member=rd_u8(p,len,&off); \
     } while(0)
 
-/* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */int parse_header(TxWorld *w){
+/* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */static int parse_header_layout(TxWorld *w,uint8_t claimable_banners_present){
     uint32_t header_offset_base=0u;
     uint32_t off=0u;
     uint32_t len=0u;
@@ -259,6 +259,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         len=w->ends[0];
         }
     int ok;
+    w->claimableBannersPresent=claimable_banners_present;
     w->header_bool_field_count=0u;
     /* name */rd_string_copy(p,len,&off,w->worldName,TX_MAX_NAME);
     /* seed + worldGenVersion (>=179) */if (w->version>=179u){
@@ -416,14 +417,22 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
             return 0;
         }
         }
-    /* Banners */if (w->version>=109u){
-        w->numClaimableBanners=rd_u16le(p,len,&off);
-        w->claimableBannersOff=off+header_offset_base;
-        if (!terra_reader_take_count(&off,w->numClaimableBanners,2u,len)) {
-            tx_set_error("TERRAX_TRUNCATED_HEADER","banner data exceeds section bounds");
-            return 0;
+    /* TerraWasm's historical writer stores a claimable-banner block here,
+     * while native Terraria WLD files continue directly with late-event
+     * booleans. The caller probes both layouts before committing the result. */
+    if (w->version>=109u){
+        if (claimable_banners_present){
+            w->numClaimableBanners=rd_u16le(p,len,&off);
+            w->claimableBannersOff=off+header_offset_base;
+            if (!terra_reader_take_count(&off,w->numClaimableBanners,2u,len)) {
+                tx_set_error("TERRAX_TRUNCATED_HEADER","banner data exceeds section bounds");
+                return 0;
+            }
+        } else {
+            w->numClaimableBanners=0u;
+            w->claimableBannersOff=0u;
         }
-        }
+    }
     /* fastForwardTime (>=140, but gate starts at >=128) */if (w->version>=128u){
         if (w->version>=140u)TX_RD_HEADER_BOOL(fastForwardTime,"fastForwardTimeToDawn");
         if (w->version>=131u){
@@ -585,6 +594,27 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     return 1;
     }
 #undef TX_RD_HEADER_BOOL
+int parse_header(TxWorld *w){
+    TxWorld candidate;
+
+    if (!w) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT","null world");
+        return 0;
+    }
+
+    candidate=*w;
+    if (parse_header_layout(&candidate,1u)) {
+        *w=candidate;
+        return 1;
+    }
+
+    candidate=*w;
+    if (parse_header_layout(&candidate,0u)) {
+        *w=candidate;
+        return 1;
+    }
+    return 0;
+}
 /* ==================================================================== * read_tile_at -- Stream one tile from the binary * ==================================================================== */int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t){
     uint8_t *p=w->file;
     uint32_t len=w->file_len;

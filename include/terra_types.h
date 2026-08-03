@@ -268,6 +268,7 @@ typedef struct TxWorld {
     uint32_t mobsOff;
 
     /* ---- Banners (dynamic: file offset for u16 array) ---- */
+    uint8_t  claimableBannersPresent;
     uint16_t numClaimableBanners;
     uint32_t claimableBannersOff;
 

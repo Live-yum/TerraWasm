@@ -164,6 +164,45 @@ static int test_header_section_bounds(void) {
     return 1;
 }
 
+static int test_native_terraria_header_layout(void) {
+    static const char* fixture_path = TERRAX_TEST_FIXTURE_DIR "/fixtures/native-terraria-header.wld";
+    unsigned char* fixture = NULL;
+    size_t fixture_len = 0u;
+    char* header = NULL;
+    const size_t header_capacity = 20000u;
+    uint64_t required = 0u;
+    uint32_t handle = 0u;
+    terrax_world_status status;
+    int ok = 0;
+
+    header = (char*)calloc(header_capacity, 1u);
+    if (!expect(header != NULL, "native WLD layout contract: failed to allocate header output")) return 0;
+    if (!expect(
+        read_file_alloc(fixture_path, &fixture, &fixture_len),
+        "native WLD layout contract: failed to read fixture")) goto cleanup;
+    status = terra_world_open_from_buffer(fixture, (uint32_t)fixture_len, &handle);
+    if (!expect(
+        status == TERRAX_WORLD_STATUS_OK && handle != 0u,
+        "native WLD layout contract: native Terraria header was rejected")) goto cleanup;
+    status = terra_section_get_json(handle, "header", header, header_capacity, &required);
+    if (!expect(
+        status == TERRAX_WORLD_STATUS_OK,
+        "native WLD layout contract: failed to read parsed header")) goto cleanup;
+    if (!expect(
+        strstr(header, "\"treeTopVariationCount\":13") != NULL &&
+        strstr(header, "\"oreTierCopper\":166") != NULL,
+        "native WLD layout contract: header fields were shifted")) goto cleanup;
+
+    puts("native WLD layout contract: native Terraria header accepted");
+    ok = 1;
+
+cleanup:
+    if (handle != 0u) terra_world_close(handle);
+    free(header);
+    free(fixture);
+    return ok;
+}
+
 static int test_native_abi_contract(void) {
     const char* capabilities = terra_capabilities();
     const char* build = terra_build_info_json();
@@ -257,6 +296,7 @@ cleanup:
 int main(void) {
     if (!test_native_abi_contract()) return 1;
     if (!test_header_section_bounds()) return 2;
-    if (!test_failed_save_preserves_destination()) return 3;
+    if (!test_native_terraria_header_layout()) return 3;
+    if (!test_failed_save_preserves_destination()) return 4;
     return 0;
 }
