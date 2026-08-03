@@ -84,7 +84,7 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
-    # Header/format patching is a cold administrative path.  Keep the global
+    # Header/format patching is a cold administrative path. Keep the global
     # release profile at -O3, but size-optimize this schema-heavy encoder so
     # the Web artifact remains inside the Mini Program budget.
     set_source_files_properties(
@@ -214,6 +214,7 @@ else()
             target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_native_contract COMMAND terra_native_contract)
+
         add_executable(terra_error_json_contract tests/error_json_contract.c)
         target_link_libraries(terra_error_json_contract PRIVATE terrax_world_static ZLIB::ZLIB)
         target_compile_definitions(terra_error_json_contract PRIVATE TERRAX_STATIC)
@@ -222,6 +223,25 @@ else()
             target_link_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_error_json_contract COMMAND terra_error_json_contract)
+
+        add_executable(terra_json_parser_contract tests/json_parser_contract.c)
+        target_link_libraries(terra_json_parser_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_json_parser_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_json_parser_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_json_parser_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_json_parser_contract COMMAND terra_json_parser_contract)
+
+        add_executable(terra_string_section_guard_contract tests/string_section_guard_contract.c)
+        target_link_libraries(terra_string_section_guard_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_string_section_guard_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_string_section_guard_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_string_section_guard_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_string_section_guard_contract COMMAND terra_string_section_guard_contract)
+
         if(TERRAWASM_FUZZ_SMOKE)
             add_executable(terra_fuzz_smoke
                 tests/fuzz/fuzz_smoke.c

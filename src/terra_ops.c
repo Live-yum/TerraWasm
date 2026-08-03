@@ -39,9 +39,11 @@ extern uint32_t tx_last_height;
 extern uint32_t tx_last_stride;
 
 /* From terra_json.c */
+extern int json_validate_document(const char* json, int jlen);
 extern int json_find_key(const char* json, int jlen, const char* key);
 extern int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap);
 extern int json_extract_int(const char* json, int jlen, int pos, int32_t* out);
+extern int json_skip_value(const char* json, int jlen, int pos);
 
 /* From terra_render.c */
 extern int txw_render_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h);
@@ -142,7 +144,9 @@ static int parse_marker_size_field(const char* request, int jlen, int elem,
                                    const char* key, int32_t default_value,
                                    int32_t max_value, const char* error_message,
                                    uint8_t* out_value) {
-    int field_pos = json_find_key(request + elem, jlen - elem, key);
+    int elem_end = json_skip_value(request, jlen, elem);
+    int elem_len = elem_end > elem ? elem_end - elem : 0;
+    int field_pos = elem_len > 0 ? json_find_key(request + elem, elem_len, key) : -1;
     int32_t value = default_value;
     if (field_pos >= 0) {
         if (!json_extract_int(request, jlen, elem + field_pos, &value)) {
@@ -193,7 +197,9 @@ static int parse_marker_array(const char* request, int jlen,
             tx_set_error("TERRAX_VALIDATION_ERROR", "invalid marker entry");
             return 0;
         }
-        int id_pos = json_find_key(request + elem, jlen - elem, id_key);
+        int elem_end = json_skip_value(request, jlen, elem);
+        int elem_len = elem_end > elem ? elem_end - elem : 0;
+        int id_pos = elem_len > 0 ? json_find_key(request + elem, elem_len, id_key) : -1;
         int32_t id = 0;
         if (id_pos < 0 || !json_extract_int(request, jlen, elem + id_pos, &id)) {
             tx_internal_free(markers);
@@ -204,7 +210,7 @@ static int parse_marker_array(const char* request, int jlen,
         uint32_t map_value = default_marker_color();
         uint8_t rgba[4];
         default_marker_rgba(rgba);
-        int color_pos = json_find_key(request + elem, jlen - elem, "color");
+        int color_pos = elem_len > 0 ? json_find_key(request + elem, elem_len, "color") : -1;
         if (color_pos >= 0) {
             char hex[16] = {0};
             if (!json_extract_str(request, jlen, elem + color_pos, hex, sizeof(hex)) ||
@@ -779,11 +785,15 @@ static int op_streq(const char* a, const char* b) {
 
 int op_execute_json(TxWorld* w, const char* op_name, const char* request,
                     TxBuf* response) {
-    int jlen = (int)tx_strlen(request);
-
     /* Debug: report operation name in response for diagnostics */
-    if (!op_name || tx_strlen(op_name) == 0) {
+    if (!op_name || !request || tx_strlen(op_name) == 0) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "empty operation name");
+        return -1;
+    }
+
+    int jlen = (int)tx_strlen(request);
+    if (!json_validate_document(request, jlen)) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "operation request is not valid JSON");
         return -1;
     }
 
