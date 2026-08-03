@@ -107,7 +107,7 @@ static int json_is_whitespace(char c) {
 }
 
 static int json_skip_whitespace(const char* s, int len, int pos) {
-    while (pos < len && json_is_whitespace(s[pos])) pos++;
+    while (pos >= 0 && pos < len && json_is_whitespace(s[pos])) pos++;
     return pos;
 }
 
@@ -123,8 +123,27 @@ static uint32_t json_hex_value(char c) {
     return (uint32_t)(c - 'A' + 10);
 }
 
+static int json_read_hex4(const char* s, int len, int pos, uint32_t* out) {
+    if (!s || !out || pos < 0 || pos > len - 4) return 0;
+    uint32_t value = 0u;
+    for (int i = 0; i < 4; i++) {
+        if (!json_is_hex(s[pos + i])) return 0;
+        value = (value << 4) | json_hex_value(s[pos + i]);
+    }
+    *out = value;
+    return 1;
+}
+
+static int json_is_high_surrogate(uint32_t value) {
+    return value >= 0xd800u && value <= 0xdbffu;
+}
+
+static int json_is_low_surrogate(uint32_t value) {
+    return value >= 0xdc00u && value <= 0xdfffu;
+}
+
 static int json_skip_string(const char* s, int len, int pos) {
-    if (!s || pos >= len || s[pos] != '"') return -1;
+    if (!s || pos < 0 || pos >= len || s[pos] != '"') return -1;
     pos++;
     while (pos < len) {
         unsigned char c = (unsigned char)s[pos++];
@@ -134,11 +153,18 @@ static int json_skip_string(const char* s, int len, int pos) {
         if (pos >= len) return -1;
         char escaped = s[pos++];
         if (escaped == 'u') {
-            if (pos > len - 4) return -1;
-            for (int i = 0; i < 4; i++) {
-                if (!json_is_hex(s[pos + i])) return -1;
-            }
+            uint32_t codepoint = 0u;
+            if (!json_read_hex4(s, len, pos, &codepoint)) return -1;
             pos += 4;
+            if (json_is_high_surrogate(codepoint)) {
+                uint32_t low = 0u;
+                if (pos > len - 6 || s[pos] != '\\' || s[pos + 1] != 'u' ||
+                    !json_read_hex4(s, len, pos + 2, &low) ||
+                    !json_is_low_surrogate(low)) return -1;
+                pos += 6;
+            } else if (json_is_low_surrogate(codepoint)) {
+                return -1;
+            }
         } else if (escaped != '"' && escaped != '\\' && escaped != '/' &&
                    escaped != 'b' && escaped != 'f' && escaped != 'n' &&
                    escaped != 'r' && escaped != 't') {
@@ -148,51 +174,100 @@ static int json_skip_string(const char* s, int len, int pos) {
     return -1;
 }
 
-static int json_token_boundary(const char* s, int len, int pos) {
+static int json_parse_number(const char* s, int len, int pos) {
+    if (!s || pos < 0 || pos >= len) return -1;
+    if (s[pos] == '-') {
+        pos++;
+        if (pos >= len) return -1;
+    }
+    if (s[pos] == '0') {
+        pos++;
+        if (pos < len && s[pos] >= '0' && s[pos] <= '9') return -1;
+    } else {
+        if (s[pos] < '1' || s[pos] > '9') return -1;
+        while (pos < len && s[pos] >= '0' && s[pos] <= '9') pos++;
+    }
+    if (pos < len && s[pos] == '.') {
+        pos++;
+        if (pos >= len || s[pos] < '0' || s[pos] > '9') return -1;
+        while (pos < len && s[pos] >= '0' && s[pos] <= '9') pos++;
+    }
+    if (pos < len && (s[pos] == 'e' || s[pos] == 'E')) {
+        pos++;
+        if (pos < len && (s[pos] == '+' || s[pos] == '-')) pos++;
+        if (pos >= len || s[pos] < '0' || s[pos] > '9') return -1;
+        while (pos < len && s[pos] >= '0' && s[pos] <= '9') pos++;
+    }
+    return pos;
+}
+
+static int json_parse_value(const char* s, int len, int pos, int depth) {
+    if (!s || pos < 0 || depth >= 64) return -1;
     pos = json_skip_whitespace(s, len, pos);
-    return pos >= len || s[pos] == ',' || s[pos] == '}' || s[pos] == ']';
+    if (pos < 0 || pos >= len) return -1;
+
+    if (s[pos] == '"') return json_skip_string(s, len, pos);
+    if (s[pos] == 't') {
+        if (pos > len - 4 || s[pos + 1] != 'r' || s[pos + 2] != 'u' || s[pos + 3] != 'e') return -1;
+        return pos + 4;
+    }
+    if (s[pos] == 'f') {
+        if (pos > len - 5 || s[pos + 1] != 'a' || s[pos + 2] != 'l' ||
+            s[pos + 3] != 's' || s[pos + 4] != 'e') return -1;
+        return pos + 5;
+    }
+    if (s[pos] == 'n') {
+        if (pos > len - 4 || s[pos + 1] != 'u' || s[pos + 2] != 'l' || s[pos + 3] != 'l') return -1;
+        return pos + 4;
+    }
+    if (s[pos] == '-' || (s[pos] >= '0' && s[pos] <= '9')) {
+        return json_parse_number(s, len, pos);
+    }
+
+    if (s[pos] == '{') {
+        pos = json_skip_whitespace(s, len, pos + 1);
+        if (pos < len && s[pos] == '}') return pos + 1;
+        while (pos < len) {
+            if (s[pos] != '"') return -1;
+            pos = json_skip_string(s, len, pos);
+            if (pos < 0) return -1;
+            pos = json_skip_whitespace(s, len, pos);
+            if (pos >= len || s[pos] != ':') return -1;
+            pos = json_parse_value(s, len, pos + 1, depth + 1);
+            if (pos < 0) return -1;
+            pos = json_skip_whitespace(s, len, pos);
+            if (pos < len && s[pos] == '}') return pos + 1;
+            if (pos >= len || s[pos] != ',') return -1;
+            pos = json_skip_whitespace(s, len, pos + 1);
+            if (pos >= len || s[pos] == '}') return -1;
+        }
+        return -1;
+    }
+
+    if (s[pos] == '[') {
+        pos = json_skip_whitespace(s, len, pos + 1);
+        if (pos < len && s[pos] == ']') return pos + 1;
+        while (pos < len) {
+            pos = json_parse_value(s, len, pos, depth + 1);
+            if (pos < 0) return -1;
+            pos = json_skip_whitespace(s, len, pos);
+            if (pos < len && s[pos] == ']') return pos + 1;
+            if (pos >= len || s[pos] != ',') return -1;
+            pos = json_skip_whitespace(s, len, pos + 1);
+            if (pos >= len || s[pos] == ']') return -1;
+        }
+    }
+    return -1;
+}
+
+int json_validate_document(const char* json, int jlen) {
+    if (!json || jlen <= 0) return 0;
+    int end = json_parse_value(json, jlen, 0, 0);
+    return end >= 0 && json_skip_whitespace(json, jlen, end) == jlen;
 }
 
 int json_skip_value(const char* s, int len, int pos) {
-    pos = json_skip_whitespace(s, len, pos);
-    if (!s || pos >= len) return -1;
-    if (s[pos] == '"') return json_skip_string(s, len, pos);
-
-    if (s[pos] == '{' || s[pos] == '[') {
-        char stack[64];
-        int depth = 0;
-        stack[depth++] = s[pos++];
-        while (pos < len && depth > 0) {
-            char c = s[pos];
-            if (c == '"') {
-                pos = json_skip_string(s, len, pos);
-                if (pos < 0) return -1;
-                continue;
-            }
-            if (c == '{' || c == '[') {
-                if (depth >= (int)sizeof(stack)) return -1;
-                stack[depth++] = c;
-                pos++;
-                continue;
-            }
-            if (c == '}' || c == ']') {
-                char expected = c == '}' ? '{' : '[';
-                if (depth == 0 || stack[depth - 1] != expected) return -1;
-                depth--;
-                pos++;
-                continue;
-            }
-            pos++;
-        }
-        return depth == 0 ? pos : -1;
-    }
-
-    int start = pos;
-    while (pos < len && s[pos] != ',' && s[pos] != '}' && s[pos] != ']' &&
-           !json_is_whitespace(s[pos])) {
-        pos++;
-    }
-    return pos > start ? pos : -1;
+    return json_parse_value(s, len, pos, 0);
 }
 
 static int json_key_equals(const char* json, int start, int end, const char* key) {
@@ -205,47 +280,49 @@ static int json_key_equals(const char* json, int start, int end, const char* key
 }
 
 int json_find_key(const char* json, int jlen, const char* key) {
-    if (!json || !key || jlen <= 0) return -1;
+    if (!json || !key || !json_validate_document(json, jlen)) return -1;
     int pos = json_skip_whitespace(json, jlen, 0);
     if (pos >= jlen || json[pos] != '{') return -1;
-    pos++;
+    pos = json_skip_whitespace(json, jlen, pos + 1);
+    if (pos < jlen && json[pos] == '}') return -1;
 
-    while (1) {
-        pos = json_skip_whitespace(json, jlen, pos);
-        if (pos >= jlen || json[pos] == '}') return -1;
+    int found = -1;
+    while (pos < jlen) {
         if (json[pos] != '"') return -1;
-
         int key_start = pos + 1;
         int key_end_pos = json_skip_string(json, jlen, pos);
         if (key_end_pos < 0) return -1;
         int key_end = key_end_pos - 1;
-        int matches = json_key_equals(json, key_start, key_end, key);
 
         pos = json_skip_whitespace(json, jlen, key_end_pos);
         if (pos >= jlen || json[pos] != ':') return -1;
         pos = json_skip_whitespace(json, jlen, pos + 1);
         if (pos >= jlen) return -1;
-        if (matches) return pos;
-
+        int value_pos = pos;
         pos = json_skip_value(json, jlen, pos);
         if (pos < 0) return -1;
+        if (found < 0 && json_key_equals(json, key_start, key_end, key)) found = value_pos;
+
         pos = json_skip_whitespace(json, jlen, pos);
-        if (pos >= jlen) return -1;
-        if (json[pos] == '}') return -1;
-        if (json[pos] != ',') return -1;
-        pos++;
+        if (pos < jlen && json[pos] == '}') return found;
+        if (pos >= jlen || json[pos] != ',') return -1;
+        pos = json_skip_whitespace(json, jlen, pos + 1);
+        if (pos >= jlen || json[pos] == '}') return -1;
     }
+    return -1;
 }
 
 int json_value_eq(const char* json, int jlen, int pos, const char* val) {
-    if (!json || !val) return 0;
+    if (!json || !val || !json_validate_document(json, jlen)) return 0;
     pos = json_skip_whitespace(json, jlen, pos);
     int vlen = (int)tx_strlen(val);
     if (pos < 0 || vlen <= 0 || pos > jlen - vlen) return 0;
+    int end = json_skip_value(json, jlen, pos);
+    if (end != pos + vlen) return 0;
     for (int i = 0; i < vlen; i++) {
         if (json[pos + i] != val[i]) return 0;
     }
-    return json_token_boundary(json, jlen, pos + vlen);
+    return 1;
 }
 
 int json_is_null(const char* json, int jlen, int pos) {
@@ -259,7 +336,9 @@ static int json_append_byte(char* out, int ocap, int* length, unsigned char valu
 }
 
 static int json_append_codepoint(char* out, int ocap, int* length, uint32_t value) {
-    if (value >= 0xd800u && value <= 0xdfffu) return 0;
+    int bytes = value <= 0x7fu ? 1 : value <= 0x7ffu ? 2 : value <= 0xffffu ? 3 : value <= 0x10ffffu ? 4 : 0;
+    if (!bytes || !out || !length || *length < 0 || ocap <= 0 ||
+        *length > ocap - 1 - bytes) return 0;
     if (value <= 0x7fu) {
         return json_append_byte(out, ocap, length, (unsigned char)value);
     }
@@ -267,23 +346,28 @@ static int json_append_codepoint(char* out, int ocap, int* length, uint32_t valu
         return json_append_byte(out, ocap, length, (unsigned char)(0xc0u | (value >> 6))) &&
                json_append_byte(out, ocap, length, (unsigned char)(0x80u | (value & 0x3fu)));
     }
-    return json_append_byte(out, ocap, length, (unsigned char)(0xe0u | (value >> 12))) &&
+    if (value <= 0xffffu) {
+        return json_append_byte(out, ocap, length, (unsigned char)(0xe0u | (value >> 12))) &&
+               json_append_byte(out, ocap, length, (unsigned char)(0x80u | ((value >> 6) & 0x3fu))) &&
+               json_append_byte(out, ocap, length, (unsigned char)(0x80u | (value & 0x3fu)));
+    }
+    return json_append_byte(out, ocap, length, (unsigned char)(0xf0u | (value >> 18))) &&
+           json_append_byte(out, ocap, length, (unsigned char)(0x80u | ((value >> 12) & 0x3fu))) &&
            json_append_byte(out, ocap, length, (unsigned char)(0x80u | ((value >> 6) & 0x3fu))) &&
            json_append_byte(out, ocap, length, (unsigned char)(0x80u | (value & 0x3fu)));
 }
 
 int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap) {
-    if (!out || ocap <= 0) return 0;
+    if (!out || ocap <= 0 || !json_validate_document(json, jlen)) return 0;
     out[0] = 0;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (!json || pos >= jlen || json[pos] != '"') return 0;
+    if (pos < 0 || pos >= jlen || json[pos] != '"') return 0;
     pos++;
     int n = 0;
 
     while (pos < jlen) {
         unsigned char c = (unsigned char)json[pos++];
         if (c == '"') {
-            if (!json_token_boundary(json, jlen, pos)) return 0;
             out[n] = 0;
             return n;
         }
@@ -305,11 +389,18 @@ int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap) {
         else if (escaped == 'u') {
             if (pos > jlen - 4) return 0;
             uint32_t codepoint = 0u;
-            for (int i = 0; i < 4; i++) {
-                if (!json_is_hex(json[pos + i])) return 0;
-                codepoint = (codepoint << 4) | json_hex_value(json[pos + i]);
-            }
+            if (!json_read_hex4(json, jlen, pos, &codepoint)) return 0;
             pos += 4;
+            if (json_is_high_surrogate(codepoint)) {
+                uint32_t low = 0u;
+                if (pos > jlen - 6 || json[pos] != '\\' || json[pos + 1] != 'u' ||
+                    !json_read_hex4(json, jlen, pos + 2, &low) ||
+                    !json_is_low_surrogate(low)) return 0;
+                codepoint = 0x10000u + ((codepoint - 0xd800u) << 10) + (low - 0xdc00u);
+                pos += 6;
+            } else if (json_is_low_surrogate(codepoint)) {
+                return 0;
+            }
             if (!json_append_codepoint(out, ocap, &n, codepoint)) return 0;
             continue;
         } else {
@@ -322,10 +413,13 @@ int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap) {
 }
 
 int json_extract_int(const char* json, int jlen, int pos, int32_t* out) {
-    if (!json || !out) return 0;
+    if (!json || !out || !json_validate_document(json, jlen)) return 0;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (pos >= jlen) return 0;
+    if (pos < 0 || pos >= jlen) return 0;
 
+    int start = pos;
+    int end = json_parse_number(json, jlen, start);
+    if (end < 0) return 0;
     int negative = 0;
     if (json[pos] == '-') {
         negative = 1;
@@ -335,30 +429,32 @@ int json_extract_int(const char* json, int jlen, int pos, int32_t* out) {
 
     uint64_t limit = negative ? 2147483648ULL : 2147483647ULL;
     uint64_t value = 0u;
-    while (pos < jlen && json[pos] >= '0' && json[pos] <= '9') {
+    while (pos < end && json[pos] >= '0' && json[pos] <= '9') {
         uint32_t digit = (uint32_t)(json[pos] - '0');
         if (value > (limit - digit) / 10u) return 0;
         value = value * 10u + digit;
         pos++;
     }
-    if (!json_token_boundary(json, jlen, pos)) return 0;
+    if (pos != end) return 0;
     *out = negative ? (int32_t)(-(int64_t)value) : (int32_t)value;
     return 1;
 }
 
 int json_extract_u64(const char* json, int jlen, int pos, uint64_t* out) {
-    if (!json || !out) return 0;
+    if (!json || !out || !json_validate_document(json, jlen)) return 0;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (pos >= jlen || json[pos] < '0' || json[pos] > '9') return 0;
+    if (pos < 0 || pos >= jlen || json[pos] < '0' || json[pos] > '9') return 0;
 
+    int end = json_parse_number(json, jlen, pos);
+    if (end < 0) return 0;
     uint64_t value = 0u;
-    while (pos < jlen && json[pos] >= '0' && json[pos] <= '9') {
+    while (pos < end && json[pos] >= '0' && json[pos] <= '9') {
         uint32_t digit = (uint32_t)(json[pos] - '0');
         if (value > (UINT64_MAX - digit) / 10u) return 0;
         value = value * 10u + digit;
         pos++;
     }
-    if (!json_token_boundary(json, jlen, pos)) return 0;
+    if (pos != end) return 0;
     *out = value;
     return 1;
 }
@@ -412,7 +508,7 @@ static int parse_double_from_str(const char* s, int len, double* out) {
         }
         if (pos >= len || s[pos] < '0' || s[pos] > '9') return 0;
         while (pos < len && s[pos] >= '0' && s[pos] <= '9') {
-            if (exponent > 1000) return 0;
+            if (exponent > 308) return 0;
             exponent = exponent * 10 + (s[pos] - '0');
             pos++;
         }
@@ -426,9 +522,9 @@ static int parse_double_from_str(const char* s, int len, double* out) {
 }
 
 int json_extract_float(const char* json, int jlen, int pos, double* out) {
-    if (!json || !out) return 0;
+    if (!json || !out || !json_validate_document(json, jlen)) return 0;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (pos >= jlen) return 0;
+    if (pos < 0 || pos >= jlen) return 0;
 
     if (json[pos] == '"') {
         char tmp[96];
@@ -437,25 +533,15 @@ int json_extract_float(const char* json, int jlen, int pos, double* out) {
     }
 
     int start = pos;
-    if (json[pos] == '-') pos++;
-    while (pos < jlen && json[pos] >= '0' && json[pos] <= '9') pos++;
-    if (pos < jlen && json[pos] == '.') {
-        pos++;
-        while (pos < jlen && json[pos] >= '0' && json[pos] <= '9') pos++;
-    }
-    if (pos < jlen && (json[pos] == 'e' || json[pos] == 'E')) {
-        pos++;
-        if (pos < jlen && (json[pos] == '+' || json[pos] == '-')) pos++;
-        while (pos < jlen && json[pos] >= '0' && json[pos] <= '9') pos++;
-    }
-    if (pos <= start || !json_token_boundary(json, jlen, pos)) return 0;
-    return parse_double_from_str(json + start, pos - start, out);
+    int end = json_parse_number(json, jlen, start);
+    if (end < 0) return 0;
+    return parse_double_from_str(json + start, end - start, out);
 }
 
 int json_array_count(const char* json, int jlen, int pos) {
-    if (!json) return -1;
+    if (!json || !json_validate_document(json, jlen)) return -1;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (pos >= jlen || json[pos] != '[') return -1;
+    if (pos < 0 || pos >= jlen || json[pos] != '[') return -1;
     pos = json_skip_whitespace(json, jlen, pos + 1);
     if (pos < jlen && json[pos] == ']') return 0;
 
@@ -475,9 +561,9 @@ int json_array_count(const char* json, int jlen, int pos) {
 }
 
 int json_array_element(const char* json, int jlen, int pos, int index) {
-    if (!json || index < 0) return -1;
+    if (!json || index < 0 || !json_validate_document(json, jlen)) return -1;
     pos = json_skip_whitespace(json, jlen, pos);
-    if (pos >= jlen || json[pos] != '[') return -1;
+    if (pos < 0 || pos >= jlen || json[pos] != '[') return -1;
     pos = json_skip_whitespace(json, jlen, pos + 1);
     if (pos >= jlen || json[pos] == ']') return -1;
 

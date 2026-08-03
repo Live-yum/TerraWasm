@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+extern int json_validate_document(const char* json, int jlen);
 extern int json_find_key(const char* json, int jlen, const char* key);
 extern int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap);
 extern int json_extract_int(const char* json, int jlen, int pos, int32_t* out);
@@ -21,6 +22,9 @@ int main(void) {
     int boolean_value = -1;
     double float_value = 0.0;
     char text[32];
+
+    const char* valid_document = " {\"value\":1,\"ignored\":false} \n";
+    assert(json_validate_document(valid_document, text_len(valid_document)));
 
     const char* signed_limits = "{\"max\":2147483647,\"min\":-2147483648}";
     int pos = json_find_key(signed_limits, text_len(signed_limits), "max");
@@ -48,15 +52,28 @@ int main(void) {
     assert(pos >= 0);
     assert(!json_extract_u64(unsigned_overflow, text_len(unsigned_overflow), pos, &unsigned_value));
 
-    const char* booleans = "{\"yes\":true,\"no\":false,\"bad\":trash}";
+    const char* booleans = "{\"yes\":true,\"no\":false,\"empty\":null}";
     pos = json_find_key(booleans, text_len(booleans), "yes");
     assert(json_extract_bool(booleans, text_len(booleans), pos, &boolean_value));
     assert(boolean_value == 1);
     pos = json_find_key(booleans, text_len(booleans), "no");
     assert(json_extract_bool(booleans, text_len(booleans), pos, &boolean_value));
     assert(boolean_value == 0);
-    pos = json_find_key(booleans, text_len(booleans), "bad");
-    assert(!json_extract_bool(booleans, text_len(booleans), pos, &boolean_value));
+
+    const char* malformed_documents[] = {
+        "{\"value\":1]",
+        "{\"ignored\":tru,\"value\":1}",
+        "{\"value\":1,\"broken\":}",
+        "[trash]",
+        "{\"value\":1} trailing",
+        "{\"value\":01}",
+        "{\"value\":1,}",
+        "{\"value\":1 \"other\":2}",
+    };
+    for (size_t i = 0; i < sizeof(malformed_documents) / sizeof(malformed_documents[0]); i++) {
+        assert(!json_validate_document(malformed_documents[i], text_len(malformed_documents[i])));
+        assert(json_find_key(malformed_documents[i], text_len(malformed_documents[i]), "value") < 0);
+    }
 
     const char* escaped = "{\"value\":\"line\\n\\u0041\"}";
     pos = json_find_key(escaped, text_len(escaped), "value");
@@ -75,8 +92,10 @@ int main(void) {
 
     const char* number_with_suffix = "{\"value\":12oops}";
     pos = json_find_key(number_with_suffix, text_len(number_with_suffix), "value");
-    assert(pos >= 0);
-    assert(!json_extract_int(number_with_suffix, text_len(number_with_suffix), pos, &signed_value));
+    assert(pos < 0);
+
+    const char* leading_zero = "{\"value\":-01}";
+    assert(!json_validate_document(leading_zero, text_len(leading_zero)));
 
     const char* floating = "{\"value\":-1.25e2}";
     pos = json_find_key(floating, text_len(floating), "value");
@@ -91,6 +110,23 @@ int main(void) {
     assert(json_array_element(array, text_len(array), 0, 3) < 0);
     assert(json_array_count("[1,]", 4, 0) < 0);
     assert(json_array_count("not-array", 9, 0) < 0);
+
+    const char* emoji = "{\"value\":\"\\uD83D\\uDE00\"}";
+    pos = json_find_key(emoji, text_len(emoji), "value");
+    assert(pos >= 0);
+    char emoji_utf8[5];
+    assert(json_extract_str(emoji, text_len(emoji), pos, emoji_utf8, sizeof(emoji_utf8)) == 4);
+    assert((unsigned char)emoji_utf8[0] == 0xf0u);
+    assert((unsigned char)emoji_utf8[1] == 0x9fu);
+    assert((unsigned char)emoji_utf8[2] == 0x98u);
+    assert((unsigned char)emoji_utf8[3] == 0x80u);
+    char emoji_too_small[4];
+    assert(!json_extract_str(emoji, text_len(emoji), pos, emoji_too_small, sizeof(emoji_too_small)));
+
+    const char* isolated_high = "{\"value\":\"\\uD83D\"}";
+    const char* isolated_low = "{\"value\":\"\\uDE00\"}";
+    assert(!json_validate_document(isolated_high, text_len(isolated_high)));
+    assert(!json_validate_document(isolated_low, text_len(isolated_low)));
 
     return 0;
 }
