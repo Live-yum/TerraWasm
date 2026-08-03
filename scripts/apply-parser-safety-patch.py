@@ -3,6 +3,7 @@ from pathlib import Path
 SOURCE = Path("src/terra_wld.c")
 
 # Keep this byte-for-byte so the patch preserves the source file's mixed line endings.
+# This helper is intentionally branch-local and removed after it produces the source commit.
 OLD_LF = b"""    if (!ok||!terra_reader_has(*off,slen,len)){\n        if (cap)out[0]=0;\n        *off=len;\n        ;\n        }\n    uint32_t n=slen;"""
 NEW_LF = b"""    if (!ok||!terra_reader_has(*off,slen,len)){\n        if (cap)out[0]=0;\n        *off=len;\n        return;\n        }\n    uint32_t n=slen;"""
 
