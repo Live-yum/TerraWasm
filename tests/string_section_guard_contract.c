@@ -33,6 +33,15 @@ static void valid_empty_npcs(TxWorld* world, uint32_t start) {
     set_section(world, 4u, start, start + 5u);
 }
 
+static void accepts_zero_length_string_sections(void) {
+    uint8_t placeholder[] = {0u};
+    TxWorld world = make_world(placeholder, (uint32_t)sizeof(placeholder), 9u, 279u);
+    for (uint32_t index = 1u; index < world.pointer_count; index++) {
+        set_section(&world, index, 0u, 0u);
+    }
+    assert(terra_validate_string_sections(&world));
+}
+
 static void rejects_truncated_chest_name(void) {
     uint8_t invalid[] = {
         1u, 0u,
@@ -105,6 +114,7 @@ static void rejects_truncated_bestiary_name(void) {
 }
 
 int main(void) {
+    accepts_zero_length_string_sections();
     rejects_truncated_chest_name();
     accepts_bounded_chest_name();
     rejects_truncated_sign_text();
