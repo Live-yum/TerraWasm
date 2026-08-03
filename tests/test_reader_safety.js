@@ -40,3 +40,22 @@ test("truncated and corrupted world buffers fail as statuses without crashing", 
     M._tx_free(inputPtr);
   }
 });
+
+test("an overlong header string is rejected without reading beyond the world buffer", async () => {
+  const M = await TerraWorldWasm();
+  const candidate = Buffer.alloc(16);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(1, 4);
+  candidate.writeUInt32LE(12, 6);
+  candidate.writeUInt16LE(0, 10);
+  candidate[12] = 0x7f;
+
+  const inputPtr = alloc(M, candidate);
+  const task = M._terra_world_open_begin(inputPtr, candidate.length);
+  assert.notEqual(task, 0);
+  const status = M._terra_world_open_step(task, 1);
+  assert.notEqual(status, 0);
+  assert.equal(M._terra_world_task_get_world_handle(task), 0);
+  assert.equal(M._terra_world_task_close(task), 0);
+  M._tx_free(inputPtr);
+});
