@@ -830,7 +830,8 @@ static int encode_header_model(TxWorld *w,TxJsonParser *request,TxPatchField *fi
     if(version>=201u)WB("savedGolfer",savedGolfer);if(version>=107u)WU32("invasionSizeStart",invasionSizeStart);
     if(version>=108u)WU32("cultistDelay",cultistDelay);
     if(version>=109u){
-        if(!encode_numeric_array(header,w,request,fields,field_count,"killCount","killCountLength",w->numMobs,w->mobsOff,4u,0,UINT16_MAX)||
+        if(!encode_numeric_array(header,w,request,fields,field_count,"killCount","killCountLength",w->numMobs,w->mobsOff,4u,0,UINT16_MAX))return 0;
+        if(w->claimableBannersPresent&&
            !encode_numeric_array(header,w,request,fields,field_count,"claimableBanners","claimableBannersLength",w->numClaimableBanners,w->claimableBannersOff,2u,0,UINT16_MAX))return 0;
         }
     if(version>=128u){
