@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +19,24 @@ function findArtifact(artifacts, role) {
   return artifact
 }
 
+function resolveArtifactPath(repositoryRoot, artifact) {
+  const realRoot = fs.realpathSync(repositoryRoot)
+  const absolutePath = fs.realpathSync(path.resolve(repositoryRoot, artifact.path))
+  const relativePath = path.relative(realRoot, absolutePath)
+  if (
+    relativePath === '..'
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath)
+  ) {
+    fail(`${artifact.role} artifact resolves outside the repository root`)
+  }
+  return absolutePath
+}
+
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex')
+}
+
 export function verifyArtifactSizes({ root, manifest }) {
   const validatedManifest = validateManifest(manifest)
   const repositoryRoot = path.resolve(root)
@@ -25,10 +44,14 @@ export function verifyArtifactSizes({ root, manifest }) {
   const wasm = findArtifact(validatedManifest.artifacts, 'wasm')
 
   for (const artifact of [wrapper, wasm]) {
-    const absolutePath = path.resolve(repositoryRoot, artifact.path)
-    const stat = fs.statSync(absolutePath)
-    if (stat.size !== artifact.bytes) {
-      fail(`${artifact.role} byte count does not match disk (${artifact.bytes} != ${stat.size})`)
+    const absolutePath = resolveArtifactPath(repositoryRoot, artifact)
+    const bytes = fs.readFileSync(absolutePath)
+    if (bytes.byteLength !== artifact.bytes) {
+      fail(`${artifact.role} byte count does not match disk (${artifact.bytes} != ${bytes.byteLength})`)
+    }
+    const digest = sha256(bytes)
+    if (digest !== artifact.sha256.toLowerCase()) {
+      fail(`${artifact.role} SHA-256 does not match disk (${artifact.sha256} != ${digest})`)
     }
   }
 
