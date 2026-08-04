@@ -23,6 +23,7 @@ const REQUIRED_TEST_FILES = [
   "tests/test_commands.js",
   "tests/test_marker_outputs.js",
   "tests/test_memory_lifecycle.js",
+  "tests/test_map_streaming_contract.js",
   "tests/test_open_task.js",
   "tests/test_pixel_art.js",
   "tests/test_pixel_art_bulk.js",
