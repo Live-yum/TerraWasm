@@ -1364,7 +1364,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_u8(b,']');
     }
-/* --- signs section --- */void serialize_signs_json(TxWorld *w,TxBuf *b){
+/* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */void serialize_signs_json(TxWorld *w,TxBuf *b){
     uint32_t off=w->starts[3];
     uint32_t end=w->ends[3];
     uint8_t *p=w->file;
@@ -1377,9 +1377,9 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     i++){
         if (i)buf_u8(b,',');
         char text[1024];
+        rd_string_copy(p,len,&off,text,1024);
         uint32_t sx=rd_i32le(p,len,&off);
         uint32_t sy=rd_i32le(p,len,&off);
-        rd_string_copy(p,len,&off,text,1024);
         buf_cstr(b," { \"x\":");
         json_i32(b,sx);
         buf_cstr(b,",\"y\":");

@@ -30,6 +30,7 @@ const REQUIRED_TEST_FILES = [
   "tests/test_pixel_art_indexed.js",
   "tests/test_reader_safety.js",
   "tests/test_section_mutators.js",
+  "tests/test_signs.js",
   "tests/helpers/fixtures.js",
 ];
 

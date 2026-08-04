@@ -268,9 +268,10 @@ static int validate_sign_strings(TxWorld* world) {
         return 0;
     }
     for (uint32_t sign = 0u; sign < sign_count; sign++) {
-        if (!terra_reader_take(&offset, 8u, length)
-                || !guard_skip_string(data, length, &offset)) {
-            tx_set_error("TERRAX_TRUNCATED_SIGNS", "sign text exceeds section bounds");
+        /* Terraria writes each sign as: 7-bit UTF-8 text, int32 X, int32 Y. */
+        if (!guard_skip_string(data, length, &offset)
+                || !terra_reader_take(&offset, 8u, length)) {
+            tx_set_error("TERRAX_TRUNCATED_SIGNS", "sign text or coordinates exceed section bounds");
             return 0;
         }
     }

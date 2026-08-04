@@ -261,7 +261,7 @@ if ($Test) {
     }
     Write-Host "`n=== Running tests ===" -ForegroundColor Cyan
     Push-Location $ProjectDir
-    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_build_identity.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
+    node --test tests/test_memory_lifecycle.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_build_identity.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_signs.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
     node tests/test_all.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }

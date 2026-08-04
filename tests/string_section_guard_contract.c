@@ -69,13 +69,28 @@ static void rejects_truncated_sign_text(void) {
     uint8_t invalid[] = {
         0u, 0u,
         1u, 0u,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
-        4u, 'n', 'o'
+        4u, 'n', 'o',
+        0u, 0u, 0u, 0u,
+        0u, 0u, 0u, 0u
     };
     TxWorld world = make_world(invalid, (uint32_t)sizeof(invalid), 4u, 294u);
     valid_empty_chests(&world, 0u);
     set_section(&world, 3u, 2u, (uint32_t)sizeof(invalid));
     assert(!terra_validate_string_sections(&world));
+}
+
+static void accepts_sign_text_before_coordinates(void) {
+    uint8_t valid[] = {
+        0u, 0u,
+        1u, 0u,
+        2u, 'o', 'k',
+        0x7au, 0x11u, 0u, 0u,
+        0x3fu, 0x02u, 0u, 0u
+    };
+    TxWorld world = make_world(valid, (uint32_t)sizeof(valid), 4u, 294u);
+    valid_empty_chests(&world, 0u);
+    set_section(&world, 3u, 2u, (uint32_t)sizeof(valid));
+    assert(terra_validate_string_sections(&world));
 }
 
 static void rejects_truncated_npc_name(void) {
@@ -118,6 +133,7 @@ int main(void) {
     rejects_truncated_chest_name();
     accepts_bounded_chest_name();
     rejects_truncated_sign_text();
+    accepts_sign_text_before_coordinates();
     rejects_truncated_npc_name();
     rejects_truncated_bestiary_name();
     return 0;
