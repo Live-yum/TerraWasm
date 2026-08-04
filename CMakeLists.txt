@@ -32,6 +32,7 @@ set(SOURCES
     "${SRC_DIR}/terra_icon.c"
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
+    "${SRC_DIR}/terra_zlib_bridge.c"
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_hash.c"
 )
@@ -40,6 +41,14 @@ set(SOURCES
 set_source_files_properties(
     "${SRC_DIR}/terra_wld.c"
     PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
+)
+
+# terra_txci.c historically declared a WASM32-shaped z_stream by hand. Route
+# those calls through a bridge that translates to the platform zlib ABI so
+# native LP64 builds cannot overwrite the adjacent fields.
+set_source_files_properties(
+    "${SRC_DIR}/terra_txci.c"
+    PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
 )
 
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
@@ -223,6 +232,15 @@ else()
             target_link_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_error_json_contract COMMAND terra_error_json_contract)
+
+        add_executable(terra_zlib_bridge_contract tests/zlib_bridge_contract.c)
+        target_link_libraries(terra_zlib_bridge_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_zlib_bridge_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_zlib_bridge_contract COMMAND terra_zlib_bridge_contract)
 
         add_executable(terra_json_parser_contract tests/json_parser_contract.c)
         target_link_libraries(terra_json_parser_contract PRIVATE terrax_world_static ZLIB::ZLIB)
