@@ -30,8 +30,12 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
     const wasmPath = path.join(temp, "module.wasm");
     const wrapperBytes = Buffer.from("x".repeat(1024));
     const wasmBytes = Buffer.alloc(2048, 7);
+    const nodeWrapperBytes = Buffer.from("z".repeat(8));
+    const nodeWasmBytes = Buffer.alloc(8, 5);
     fs.writeFileSync(wrapperPath, wrapperBytes);
     fs.writeFileSync(wasmPath, wasmBytes);
+    fs.writeFileSync(path.join(temp, "node-wrapper.js"), nodeWrapperBytes);
+    fs.writeFileSync(path.join(temp, "node-module.wasm"), nodeWasmBytes);
 
     const manifest = {
       version: 1,
@@ -58,8 +62,8 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
           exports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
           exportHash: exportHash(["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"]),
           artifacts: [
-            { role: "wrapper", path: "node-wrapper.js", bytes: 8, sha256: "c".repeat(64) },
-            { role: "wasm", path: "node-module.wasm", bytes: 8, sha256: "d".repeat(64) },
+            { role: "wrapper", path: "node-wrapper.js", bytes: nodeWrapperBytes.byteLength, sha256: sha256(nodeWrapperBytes) },
+            { role: "wasm", path: "node-module.wasm", bytes: nodeWasmBytes.byteLength, sha256: sha256(nodeWasmBytes) },
           ],
         },
         web: {
@@ -77,14 +81,15 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
         { role: "wasm", path: "module.wasm", bytes: wasmBytes.byteLength, sha256: sha256(wasmBytes) },
       ],
     };
-    fs.writeFileSync(path.join(temp, "node-wrapper.js"), "z".repeat(8));
-    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.alloc(8, 5));
-
     assert.doesNotThrow(() => verifyArtifactSizes({ root: temp, manifest }));
 
     fs.writeFileSync(wasmPath, Buffer.alloc(wasmBytes.byteLength, 8));
     assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /SHA-256/i);
     fs.writeFileSync(wasmPath, wasmBytes);
+
+    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.alloc(nodeWasmBytes.byteLength, 6));
+    assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /Node wasm SHA-256/i);
+    fs.writeFileSync(path.join(temp, "node-module.wasm"), nodeWasmBytes);
 
     manifest.artifacts[0].bytes = 1023;
     manifest.targets.web.artifacts[0].bytes = 1023;
