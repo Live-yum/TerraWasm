@@ -32,7 +32,6 @@ set(SOURCES
     "${SRC_DIR}/terra_icon.c"
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
-    "${SRC_DIR}/terra_zlib_bridge.c"
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_hash.c"
 )
@@ -41,14 +40,6 @@ set(SOURCES
 set_source_files_properties(
     "${SRC_DIR}/terra_wld.c"
     PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
-)
-
-# terra_txci.c historically declared a WASM32-shaped z_stream by hand. Route
-# those calls through a bridge that translates to the platform zlib ABI so
-# native LP64 builds cannot overwrite the adjacent fields.
-set_source_files_properties(
-    "${SRC_DIR}/terra_txci.c"
-    PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
 )
 
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
@@ -201,7 +192,17 @@ if(EMSCRIPTEN)
         ${WEB_LINK_OPTIONS}
     )
 else()
-    add_library(terrax_world_static STATIC ${SOURCES})
+    # Native LP64 zlib uses wider total counters than the legacy WASM-shaped
+    # declaration in terra_txci.c. Compile only native TXCI calls through the
+    # translating bridge; Emscripten keeps its established USE_ZLIB path.
+    set_source_files_properties(
+        "${SRC_DIR}/terra_txci.c"
+        PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
+    )
+    add_library(terrax_world_static STATIC
+        ${SOURCES}
+        "${SRC_DIR}/terra_zlib_bridge.c"
+    )
     configure_terra_identity(terrax_world_static "native" 0 0 "" "")
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
     if(TERRAWASM_SANITIZERS)
