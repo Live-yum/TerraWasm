@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include "terra_status.h"
+#include "terra_txci.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -390,6 +391,9 @@ typedef struct TxWorld {
 
     /* Marker item thumbnails owned by the active world session. */
     TxIconAtlas icon_atlas;
+
+    /* Optional TXCI palette used when marker colors are written to MAP. */
+    TxciIndex marker_color_index;
 
     /* Cached preview state */
     uint32_t preview_width;

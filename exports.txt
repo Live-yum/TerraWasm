@@ -33,6 +33,7 @@ _tx_bridge_heap_peak
 _tx_native_heap_peak
 _tx_reset_heap
 _txw_set_color_tables
+_txw_set_marker_color_index
 _txw_set_icon_atlas
 _txw_clear_icon_atlas
 _tx_memory_used

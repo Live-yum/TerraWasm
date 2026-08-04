@@ -11,6 +11,7 @@ const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world
 
 const TEST_WLD = getPrimaryWorldPath();
 const TEST_BYTES = fs.readFileSync(TEST_WLD);
+const TXCI_GZ = fs.readFileSync(path.join(__dirname, "..", "data", "terraria_color_index.txci.gz"));
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 let modulePromise;
@@ -105,6 +106,17 @@ function installSolidMarkerIcon(M, handle, itemId, rgba = [12, 34, 56, 255]) {
     M._tx_free(xOffsetsPtr);
     M._tx_free(idsPtr);
     M._tx_free(rgbaPtr);
+  }
+}
+
+function installMarkerColorIndex(M, handle) {
+  const dataPtr = mustAlloc(M, TXCI_GZ.length, "marker color index");
+  M.HEAPU8.set(TXCI_GZ, dataPtr);
+  try {
+    const status = M._txw_set_marker_color_index(handle, dataPtr, TXCI_GZ.length);
+    assert.equal(status, 0, "marker color index must load successfully");
+  } finally {
+    M._tx_free(dataPtr);
   }
 }
 
@@ -666,6 +678,42 @@ test("marked map output changes when the matched item thumbnail is installed", a
     assert.equal(result.status, 0);
     const withIcon = getMapBytes(M, opened.handle).map;
     assert.notDeepEqual(withIcon, withoutIcon);
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("marked MAP preserves configured marker RGB and item icon RGB", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const chests = readSection(M, opened.handle, "chests");
+    const markerItem = firstStoredItem(chests);
+    installMarkerColorIndex(M, opened.handle);
+
+    const request = (color) => ({
+      chest_markers: [{ item_id: markerItem, color, radius: 60, line_width: 1 }],
+    });
+    let result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request("#FF2020FF"));
+    assert.equal(result.status, 0);
+    const redMarker = getMapBytes(M, opened.handle).map;
+
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request("#20A020FF"));
+    assert.equal(result.status, 0);
+    const greenMarker = getMapBytes(M, opened.handle).map;
+    assert.notDeepEqual(greenMarker, redMarker, "marker RGB must affect MAP tile values");
+
+    installSolidMarkerIcon(M, opened.handle, markerItem, [255, 0, 0, 255]);
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request("#FF2020FF"));
+    assert.equal(result.status, 0);
+    const redIcon = getMapBytes(M, opened.handle).map;
+
+    installSolidMarkerIcon(M, opened.handle, markerItem, [0, 0, 255, 255]);
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request("#FF2020FF"));
+    assert.equal(result.status, 0);
+    const blueIcon = getMapBytes(M, opened.handle).map;
+    assert.notDeepEqual(blueIcon, redIcon, "icon RGB must affect MAP tile values");
   } finally {
     closeWorld(M, opened);
   }

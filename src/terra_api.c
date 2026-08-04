@@ -5,6 +5,7 @@
  * to internal functions for section serialization and operations.
  */
 #include "terra_types.h"
+#include "terra_map.h"
 #include "terra_world.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -473,6 +474,7 @@ terrax_world_status terra_world_close(
 
     uint32_t allocation_mark = world->allocation_mark;
     if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
+    txw_clear_marker_color_index(world);
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();
     if (count > 0) tx_set_world_open_count(count - 1);

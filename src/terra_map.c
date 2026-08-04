@@ -14,6 +14,7 @@
 #include "terra_types.h"
 #include "terra_map.h"
 #include "terra_icon.h"
+#include "terra_color_data.h"
 #include "terra_defaults.inc"
 
 /* ---------- Extern declarations from terra_mem.c ---------- */
@@ -45,6 +46,9 @@ extern int      set_result_bytes(uint8_t* p, uint32_t len);
 
 extern void*    memset(void* dst, int value, unsigned long n);
 extern void*    memcpy(void* dst, const void* src, unsigned long n);
+extern TxWorld* tx_get_world(uint32_t handle);
+extern uint32_t tx_mark(void);
+extern void     tx_clear_error(void);
 
 extern const uint8_t* tx_get_tile_colors(void);
 extern uint32_t       tx_get_tile_color_count(void);
@@ -521,10 +525,14 @@ static uint32_t map_type_for_tile(const TxTile* t) {
     return 0u;
 }
 
+static uint32_t map_value_for_type(uint32_t type, uint8_t paint_id) {
+    return (type & 65535u) | (255u << 16) | ((uint32_t)(paint_id & 31u) << 24);
+}
+
 static uint32_t map_value_for_tile(const TxTile* t) {
     uint32_t type = map_type_for_tile(t);
     uint32_t extra = t->active ? (t->tile_color & 31u) : (t->wall ? (t->wall_color & 31u) : 0u);
-    return (type & 65535u) | (255u << 16) | ((extra & 255u) << 24);
+    return map_value_for_type(type, (uint8_t)extra);
 }
 
 typedef struct TxMapColorCacheEntry {
@@ -551,7 +559,67 @@ static int map_read_color(const uint8_t* table, uint32_t count, uint32_t id, uin
     return 1;
 }
 
+static int map_read_builtin_color(const uint8_t* table, uint32_t id, uint32_t variant,
+                                  uint8_t out[3]) {
+    const uint8_t* color;
+    if (!table || id >= TX_COLOR_MAX_IDS || variant >= TX_COLOR_MAX_VARIANTS) return 0;
+    color = table + ((id * TX_COLOR_MAX_VARIANTS + variant) * 4u);
+    if (!color[3]) return 0;
+    out[0] = color[0];
+    out[1] = color[1];
+    out[2] = color[2];
+    return 1;
+}
+
+static int map_value_for_txci_item(const TxciItem* item, uint32_t* out_value) {
+    uint32_t base_type;
+    uint32_t variant;
+
+    if (!item || !out_value) return 0;
+    variant = item->variant;
+    if (item->is_wall) {
+        if (item->type_id >= TX_MAP_WALL_COUNT ||
+            !TX_MAP_WALL_EXISTS[item->type_id] ||
+            !TX_MAP_WALL_ID_LIST[item->type_id] ||
+            variant >= TX_MAP_WALL_TYPE_COUNTS[item->type_id]) return 0;
+        base_type = TX_MAP_WALL_ID_LIST[item->type_id];
+    } else {
+        if (item->type_id >= TX_MAP_TILE_COUNT ||
+            !TX_MAP_TILE_EXISTS[item->type_id] ||
+            !TX_MAP_TILE_ID_LIST[item->type_id] ||
+            variant >= TX_MAP_TILE_TYPE_COUNTS[item->type_id]) return 0;
+        base_type = TX_MAP_TILE_ID_LIST[item->type_id];
+    }
+
+    *out_value = map_value_for_type(base_type + variant, item->paint_id);
+    return 1;
+}
+
+static int map_value_for_txci_rgb(const TxciIndex* index, uint8_t r, uint8_t g, uint8_t b,
+                                  uint32_t* out_value) {
+    int group_id;
+    TxciItem candidates[32];
+    int candidate_count;
+
+    if (!index || !index->data || !out_value) return 0;
+    group_id = txci_lookup_group(index, r, g, b);
+    if (group_id < 0) return 0;
+    candidate_count = txci_get_items(index, (uint32_t)group_id, candidates, 32);
+
+    /* TXCI stores its candidates in preference order. Keep tiles preferred for
+     * marker pixels, then accept a wall if no valid map tile is available. */
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < candidate_count; i++) {
+            if ((pass == 0 && candidates[i].is_wall) ||
+                (pass == 1 && !candidates[i].is_wall)) continue;
+            if (map_value_for_txci_item(&candidates[i], out_value)) return 1;
+        }
+    }
+    return 0;
+}
+
 static uint32_t nearest_map_value_for_rgb(
+        const TxciIndex* marker_color_index,
         uint8_t r, uint8_t g, uint8_t b, uint32_t fallback,
         TxMapColorCacheEntry* cache, uint32_t* cache_count, uint32_t cache_capacity) {
     uint32_t key = (uint32_t)r | ((uint32_t)g << 8u) | ((uint32_t)b << 16u);
@@ -570,7 +638,17 @@ static uint32_t nearest_map_value_for_rgb(
         }
     }
 
+    if (map_value_for_txci_rgb(marker_color_index, r, g, b, &best_value)) {
+        if (cache && cache_count && *cache_count < cache_capacity) {
+            cache[*cache_count].color_key = key;
+            cache[*cache_count].map_value = best_value;
+            (*cache_count)++;
+        }
+        return best_value;
+    }
+
     for (uint32_t id = 0u; id < tile_count; id++) {
+        if (id >= TX_MAP_TILE_COUNT || !TX_MAP_TILE_EXISTS[id] || !TX_MAP_TILE_ID_LIST[id]) continue;
         if (!map_read_color(tile_colors, tile_count, id, color)) continue;
         {
             uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
@@ -583,6 +661,7 @@ static uint32_t nearest_map_value_for_rgb(
         }
     }
     for (uint32_t id = 0u; id < wall_count; id++) {
+        if (id >= TX_MAP_WALL_COUNT || !TX_MAP_WALL_EXISTS[id] || !TX_MAP_WALL_ID_LIST[id]) continue;
         if (!map_read_color(wall_colors, wall_count, id, color)) continue;
         {
             uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
@@ -591,6 +670,37 @@ static uint32_t nearest_map_value_for_rgb(
             tile.wall = (uint16_t)id;
             best_distance = distance;
             best_value = map_value_for_tile(&tile);
+        }
+    }
+
+    for (uint32_t id = 0u; id < TX_MAP_TILE_COUNT; id++) {
+        uint32_t variant_count;
+        if (!TX_MAP_TILE_EXISTS[id] || !TX_MAP_TILE_ID_LIST[id]) continue;
+        variant_count = TX_MAP_TILE_TYPE_COUNTS[id];
+        if (variant_count > TX_COLOR_MAX_VARIANTS) variant_count = TX_COLOR_MAX_VARIANTS;
+        for (uint32_t variant = 0u; variant < variant_count; variant++) {
+            if (!map_read_builtin_color(TX_BUILTIN_TILE_COLORS, id, variant, color)) continue;
+            {
+                uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
+                if (distance >= best_distance) continue;
+                best_distance = distance;
+                best_value = map_value_for_type(TX_MAP_TILE_ID_LIST[id] + variant, 0u);
+            }
+        }
+    }
+    for (uint32_t id = 0u; id < TX_MAP_WALL_COUNT; id++) {
+        uint32_t variant_count;
+        if (!TX_MAP_WALL_EXISTS[id] || !TX_MAP_WALL_ID_LIST[id]) continue;
+        variant_count = TX_MAP_WALL_TYPE_COUNTS[id];
+        if (variant_count > TX_COLOR_MAX_VARIANTS) variant_count = TX_COLOR_MAX_VARIANTS;
+        for (uint32_t variant = 0u; variant < variant_count; variant++) {
+            if (!map_read_builtin_color(TX_BUILTIN_WALL_COLORS, id, variant, color)) continue;
+            {
+                uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
+                if (distance >= best_distance) continue;
+                best_distance = distance;
+                best_value = map_value_for_type(TX_MAP_WALL_ID_LIST[id] + variant, 0u);
+            }
         }
     }
 
@@ -615,6 +725,7 @@ typedef struct MapChestPoint {
     uint8_t radius;
     uint8_t line_width;
     uint8_t reserved[2];
+    uint8_t rgba[4];
 } MapChestPoint;
 
 typedef struct MapBuildRequest {
@@ -629,6 +740,7 @@ typedef struct MapBuildRequest {
     uint32_t legacy_marker_value;
     uint32_t use_legacy_chest_markers;
     uint32_t use_legacy_tile_markers;
+    const TxciIndex* marker_color_index;
 } MapBuildRequest;
 
 /* ================================================================ */
@@ -709,6 +821,7 @@ static void draw_map_marker_on_strip(
         TxWorld* world, uint32_t* strip, uint32_t world_x_base,
         uint32_t width, uint32_t height, const MapChestPoint* point,
         TxMapColorCacheEntry* color_cache, uint32_t* color_cache_count) {
+    uint32_t marker_value;
     int32_t radius;
     int32_t thickness;
     int32_t outer_squared;
@@ -717,9 +830,16 @@ static void draw_map_marker_on_strip(
     int icon_index;
 
     if (!world || !strip || !point || !width || !height) return;
+    marker_value = point->map_value;
+    if (point->reserved[0]) {
+        marker_value = nearest_map_value_for_rgb(
+            &world->marker_color_index,
+            point->rgba[0], point->rgba[1], point->rgba[2], point->map_value,
+            color_cache, color_cache_count, 512u);
+    }
     if (point->radius == 0u) {
         set_chunk_strip_point(strip, (uint32_t)(point->x - (int32_t)world_x_base),
-                              height, point->y, point->map_value);
+                              height, point->y, marker_value);
         return;
     }
 
@@ -741,7 +861,7 @@ static void draw_map_marker_on_strip(
             if (world_x < (int32_t)world_x_base ||
                 world_x >= (int32_t)(world_x_base + 64u)) continue;
             set_chunk_strip_point(strip, (uint32_t)(world_x - (int32_t)world_x_base),
-                                  height, point->y + dy, point->map_value);
+                                  height, point->y + dy, marker_value);
         }
     }
 
@@ -782,7 +902,8 @@ static void draw_map_marker_on_strip(
                             strip, (uint32_t)(world_x - (int32_t)world_x_base), height,
                             world_y,
                             nearest_map_value_for_rgb(
-                                source[0], source[1], source[2], point->map_value,
+                                &world->marker_color_index,
+                                source[0], source[1], source[2], marker_value,
                                 color_cache, color_cache_count, 512u));
                     }
                 }
@@ -878,7 +999,7 @@ static int collect_matching_chest_points(
                     if (stack != 0) {
                         int32_t item_type = rd_i32le(p, len, &off);
                         rd_u8(p, len, &off);
-                        if (matched_value == 0u && request->chest_marker_count > 0u) {
+                        if (matched_marker == NULL && request->chest_marker_count > 0u) {
                             matched_marker = find_chest_marker(
                                 request->chest_markers, request->chest_marker_count, item_type);
                             if (matched_marker) {
@@ -894,7 +1015,7 @@ static int collect_matching_chest_points(
                 }
             }
 
-            if ((matched_value != 0u || legacy_match) &&
+            if ((matched_marker != NULL || legacy_match) &&
                 x >= 0 && y >= 0 && (uint32_t)x < width && (uint32_t)y < height) {
                 points[matched].x = x;
                 points[matched].y = y;
@@ -903,8 +1024,19 @@ static int collect_matching_chest_points(
                 points[matched].item_id = matched_item_id;
                 points[matched].radius = matched_marker ? matched_marker->radius : 0u;
                 points[matched].line_width = matched_marker ? matched_marker->line_width : 0u;
-                points[matched].reserved[0] = 0u;
+                points[matched].reserved[0] = matched_marker ? 1u : 0u;
                 points[matched].reserved[1] = 0u;
+                if (matched_marker) {
+                    points[matched].rgba[0] = matched_marker->rgba[0];
+                    points[matched].rgba[1] = matched_marker->rgba[1];
+                    points[matched].rgba[2] = matched_marker->rgba[2];
+                    points[matched].rgba[3] = matched_marker->rgba[3];
+                } else {
+                    points[matched].rgba[0] = 0u;
+                    points[matched].rgba[1] = 0u;
+                    points[matched].rgba[2] = 0u;
+                    points[matched].rgba[3] = 0u;
+                }
                 matched++;
             }
         }
@@ -919,13 +1051,13 @@ static int collect_matching_chest_points(
     return 1;
 }
 
-static uint32_t find_tile_marker_value(const MapMarkerEntry* markers, uint32_t count,
-                                       uint16_t tile_type) {
+static const MapMarkerEntry* find_tile_marker(const MapMarkerEntry* markers, uint32_t count,
+                                              uint16_t tile_type) {
     for (uint32_t i = 0; i < count; i++) {
         if (markers[i].id == (int32_t)tile_type)
-            return markers[i].map_value;
+            return &markers[i];
     }
-    return 0u;
+    return NULL;
 }
 
 /* ================================================================ */
@@ -954,6 +1086,48 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
         if (TX_MAP_TILE_EXISTS[i]) buf_u8(out, TX_MAP_TILE_TYPE_COUNTS[i]);
     for (uint32_t i = 0; i < TX_MAP_WALL_COUNT; i++)
         if (TX_MAP_WALL_EXISTS[i]) buf_u8(out, TX_MAP_WALL_TYPE_COUNTS[i]);
+}
+
+/* The TXCI buffer is copied into the active world's native allocation domain,
+ * so operation reclamation cannot invalidate the palette while MAP is being
+ * generated. It is released explicitly before the world allocation mark is
+ * rewound during close. */
+void txw_clear_marker_color_index(TxWorld* world) {
+    if (!world) return;
+    if (world->marker_color_index.data) {
+        txci_unload(&world->marker_color_index);
+    }
+}
+
+int32_t txw_set_marker_color_index(uint32_t handle, uint32_t data_ptr, uint32_t data_len) {
+    TxWorld* world = tx_get_world(handle);
+
+    if (!world) {
+        tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
+        return -1;
+    }
+
+    txw_clear_marker_color_index(world);
+    if (!data_ptr && !data_len) {
+        world->heap_mark = tx_mark();
+        world->last_op_heap_end = world->heap_mark;
+        tx_clear_error();
+        return 0;
+    }
+    if (!data_ptr || data_len < TXCI_HEADER_SIZE) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "TXCI data too small or null");
+        return -1;
+    }
+    if (!txci_load_from_memory(
+            &world->marker_color_index,
+            (const uint8_t*)(uintptr_t)data_ptr, data_len)) {
+        return -1;
+    }
+
+    world->heap_mark = tx_mark();
+    world->last_op_heap_end = world->heap_mark;
+    tx_clear_error();
+    return 0;
 }
 
 /* ================================================================ */
@@ -1077,11 +1251,13 @@ static int32_t assemble_map_output(TxWorld* w, MapChunkDesc* descs, uint32_t chu
 
 static int map_value_for_requested_tile(const MapBuildRequest* request, const TxTile* t,
                                         uint32_t run, uint32_t* matched_tiles,
+                                        TxMapColorCacheEntry* color_cache,
+                                        uint32_t* color_cache_count,
                                         uint32_t* out_value) {
     if (request->tile_marker_count > 0u && t->active) {
-        uint32_t marker_val = find_tile_marker_value(
+        const MapMarkerEntry* marker = find_tile_marker(
             request->tile_markers, request->tile_marker_count, t->type);
-        if (marker_val != 0u) {
+        if (marker) {
             if (matched_tiles) {
                 if (UINT32_MAX - *matched_tiles < run) {
                     tx_set_error("TERRAX_BAD_DIMENSIONS", "tile match count overflow");
@@ -1089,7 +1265,10 @@ static int map_value_for_requested_tile(const MapBuildRequest* request, const Tx
                 }
                 *matched_tiles += run;
             }
-            *out_value = marker_val;
+            *out_value = nearest_map_value_for_rgb(
+                request->marker_color_index,
+                marker->rgba[0], marker->rgba[1], marker->rgba[2], marker->map_value,
+                color_cache, color_cache_count, 512u);
             return 1;
         }
     }
@@ -1190,7 +1369,8 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
                     }
                     run = (uint32_t)t.same + 1u;
                     if (!map_value_for_requested_tile(
-                            request, &t, run, matched_tile_count ? &tile_matches : NULL, &value)) {
+                            request, &t, run, matched_tile_count ? &tile_matches : NULL,
+                            color_cache, &color_cache_count, &value)) {
                         w->file = saved_file;
                         w->file_len = saved_len;
                         goto cleanup;
@@ -1248,6 +1428,8 @@ cleanup:
 static int32_t generate_map(TxWorld* w, const int32_t* item_ids, uint32_t item_id_count,
                             const int32_t* tile_types, uint32_t tile_type_count,
                             uint32_t mark_chests) {
+    uint32_t legacy_marker_value = nearest_map_value_for_rgb(
+        &w->marker_color_index, 255u, 35u, 26u, 0u, NULL, NULL, 0u);
     const MapBuildRequest request = {
         item_ids,
         item_id_count,
@@ -1257,9 +1439,10 @@ static int32_t generate_map(TxWorld* w, const int32_t* item_ids, uint32_t item_i
         0u,
         NULL,
         0u,
-        (35u & 65535u) | (255u << 16) | (26u << 24),
+        legacy_marker_value,
         mark_chests ? 1u : 0u,
-        tile_type_count ? 1u : 0u
+        tile_type_count ? 1u : 0u,
+        &w->marker_color_index
     };
     return generate_map_streaming(w, &request, NULL, NULL);
 }
@@ -1281,7 +1464,8 @@ static int32_t generate_map_marked(TxWorld* w,
         tile_count,
         0u,
         0u,
-        0u
+        0u,
+        &w->marker_color_index
     };
     return generate_map_streaming(w, &request, matched_chest_count, matched_tile_count);
 }

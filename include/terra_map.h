@@ -6,12 +6,19 @@
 
 typedef struct MapMarkerEntry {
     int32_t id;
-    uint32_t map_value;
+    uint32_t map_value; /* legacy fallback; marker RGB is resolved at MAP render time */
     uint8_t rgba[4];
     uint8_t radius;
     uint8_t line_width;
     uint8_t reserved[2];
 } MapMarkerEntry;
+
+int32_t txw_set_marker_color_index(
+    uint32_t handle,
+    uint32_t data_ptr,
+    uint32_t data_len);
+
+void txw_clear_marker_color_index(TxWorld* world);
 
 int32_t terra_generate_map(TxWorld* world);
 

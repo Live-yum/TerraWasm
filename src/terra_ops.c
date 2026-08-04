@@ -109,23 +109,6 @@ static void default_marker_rgba(uint8_t rgba[4]) {
     rgba[3] = 255u;
 }
 
-static uint32_t parse_marker_color(const char* hex) {
-    if (!hex || hex[0] != '#' || !hex[1]) {
-        return (35u & 65535u) | (255u << 16) | (26u << 24); /* default red */
-    }
-    const char* h = hex + 1;
-    uint8_t cr = parse_hex_byte(h);
-    uint8_t cg = parse_hex_byte(h + 2);
-    uint8_t cb = parse_hex_byte(h + 4);
-    uint8_t ca = (h[6] && h[7]) ? parse_hex_byte(h + 6) : 255;
-    (void)cr; (void)cg; /* unused in map encoding */
-    return (35u & 65535u) | ((uint32_t)ca << 16) | ((uint32_t)cb << 24);
-}
-
-static uint32_t default_marker_color(void) {
-    return (35u & 65535u) | (255u << 16) | (26u << 24);
-}
-
 static void parse_marker_rgba(const char* hex, uint8_t rgba[4]) {
     if (!hex || !marker_color_is_valid(hex)) {
         default_marker_rgba(rgba);
@@ -207,7 +190,7 @@ static int parse_marker_array(const char* request, int jlen,
             return 0;
         }
 
-        uint32_t map_value = default_marker_color();
+        uint32_t map_value = 0u;
         uint8_t rgba[4];
         default_marker_rgba(rgba);
         int color_pos = elem_len > 0 ? json_find_key(request + elem, elem_len, "color") : -1;
@@ -219,7 +202,6 @@ static int parse_marker_array(const char* request, int jlen,
                 tx_set_error("TERRAX_VALIDATION_ERROR", "marker color must be #RRGGBB or #RRGGBBAA");
                 return 0;
             }
-            map_value = parse_marker_color(hex);
             parse_marker_rgba(hex, rgba);
         }
         if (!parse_marker_size_field(
