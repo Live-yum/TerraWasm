@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include "terra_types.h"
 
+/* Keep the native MAP result below the Web WASM output contract. */
+#define TX_MAP_MAX_OUTPUT_BYTES (128u * 1024u * 1024u)
+
 typedef struct MapMarkerEntry {
     int32_t id;
     uint32_t map_value; /* legacy fallback; marker RGB is resolved at MAP render time */

@@ -1174,12 +1174,12 @@ terrax_world_status terra_op_execute_json(
     } else if (tx_streq_c(on_copy, "render_lit_map") ||
                tx_streq_c(on_copy, "mark_chest_items_map") ||
                tx_streq_c(on_copy, "mark_tiles_and_chests_map")) {
-        if (!tx_last_ptr || tx_last_len == 0u || tx_last_len > 128u * 1024u * 1024u) {
+        if (!tx_last_ptr || tx_last_len == 0u || tx_last_len > TX_MAP_MAX_OUTPUT_BYTES) {
             if (tx_last_ptr) tx_internal_free((void*)(uintptr_t)tx_last_ptr);
             tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = tx_last_stride = 0u;
             if (response.data) tx_internal_free(response.data);
             world->last_op_heap_end = world->heap_mark;
-            tx_set_error("TERRAX_RESULT_TOO_LARGE", "map output is empty or exceeds 128 MiB");
+            tx_set_error("TERRAX_RESULT_TOO_LARGE", "map output is empty or exceeds the 128 MiB budget");
             return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
         }
         world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
@@ -1322,7 +1322,7 @@ terrax_world_status terra_op_get_map(
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
     if (world->media_result_kind != 3u || !world->media_result ||
-        world->media_result_len == 0u || world->media_result_len > 128u * 1024u * 1024u) {
+        world->media_result_len == 0u || world->media_result_len > TX_MAP_MAX_OUTPUT_BYTES) {
         tx_set_error("TERRAX_STATE_ERROR", "no map output available");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
