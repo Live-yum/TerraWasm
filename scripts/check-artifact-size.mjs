@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,30 +19,68 @@ function findArtifact(artifacts, role) {
   return artifact
 }
 
+function resolveArtifactPath(repositoryRoot, artifact) {
+  const realRoot = fs.realpathSync(repositoryRoot)
+  const absolutePath = fs.realpathSync(path.resolve(repositoryRoot, artifact.path))
+  const relativePath = path.relative(realRoot, absolutePath)
+  if (
+    relativePath === '..'
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath)
+  ) {
+    fail(`${artifact.role} artifact resolves outside the repository root`)
+  }
+  return absolutePath
+}
+
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex')
+}
+
 export function verifyArtifactSizes({ root, manifest }) {
   const validatedManifest = validateManifest(manifest)
   const repositoryRoot = path.resolve(root)
-  const wrapper = findArtifact(validatedManifest.artifacts, 'wrapper')
-  const wasm = findArtifact(validatedManifest.artifacts, 'wasm')
+  const targets = [
+    { label: 'Node', artifacts: validatedManifest.targets.node.artifacts },
+    { label: 'Web', artifacts: validatedManifest.targets.web.artifacts },
+  ]
 
-  for (const artifact of [wrapper, wasm]) {
-    const absolutePath = path.resolve(repositoryRoot, artifact.path)
-    const stat = fs.statSync(absolutePath)
-    if (stat.size !== artifact.bytes) {
-      fail(`${artifact.role} byte count does not match disk (${artifact.bytes} != ${stat.size})`)
+  for (const target of targets) {
+    const wrapper = findArtifact(target.artifacts, 'wrapper')
+    const wasm = findArtifact(target.artifacts, 'wasm')
+    for (const artifact of [wrapper, wasm]) {
+      const absolutePath = resolveArtifactPath(repositoryRoot, artifact)
+      const bytes = fs.readFileSync(absolutePath)
+      if (bytes.byteLength !== artifact.bytes) {
+        fail(`${target.label} ${artifact.role} byte count does not match disk (${artifact.bytes} != ${bytes.byteLength})`)
+      }
+      const digest = sha256(bytes)
+      if (digest !== artifact.sha256.toLowerCase()) {
+        fail(`${target.label} ${artifact.role} SHA-256 does not match disk (${artifact.sha256} != ${digest})`)
+      }
     }
   }
 
-  if (wrapper.bytes > WEB_ARTIFACT_LIMITS.wrapperBytes) {
-    fail(`wrapper size ${wrapper.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wrapperBytes} bytes`)
+  const webWrapper = findArtifact(validatedManifest.targets.web.artifacts, 'wrapper')
+  const webWasm = findArtifact(validatedManifest.targets.web.artifacts, 'wasm')
+  if (webWrapper.bytes > WEB_ARTIFACT_LIMITS.wrapperBytes) {
+    fail(`wrapper size ${webWrapper.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wrapperBytes} bytes`)
   }
-  if (wasm.bytes > WEB_ARTIFACT_LIMITS.wasmBytes) {
-    fail(`wasm size ${wasm.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wasmBytes} bytes`)
+  if (webWasm.bytes > WEB_ARTIFACT_LIMITS.wasmBytes) {
+    fail(`wasm size ${webWasm.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wasmBytes} bytes`)
   }
 
   return {
-    wrapperBytes: wrapper.bytes,
-    wasmBytes: wasm.bytes,
+    wrapperBytes: webWrapper.bytes,
+    wasmBytes: webWasm.bytes,
+    node: {
+      wrapperBytes: findArtifact(validatedManifest.targets.node.artifacts, 'wrapper').bytes,
+      wasmBytes: findArtifact(validatedManifest.targets.node.artifacts, 'wasm').bytes,
+    },
+    web: {
+      wrapperBytes: webWrapper.bytes,
+      wasmBytes: webWasm.bytes,
+    },
     limits: WEB_ARTIFACT_LIMITS,
   }
 }
