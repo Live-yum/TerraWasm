@@ -275,5 +275,21 @@ else()
             endif()
             add_test(NAME terra_fuzz_smoke COMMAND terra_fuzz_smoke)
         endif()
+
+        # Release and RelWithDebInfo define NDEBUG by default. Native
+        # contracts intentionally use assert for side-effect-free
+        # invariants, so force assertions on for every test target.
+        foreach(TERRAWASM_CONTRACT_TARGET IN ITEMS
+            terra_native_contract
+            terra_error_json_contract
+            terra_zlib_bridge_contract
+            terra_json_parser_contract
+            terra_string_section_guard_contract
+            terra_fuzz_smoke
+        )
+            if(TARGET ${TERRAWASM_CONTRACT_TARGET})
+                target_compile_options(${TERRAWASM_CONTRACT_TARGET} PRIVATE -UNDEBUG)
+            endif()
+        endforeach()
     endif()
 endif()
