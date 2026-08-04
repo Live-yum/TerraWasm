@@ -192,7 +192,17 @@ if(EMSCRIPTEN)
         ${WEB_LINK_OPTIONS}
     )
 else()
-    add_library(terrax_world_static STATIC ${SOURCES})
+    # Native LP64 zlib uses wider total counters than the legacy WASM-shaped
+    # declaration in terra_txci.c. Compile only native TXCI calls through the
+    # translating bridge; Emscripten keeps its established USE_ZLIB path.
+    set_source_files_properties(
+        "${SRC_DIR}/terra_txci.c"
+        PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
+    )
+    add_library(terrax_world_static STATIC
+        ${SOURCES}
+        "${SRC_DIR}/terra_zlib_bridge.c"
+    )
     configure_terra_identity(terrax_world_static "native" 0 0 "" "")
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
     if(TERRAWASM_SANITIZERS)
@@ -223,6 +233,15 @@ else()
             target_link_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined)
         endif()
         add_test(NAME terra_error_json_contract COMMAND terra_error_json_contract)
+
+        add_executable(terra_zlib_bridge_contract tests/zlib_bridge_contract.c)
+        target_link_libraries(terra_zlib_bridge_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_zlib_bridge_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_zlib_bridge_contract COMMAND terra_zlib_bridge_contract)
 
         add_executable(terra_json_parser_contract tests/json_parser_contract.c)
         target_link_libraries(terra_json_parser_contract PRIVATE terrax_world_static ZLIB::ZLIB)
@@ -256,5 +275,21 @@ else()
             endif()
             add_test(NAME terra_fuzz_smoke COMMAND terra_fuzz_smoke)
         endif()
+
+        # Release and RelWithDebInfo define NDEBUG by default. Native
+        # contracts intentionally use assert for side-effect-free
+        # invariants, so force assertions on for every test target.
+        foreach(TERRAWASM_CONTRACT_TARGET IN ITEMS
+            terra_native_contract
+            terra_error_json_contract
+            terra_zlib_bridge_contract
+            terra_json_parser_contract
+            terra_string_section_guard_contract
+            terra_fuzz_smoke
+        )
+            if(TARGET ${TERRAWASM_CONTRACT_TARGET})
+                target_compile_options(${TERRAWASM_CONTRACT_TARGET} PRIVATE -UNDEBUG)
+            endif()
+        endforeach()
     endif()
 endif()
