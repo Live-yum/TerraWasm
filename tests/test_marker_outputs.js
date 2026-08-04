@@ -109,15 +109,19 @@ function installSolidMarkerIcon(M, handle, itemId, rgba = [12, 34, 56, 255]) {
   }
 }
 
-function installMarkerColorIndex(M, handle) {
-  const dataPtr = mustAlloc(M, TXCI_GZ.length, "marker color index");
-  M.HEAPU8.set(TXCI_GZ, dataPtr);
+function installMarkerColorIndexBytes(M, handle, bytes) {
+  const dataPtr = mustAlloc(M, bytes.length, "marker color index");
+  M.HEAPU8.set(bytes, dataPtr);
   try {
-    const status = M._txw_set_marker_color_index(handle, dataPtr, TXCI_GZ.length);
-    assert.equal(status, 0, "marker color index must load successfully");
+    return M._txw_set_marker_color_index(handle, dataPtr, bytes.length);
   } finally {
     M._tx_free(dataPtr);
   }
+}
+
+function installMarkerColorIndex(M, handle) {
+  const status = installMarkerColorIndexBytes(M, handle, TXCI_GZ);
+  assert.equal(status, 0, "marker color index must load successfully");
 }
 
 function callStringApi(M, invoke) {
@@ -714,6 +718,43 @@ test("marked MAP preserves configured marker RGB and item icon RGB", async () =>
     assert.equal(result.status, 0);
     const blueIcon = getMapBytes(M, opened.handle).map;
     assert.notDeepEqual(blueIcon, redIcon, "icon RGB must affect MAP tile values");
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("failed marker color index replacement preserves the previous MAP lookup", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const chests = readSection(M, opened.handle, "chests");
+    const markerItem = firstStoredItem(chests);
+    const request = {
+      chest_markers: [{ item_id: markerItem, color: "#FF2020FF", radius: 60, line_width: 1 }],
+    };
+
+    installMarkerColorIndex(M, opened.handle);
+    let result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const beforeFailedReplacement = getMapBytes(M, opened.handle).map;
+
+    const malformed = Buffer.alloc(TXCI_GZ.length, 0);
+    assert.equal(
+      installMarkerColorIndexBytes(M, opened.handle, malformed),
+      -1,
+      "malformed TXCI replacement must fail",
+    );
+    assert.equal(readLastErrorJson(M).code, "TERRAX_PARSE_ERROR");
+
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const afterFailedReplacement = getMapBytes(M, opened.handle).map;
+    assert.deepEqual(
+      afterFailedReplacement,
+      beforeFailedReplacement,
+      "a failed replacement must keep the last known-good marker color lookup",
+    );
   } finally {
     closeWorld(M, opened);
   }

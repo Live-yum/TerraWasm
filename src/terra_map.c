@@ -1099,6 +1099,31 @@ void txw_clear_marker_color_index(TxWorld* world) {
     }
 }
 
+int32_t txw_set_marker_color_index_from_buffer(
+    TxWorld* world,
+    const uint8_t* data,
+    uint32_t data_len) {
+    if (!world) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "world is null");
+        return -1;
+    }
+
+    /* Parse into a separate allocation domain root. A failed replacement must
+     * not destroy the last known-good index held by the world. */
+    TxciIndex replacement;
+    memset(&replacement, 0, sizeof(replacement));
+    if (!txci_load_from_memory(&replacement, data, data_len)) {
+        return -1;
+    }
+
+    TxciIndex previous = world->marker_color_index;
+    world->marker_color_index = replacement;
+    txci_unload(&previous);
+    world->heap_mark = tx_mark();
+    world->last_op_heap_end = world->heap_mark;
+    return 0;
+}
+
 int32_t txw_set_marker_color_index(uint32_t handle, uint32_t data_ptr, uint32_t data_len) {
     TxWorld* world = tx_get_world(handle);
 
@@ -1107,8 +1132,8 @@ int32_t txw_set_marker_color_index(uint32_t handle, uint32_t data_ptr, uint32_t 
         return -1;
     }
 
-    txw_clear_marker_color_index(world);
     if (!data_ptr && !data_len) {
+        txw_clear_marker_color_index(world);
         world->heap_mark = tx_mark();
         world->last_op_heap_end = world->heap_mark;
         tx_clear_error();
@@ -1118,14 +1143,11 @@ int32_t txw_set_marker_color_index(uint32_t handle, uint32_t data_ptr, uint32_t 
         tx_set_error("TERRAX_INVALID_ARGUMENT", "TXCI data too small or null");
         return -1;
     }
-    if (!txci_load_from_memory(
-            &world->marker_color_index,
-            (const uint8_t*)(uintptr_t)data_ptr, data_len)) {
+    if (txw_set_marker_color_index_from_buffer(
+            world, (const uint8_t*)(uintptr_t)data_ptr, data_len) < 0) {
         return -1;
     }
 
-    world->heap_mark = tx_mark();
-    world->last_op_heap_end = world->heap_mark;
     tx_clear_error();
     return 0;
 }

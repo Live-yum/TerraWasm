@@ -261,6 +261,15 @@ else()
         endif()
         add_test(NAME terra_string_section_guard_contract COMMAND terra_string_section_guard_contract)
 
+        add_executable(terra_marker_color_index_contract tests/marker_color_index_contract.c)
+        target_link_libraries(terra_marker_color_index_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_marker_color_index_contract PRIVATE TERRAX_STATIC)
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_marker_color_index_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_marker_color_index_contract PRIVATE -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_marker_color_index_contract COMMAND terra_marker_color_index_contract)
+
         if(TERRAWASM_FUZZ_SMOKE)
             add_executable(terra_fuzz_smoke
                 tests/fuzz/fuzz_smoke.c
@@ -285,6 +294,7 @@ else()
             terra_zlib_bridge_contract
             terra_json_parser_contract
             terra_string_section_guard_contract
+            terra_marker_color_index_contract
             terra_fuzz_smoke
         )
             if(TARGET ${TERRAWASM_CONTRACT_TARGET})
