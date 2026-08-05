@@ -31,6 +31,7 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   const M = await TerraWorldWasm();
   assert.equal(typeof M._txw_add_pixel_art_chunks_bulk, "function");
   assert.equal(typeof M._txw_add_pixel_art_chunks_bulk_fast, "function");
+  assert.equal(typeof M._terra_world_commit_to_buffer, "function");
 
   function alloc(bytes) {
     const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -62,7 +63,7 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   const handlePtr = M._tx_malloc(4);
   const worldPtr = alloc(worldBytes);
   assert.equal(M._terra_world_open_from_buffer(worldPtr, worldBytes.byteLength, handlePtr), 0);
-  const handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
+  let handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
   assert.notEqual(handle, 0);
   M._tx_free(worldPtr);
   M._tx_free(handlePtr);
@@ -134,6 +135,40 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   M._tx_free(fullBatchPtr);
   assert.equal(M._tx_bridge_heap_used(), 0);
   assert.ok(M._tx_native_heap_used() > fastBaseline);
+
+  const requiredPtr = M._tx_malloc(4);
+  const newHandlePtr = M._tx_malloc(4);
+  assert.notEqual(requiredPtr, 0);
+  assert.notEqual(newHandlePtr, 0);
+  assert.equal(M._terra_world_commit_to_buffer(
+    handle,
+    0,
+    0,
+    requiredPtr,
+    newHandlePtr,
+  ), 0);
+  const required = M.HEAPU32[requiredPtr >>> 2] >>> 0;
+  assert.ok(required > 16);
+  assert.equal(M.HEAPU32[newHandlePtr >>> 2] >>> 0, 0);
+
+  const outputPtr = M._tx_malloc(required);
+  assert.notEqual(outputPtr, 0);
+  assert.equal(M._terra_world_commit_to_buffer(
+    handle,
+    outputPtr,
+    required,
+    requiredPtr,
+    newHandlePtr,
+  ), 0);
+  handle = M.HEAPU32[newHandlePtr >>> 2] >>> 0;
+  assert.notEqual(handle, 0);
+  assert.equal(M.HEAPU32[requiredPtr >>> 2] >>> 0, required);
+  assert.equal(M.HEAPU8[outputPtr], worldBytes[0]);
+
+  M._tx_free(outputPtr);
+  M._tx_free(newHandlePtr);
+  M._tx_free(requiredPtr);
+  assert.equal(M._tx_bridge_heap_used(), 0);
 
   assert.equal(M._terra_world_close(handle), 0);
   assert.equal(M._tx_bridge_heap_used(), 0);
