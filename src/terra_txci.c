@@ -165,6 +165,10 @@ int txci_load(TxciIndex* idx, const char* path) {
 
 /* ---------- Brick-based color lookup ---------- */
 
+static int checked_group_id(const TxciIndex* idx, uint16_t group_id) {
+    return group_id < idx->color_count ? (int)group_id : -1;
+}
+
 int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b) {
     if (!idx || !idx->data) return -1;
 
@@ -199,7 +203,7 @@ int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b) {
     switch (block_type) {
     case TXCI_BLOCK_UNIFORM:
         if (remaining < 2u) return -1;
-        return (int)read_u16le(p);
+        return checked_group_id(idx, read_u16le(p));
 
     case TXCI_BLOCK_PAL4: {
         if (remaining < 1u) return -1;
@@ -211,7 +215,7 @@ int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b) {
         uint8_t byte_val = indices[local >> 1];
         uint8_t pal_idx = (local & 1) ? (byte_val >> 4) : (byte_val & 0x0F);
         if (pal_idx >= k) return -1;
-        return (int)read_u16le(pal + pal_idx * 2);
+        return checked_group_id(idx, read_u16le(pal + pal_idx * 2));
     }
 
     case TXCI_BLOCK_PAL8: {
@@ -223,12 +227,12 @@ int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b) {
         const uint8_t* indices = p + 2 + k * 2;
         uint8_t pal_idx = indices[local];
         if (pal_idx >= k) return -1;
-        return (int)read_u16le(pal + pal_idx * 2);
+        return checked_group_id(idx, read_u16le(pal + pal_idx * 2));
     }
 
     case TXCI_BLOCK_RAW16:
         if ((uint64_t)local_count * 2u > remaining) return -1;
-        return (int)read_u16le(p + local * 2);
+        return checked_group_id(idx, read_u16le(p + local * 2));
 
     default:
         return -1;
