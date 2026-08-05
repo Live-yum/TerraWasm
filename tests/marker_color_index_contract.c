@@ -109,9 +109,22 @@ static void assert_complete_group_selection(const TxWorld* world) {
     assert(item.type_id == 1u);
 }
 
+static void assert_out_of_range_group_is_safe(
+        uint8_t data[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)]) {
+    TxciIndex index = {0};
+    TxciItem item;
+    make_single_index(data);
+    write_u16le(data, INDEX_PAYLOAD_OFFSET(SINGLE_ITEM_COUNT), 1u);
+    assert(txci_load_from_memory(&index, data, INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)) == 1);
+    assert(txci_lookup_group(&index, 17u, 34u, 51u) == 1);
+    assert(txci_choose_tile(&index, 17u, 34u, 51u, 0, &item) == 0);
+    txci_unload(&index);
+}
+
 int main(void) {
     uint8_t valid[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)];
     uint8_t invalid_version[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)];
+    uint8_t invalid_group[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)];
     uint8_t truncated[TXCI_HEADER_SIZE - 1u];
     uint8_t many_options[INDEX_DATA_SIZE(MANY_ITEM_COUNT)];
     uint8_t too_many_options[INDEX_DATA_SIZE(TOO_MANY_ITEM_COUNT)];
@@ -131,6 +144,9 @@ int main(void) {
     memset(truncated, 0, sizeof(truncated));
     assert(txw_set_marker_color_index_from_buffer(
         &world, truncated, sizeof(truncated)) == -1);
+    assert_known_lookup(&world);
+
+    assert_out_of_range_group_is_safe(invalid_group);
     assert_known_lookup(&world);
 
     make_many_options_index(many_options);
