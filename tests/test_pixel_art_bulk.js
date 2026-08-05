@@ -30,6 +30,7 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   assert.ok(fs.existsSync(TXCI_PATH), `missing checked-in TXCI palette: ${TXCI_PATH}`);
   const M = await TerraWorldWasm();
   assert.equal(typeof M._txw_add_pixel_art_chunks_bulk, "function");
+  assert.equal(typeof M._txw_add_pixel_art_chunks_bulk_fast, "function");
 
   function alloc(bytes) {
     const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -37,6 +38,24 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
     assert.notEqual(ptr, 0);
     M.HEAPU8.set(value, ptr);
     return ptr;
+  }
+
+  function beginIndexed(handle, txci, palette, width, height) {
+    const txciPtr = alloc(txci);
+    const palettePtr = alloc(palette);
+    const status = M._txw_begin_pixel_art_indexed(
+      handle,
+      500, 500,
+      width, height,
+      palettePtr, 2,
+      txciPtr, txci.byteLength,
+      0, 0,
+      0, 0,
+      0,
+    );
+    M._tx_free(palettePtr);
+    M._tx_free(txciPtr);
+    assert.equal(status, 0);
   }
 
   const worldBytes = fs.readFileSync(WLD_PATH);
@@ -49,21 +68,8 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   M._tx_free(handlePtr);
 
   const txci = fs.readFileSync(TXCI_PATH);
-  const txciPtr = alloc(txci);
   const palette = Uint8Array.of(0, 0, 0, 0, 255, 0, 0, 255);
-  const palettePtr = alloc(palette);
-  assert.equal(M._txw_begin_pixel_art_indexed(
-    handle,
-    500, 500,
-    16, 16,
-    palettePtr, 2,
-    txciPtr, txci.byteLength,
-    0, 0,
-    0, 0,
-    0,
-  ), 0);
-  M._tx_free(palettePtr);
-  M._tx_free(txciPtr);
+  beginIndexed(handle, txci, palette, 16, 16);
 
   assert.equal(M._tx_bridge_heap_used(), 0);
   const nativeBaseline = M._tx_native_heap_used();
@@ -100,8 +106,36 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   assert.equal(M._tx_bridge_heap_used(), 0);
   assert.ok(M._tx_native_heap_used() > nativeBaseline);
 
+  beginIndexed(handle, txci, palette, 63 * 64, 1);
+  const fastBaseline = M._tx_native_heap_used();
+
+  const invalidFast = makeRecord({ reserved: 1 });
+  const invalidFastPtr = alloc(invalidFast);
+  assert.ok(M._txw_add_pixel_art_chunks_bulk_fast(
+    handle,
+    invalidFastPtr,
+    invalidFast.byteLength,
+    1,
+  ) < 0);
+  M._tx_free(invalidFastPtr);
+  assert.equal(M._tx_native_heap_used(), fastBaseline);
+
+  const fullBatch = new Uint8Array(RECORD_BYTES * 63);
+  for (let index = 0; index < 63; index += 1) {
+    fullBatch.set(makeRecord({ cx: index }), index * RECORD_BYTES);
+  }
+  const fullBatchPtr = alloc(fullBatch);
+  assert.equal(M._txw_add_pixel_art_chunks_bulk_fast(
+    handle,
+    fullBatchPtr,
+    fullBatch.byteLength,
+    63,
+  ), 0);
+  M._tx_free(fullBatchPtr);
+  assert.equal(M._tx_bridge_heap_used(), 0);
+  assert.ok(M._tx_native_heap_used() > fastBaseline);
+
   assert.equal(M._terra_world_close(handle), 0);
   assert.equal(M._tx_bridge_heap_used(), 0);
   assert.equal(M._tx_native_heap_used(), 0);
 });
-
