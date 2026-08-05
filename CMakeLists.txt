@@ -25,6 +25,7 @@ set(SOURCES
     "${SRC_DIR}/terra_wld.c"
     "${SRC_DIR}/terra_wld_guard.c"
     "${SRC_DIR}/terra_api.c"
+    "${SRC_DIR}/terra_commit.c"
     "${SRC_DIR}/terra_ops.c"
     "${SRC_DIR}/terra_mutators.c"
     "${SRC_DIR}/terra_render.c"
@@ -33,6 +34,7 @@ set(SOURCES
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
+    "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
 )
 
