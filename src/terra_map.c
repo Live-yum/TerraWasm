@@ -598,13 +598,14 @@ static int map_value_for_txci_item(const TxciItem* item, uint32_t* out_value) {
 static int map_value_for_txci_rgb(const TxciIndex* index, uint8_t r, uint8_t g, uint8_t b,
                                   uint32_t* out_value) {
     int group_id;
-    TxciItem candidates[32];
+    TxciItem candidates[TXCI_MAX_GROUP_OPTIONS];
     int candidate_count;
 
     if (!index || !index->data || !out_value) return 0;
     group_id = txci_lookup_group(index, r, g, b);
     if (group_id < 0) return 0;
-    candidate_count = txci_get_items(index, (uint32_t)group_id, candidates, 32);
+    candidate_count = txci_get_items(
+        index, (uint32_t)group_id, candidates, (int)TXCI_MAX_GROUP_OPTIONS);
 
     /* TXCI stores its candidates in preference order. Keep tiles preferred for
      * marker pixels, then accept a wall if no valid map tile is available. */
