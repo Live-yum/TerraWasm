@@ -25,6 +25,7 @@ set(SOURCES
     "${SRC_DIR}/terra_wld.c"
     "${SRC_DIR}/terra_wld_guard.c"
     "${SRC_DIR}/terra_api.c"
+    "${SRC_DIR}/terra_commit.c"
     "${SRC_DIR}/terra_ops.c"
     "${SRC_DIR}/terra_mutators.c"
     "${SRC_DIR}/terra_render.c"
