@@ -109,14 +109,14 @@ static void assert_complete_group_selection(const TxWorld* world) {
     assert(item.type_id == 1u);
 }
 
-static void assert_out_of_range_group_is_safe(
+static void assert_out_of_range_group_is_rejected(
         uint8_t data[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)]) {
     TxciIndex index = {0};
     TxciItem item;
     make_single_index(data);
     write_u16le(data, INDEX_PAYLOAD_OFFSET(SINGLE_ITEM_COUNT), 1u);
     assert(txci_load_from_memory(&index, data, INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)) == 1);
-    assert(txci_lookup_group(&index, 17u, 34u, 51u) == 1);
+    assert(txci_lookup_group(&index, 17u, 34u, 51u) == -1);
     assert(txci_choose_tile(&index, 17u, 34u, 51u, 0, &item) == 0);
     txci_unload(&index);
 }
@@ -146,7 +146,7 @@ int main(void) {
         &world, truncated, sizeof(truncated)) == -1);
     assert_known_lookup(&world);
 
-    assert_out_of_range_group_is_safe(invalid_group);
+    assert_out_of_range_group_is_rejected(invalid_group);
     assert_known_lookup(&world);
 
     make_many_options_index(many_options);
