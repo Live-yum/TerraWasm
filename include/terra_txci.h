@@ -10,11 +10,12 @@
 #include <stdint.h>
 
 /* TXCI v3 binary format constants */
-#define TXCI_MAGIC          0x49435854  /* "TXCI" little-endian */
-#define TXCI_VERSION        3
-#define TXCI_HEADER_SIZE    44
-#define TXCI_ITEM_SIZE      6
-#define TXCI_DIR_SIZE       8
+#define TXCI_MAGIC             0x49435854  /* "TXCI" little-endian */
+#define TXCI_VERSION           3
+#define TXCI_HEADER_SIZE       44
+#define TXCI_ITEM_SIZE         6
+#define TXCI_DIR_SIZE          8
+#define TXCI_MAX_GROUP_OPTIONS 256u
 
 /* Block types in the directory */
 #define TXCI_BLOCK_UNIFORM  0
