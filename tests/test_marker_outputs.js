@@ -124,6 +124,47 @@ function installMarkerColorIndex(M, handle) {
   assert.equal(status, 0, "marker color index must load successfully");
 }
 
+function makeLongMarkerColorIndex() {
+  const itemCount = 34;
+  const brickCount = 512;
+  const itemsOffset = 56;
+  const directoryOffset = itemsOffset + itemCount * 6;
+  const payloadOffset = directoryOffset + brickCount * 8;
+  const bytes = Buffer.alloc(payloadOffset + 2);
+
+  bytes.writeUInt32LE(0x49435854, 0);
+  bytes.writeUInt16LE(3, 4);
+  bytes.writeUInt16LE(32, 6);
+  bytes.writeUInt32LE(1, 8);
+  bytes.writeUInt32LE(itemCount, 12);
+  bytes.writeUInt32LE(brickCount, 16);
+  bytes.writeUInt32LE(44, 20);
+  bytes.writeUInt32LE(48, 24);
+  bytes.writeUInt32LE(itemsOffset, 28);
+  bytes.writeUInt32LE(directoryOffset, 32);
+  bytes.writeUInt32LE(payloadOffset, 36);
+  bytes[44] = 0x11;
+  bytes[45] = 0x22;
+  bytes[46] = 0x33;
+  bytes.writeUInt32LE(0, 48);
+  bytes.writeUInt32LE(itemCount, 52);
+
+  for (let item = 0; item < itemCount; item += 1) {
+    const offset = itemsOffset + item * 6;
+    const kindAndId = item === itemCount - 1 ? (0x8000 | 27) : 0;
+    bytes.writeUInt16LE(kindAndId, offset);
+    bytes.writeUInt16LE(0, offset + 2);
+    bytes[offset + 4] = 0;
+  }
+  for (let brick = 0; brick < brickCount; brick += 1) {
+    const offset = directoryOffset + brick * 8;
+    bytes[offset] = 0;
+    bytes.writeUInt32LE(0, offset + 4);
+  }
+  bytes.writeUInt16LE(0, payloadOffset);
+  return bytes;
+}
+
 function callStringApi(M, invoke) {
   const sizePtr = mustAlloc(M, 8, "required size");
   let outputPtr = 0;
@@ -718,6 +759,40 @@ test("marked MAP preserves configured marker RGB and item icon RGB", async () =>
     assert.equal(result.status, 0);
     const blueIcon = getMapBytes(M, opened.handle).map;
     assert.notDeepEqual(blueIcon, redIcon, "icon RGB must affect MAP tile values");
+  } finally {
+    closeWorld(M, opened);
+  }
+});
+
+test("marked MAP scans TXCI candidates beyond the legacy 32-entry limit", async () => {
+  const M = await loadModule();
+  let opened;
+  try {
+    opened = openWorld(M);
+    const chests = readSection(M, opened.handle, "chests");
+    const markerItem = firstStoredItem(chests);
+    const request = {
+      chest_markers: [{ item_id: markerItem, color: "#112233FF", radius: 1, line_width: 1 }],
+    };
+
+    assert.equal(
+      installMarkerColorIndexBytes(M, opened.handle, makeLongMarkerColorIndex()),
+      0,
+      "synthetic long TXCI group must load successfully",
+    );
+    let result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const withLongGroup = getMapBytes(M, opened.handle).map;
+
+    assert.equal(M._txw_set_marker_color_index(opened.handle, 0, 0), 0);
+    result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", request);
+    assert.equal(result.status, 0);
+    const withoutIndex = getMapBytes(M, opened.handle).map;
+    assert.notDeepEqual(
+      withLongGroup,
+      withoutIndex,
+      "MAP generation must use a valid candidate after the first 32 entries",
+    );
   } finally {
     closeWorld(M, opened);
   }
