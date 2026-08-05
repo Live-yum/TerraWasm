@@ -268,7 +268,7 @@ int txci_choose_tile(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b,
     if (!idx || !idx->data || !out) return 0;
 
     int group_id = txci_lookup_group(idx, r, g, b);
-    if (group_id < 0) return 0;
+    if (group_id < 0 || (uint32_t)group_id >= idx->color_count) return 0;
 
     uint32_t start = idx->group_offsets[(uint32_t)group_id];
     uint32_t end = idx->group_offsets[(uint32_t)group_id + 1u];
