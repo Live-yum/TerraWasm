@@ -45,6 +45,7 @@ _txw_apply_pixel_art
 _txw_begin_pixel_art_indexed
 _txw_add_pixel_art_chunk
 _txw_add_pixel_art_chunks_bulk
+_txw_add_pixel_art_chunks_bulk_fast
 _tx_gunzip
 _terra_sha256
 _terra_sha256_create
