@@ -237,6 +237,15 @@ int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b) {
 
 /* ---------- Item enumeration ---------- */
 
+static void txci_read_item(const TxciIndex* idx, uint32_t index, TxciItem* out) {
+    const uint8_t* item = idx->items + index * TXCI_ITEM_SIZE;
+    uint16_t kind_and_id = read_u16le(item);
+    out->is_wall = (kind_and_id & TXCI_KIND_WALL) ? 1 : 0;
+    out->type_id = kind_and_id & TXCI_KIND_ID_MASK;
+    out->variant = read_u16le(item + 2);
+    out->paint_id = item[4];
+}
+
 int txci_get_items(const TxciIndex* idx, uint32_t group_id,
                    TxciItem* out, int max_out) {
     if (!idx || !idx->data || !out || max_out <= 0) return 0;
@@ -247,13 +256,7 @@ int txci_get_items(const TxciIndex* idx, uint32_t group_id,
     int count = 0;
 
     for (uint32_t i = start; i < end && count < max_out; i++) {
-        const uint8_t* item = idx->items + i * TXCI_ITEM_SIZE;
-        uint16_t kind_and_id = read_u16le(item);
-        TxciItem* out_item = &out[count++];
-        out_item->is_wall = (kind_and_id & TXCI_KIND_WALL) ? 1 : 0;
-        out_item->type_id = kind_and_id & TXCI_KIND_ID_MASK;
-        out_item->variant = read_u16le(item + 2);
-        out_item->paint_id = item[4];
+        txci_read_item(idx, i, &out[count++]);
     }
     return count;
 }
@@ -267,25 +270,29 @@ int txci_choose_tile(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b,
     int group_id = txci_lookup_group(idx, r, g, b);
     if (group_id < 0) return 0;
 
-    /* Get all candidates for this color group */
-    TxciItem candidates[32];
-    int count = txci_get_items(idx, (uint32_t)group_id, candidates, 32);
-    if (count == 0) return 0;
+    uint32_t start = idx->group_offsets[(uint32_t)group_id];
+    uint32_t end = idx->group_offsets[(uint32_t)group_id + 1u];
+    TxciItem first;
+    int has_first = 0;
 
-    /* First pass: try to find exact preference */
-    for (int i = 0; i < count; i++) {
-        if (prefer_wall && candidates[i].is_wall) {
-            *out = candidates[i];
-            return 1;
+    /* Scan the complete bounded group. A preferred candidate may appear after
+     * the first 32 entries, so selection must not depend on a fixed stack copy. */
+    for (uint32_t index = start; index < end; index++) {
+        TxciItem candidate;
+        txci_read_item(idx, index, &candidate);
+        if (!has_first) {
+            first = candidate;
+            has_first = 1;
         }
-        if (!prefer_wall && !candidates[i].is_wall) {
-            *out = candidates[i];
+        if ((prefer_wall && candidate.is_wall) ||
+            (!prefer_wall && !candidate.is_wall)) {
+            *out = candidate;
             return 1;
         }
     }
 
-    /* Second pass: accept any match */
-    *out = candidates[0];
+    if (!has_first) return 0;
+    *out = first;
     return 1;
 }
 
@@ -367,6 +374,10 @@ static int txci_parse_header(TxciIndex* idx, uint8_t* buf, uint32_t buf_len) {
         uint32_t offset = idx->group_offsets[i];
         if (offset < prior || offset > idx->item_count) {
             tx_set_error("TERRAX_PARSE_ERROR", "TXCI group offsets are invalid");
+            return 0;
+        }
+        if (offset - prior > TXCI_MAX_GROUP_OPTIONS) {
+            tx_set_error("TERRAX_PARSE_ERROR", "TXCI group contains too many options");
             return 0;
         }
         prior = offset;
