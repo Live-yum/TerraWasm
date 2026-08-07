@@ -1,3 +1,4 @@
+// Temporary exact-EOL patch helper; removed from the final PR tree.
 import fs from 'node:fs'
 
 function replaceRegion(source, startMarker, endMarker, replacement, label) {
