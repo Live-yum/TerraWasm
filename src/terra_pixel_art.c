@@ -24,6 +24,7 @@ extern void* memcpy(void* dst, const void* src, unsigned long n);
 extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
 extern uint32_t tx_bridge_allocation_size(uint32_t ptr);
+extern int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern uint32_t tx_mark(void);
 extern void tx_rewind(uint32_t mark);
 extern TxWorld* tx_get_world(uint32_t handle);
@@ -165,16 +166,24 @@ int txw_queue_pixel_art(
         return -1;
     }
 
-    /* Copy RGBA pixels to bump allocator */
-    uint8_t* pix = tx_alloc(pixels_len);
+    uint32_t expected_len = (uint32_t)expected_len64;
+    uint32_t maps_size = map_count * sizeof(TxPixelMap);
+    if (!tx_bridge_range_is_valid(pixels_ptr, expected_len) ||
+        !tx_bridge_range_is_valid(map_ptr, maps_size)) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "pixel art payload exceeds its bridge allocation");
+        return -1;
+    }
+
+    /* Only retain the bytes addressed by width*height. Callers may provide a
+     * padded/backing buffer, but the unused suffix must not inflate native heap. */
+    uint8_t* pix = tx_alloc(expected_len);
     if (!pix) {
         tx_set_error("TERRAX_WASM_OOM", "pixel art pixels allocation failed");
         return -1;
     }
-    memcpy(pix, (const void*)(uintptr_t)pixels_ptr, pixels_len);
+    memcpy(pix, (const void*)(uintptr_t)pixels_ptr, expected_len);
 
     /* Copy TxPixelMap array to bump allocator */
-    uint32_t maps_size = map_count * sizeof(TxPixelMap);
     uint8_t* maps = tx_alloc(maps_size);
     if (!maps) {
         tx_internal_free(pix);
@@ -186,7 +195,7 @@ int txw_queue_pixel_art(
     /* Replace the prior queued operation only after all new roots exist. */
     txw_clear_pixel_art_state(w);
     w->pixel_art_pixels = pix;
-    w->pixel_art_pixels_len = pixels_len;
+    w->pixel_art_pixels_len = expected_len;
     w->pixel_art_maps = maps;
     w->pixel_art_map_count = map_count;
     w->pixel_art_start_x = start_x;
@@ -254,6 +263,15 @@ int txw_begin_pixel_art_indexed(
         tx_set_error("TERRAX_INVALID_ARGUMENT", "indexed palette size overflow");
         return -1;
     }
+    uint32_t palette_bytes = palette_count * 4u;
+    uint32_t override_bytes = overrides_count * sizeof(TxPixelMap);
+    if (!tx_bridge_range_is_valid(palette_ptr, palette_bytes) ||
+        !tx_bridge_range_is_valid(txci_ptr, txci_len) ||
+        (overrides_count > 0u && !tx_bridge_range_is_valid(overrides_ptr, override_bytes))) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "indexed pixel art payload exceeds its bridge allocation");
+        return -1;
+    }
+
     uint32_t maps_size = palette_count * sizeof(TxPixelMap);
     uint8_t* maps_buf = tx_alloc(maps_size);
     if (!maps_buf) {
@@ -364,12 +382,16 @@ int txw_add_pixel_art_chunk(
         tx_set_error("TERRAX_INVALID_ARGUMENT", "chunk used count exceeds 4096");
         return -1;
     }
+
+    uint32_t bytes = TX_PIXEL_ART_CHUNK_SIZE * TX_PIXEL_ART_CHUNK_SIZE * sizeof(uint16_t);
+    if (!tx_bridge_range_is_valid(indices_ptr, bytes)) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "chunk indices exceed their bridge allocation");
+        return -1;
+    }
     if (used == 0u) {
         tx_clear_error();
         return 0;
     }
-
-    uint32_t bytes = TX_PIXEL_ART_CHUNK_SIZE * TX_PIXEL_ART_CHUNK_SIZE * sizeof(uint16_t);
     uint16_t* indices = (uint16_t*)tx_alloc(bytes);
     if (!indices) {
         tx_set_error("TERRAX_WASM_OOM", "indexed chunk allocation failed");
@@ -658,6 +680,14 @@ int txw_apply_pixel_art(
         return -1;
     }
     uint32_t pixel_count = (uint32_t)pixel_count64;
+    uint32_t expected_len = (uint32_t)expected_len64;
+    uint32_t override_bytes = overrides_count * sizeof(TxPixelMap);
+    if (!tx_bridge_range_is_valid(image_ptr, expected_len) ||
+        !tx_bridge_range_is_valid(txci_ptr, txci_len) ||
+        (overrides_count > 0u && !tx_bridge_range_is_valid(overrides_ptr, override_bytes))) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "pixel-art input exceeds its bridge allocation");
+        return -1;
+    }
 
     /* Load TXCI index from memory */
     TxciIndex txci;
@@ -848,8 +878,8 @@ int txw_apply_pixel_art(
         }
     }
 
-    /* Copy RGBA pixels to bump allocator */
-    uint8_t* pix = tx_alloc(image_len);
+    /* Retain only the RGBA prefix addressed by width*height. */
+    uint8_t* pix = tx_alloc(expected_len);
     if (!pix) {
         tx_internal_free(maps_buf);
         tx_internal_free(unique_colors);
@@ -858,7 +888,7 @@ int txw_apply_pixel_art(
         tx_set_error("TERRAX_WASM_OOM", "pixel art pixels allocation failed");
         return -1;
     }
-    memcpy(pix, (const void*)(uintptr_t)image_ptr, image_len);
+    memcpy(pix, (const void*)(uintptr_t)image_ptr, expected_len);
 
     tx_internal_free(unique_colors);
     tx_internal_free(hash_keys);
@@ -867,7 +897,7 @@ int txw_apply_pixel_art(
     /* Store only the final maps/pixels; TXCI and hash roots were released. */
     txw_clear_pixel_art_state(w);
     w->pixel_art_pixels = pix;
-    w->pixel_art_pixels_len = image_len;
+    w->pixel_art_pixels_len = expected_len;
     w->pixel_art_maps = maps_buf;
     w->pixel_art_map_count = map_count;
     w->pixel_art_start_x = start_x;

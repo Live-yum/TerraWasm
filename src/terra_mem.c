@@ -200,6 +200,28 @@ uint32_t tx_bridge_allocation_size(uint32_t ptr) {
     return header ? header->root.size : 0u;
 }
 
+int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
+    if (!ptr) return length == 0u;
+    uintptr_t address = (uintptr_t)ptr;
+    TxAllocHeader* root = tx_bridge_head;
+    while (root) {
+        if (root->root.magic == TX_ALLOC_MAGIC &&
+            root->root.domain == TX_DOMAIN_BRIDGE &&
+            root->root.self == (uintptr_t)root) {
+            uintptr_t payload = (uintptr_t)((uint8_t*)root + sizeof(TxAllocHeader));
+            if (address >= payload) {
+                uintptr_t offset = address - payload;
+                if (offset <= root->root.size &&
+                    length <= root->root.size - (uint32_t)offset) {
+                    return 1;
+                }
+            }
+        }
+        root = root->root.next;
+    }
+    return 0;
+}
+
 uint8_t* tx_alloc(uint32_t size) {
     return (uint8_t*)tx_new_root(size ? size : 1u, TX_DOMAIN_NATIVE);
 }
