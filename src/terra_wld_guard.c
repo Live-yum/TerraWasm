@@ -170,11 +170,35 @@ static int validate_header_prefix(TxWorld* world) {
     return 1;
 }
 
+static int validate_recorded_header_offsets(TxWorld* world) {
+    const uint8_t* data;
+    uint32_t length;
+    uint32_t start;
+    uint32_t section_length;
+
+    if (!guard_section_view(world, 0u, &data, &start, &length)) return 0;
+    (void)data;
+    section_length = world->section_overrides[0].active
+        ? length
+        : length - start;
+
+    for (uint32_t index = 0u; index < world->header_bool_field_count; index++) {
+        if (world->header_bool_fields[index].section_offset >= section_length) {
+            tx_set_error(
+                "TERRAX_TRUNCATED_HEADER",
+                "fixed header fields exceed section bounds");
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int validate_header_late_strings(TxWorld* world) {
     const uint8_t* data;
     uint32_t length;
     uint32_t offset;
 
+    if (!validate_recorded_header_offsets(world)) return 0;
     if (!guard_section_view(world, 0u, &data, &offset, &length)) return 0;
 
     if (world->anglerFinishedSize > 0u) {
