@@ -21,6 +21,10 @@ $SourceState = $DirtyOutput -join "`n"
 $Dirty = -not [string]::IsNullOrWhiteSpace($SourceState)
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
 $EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
+$NodeInitialMemory = 134217728
+$NodeMaximumMemory = 536870912
+$WebInitialMemory = 67108864
+$WebMaximumMemory = 167772160
 $CommonFlags = @(
     $OptimizeFlag,
     "-fno-exceptions",
@@ -37,8 +41,8 @@ if ($EnableLto) {
 }
 $NodeFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
-    "-sINITIAL_MEMORY=134217728",
-    "-sMAXIMUM_MEMORY=536870912",
+    "-sINITIAL_MEMORY=$NodeInitialMemory",
+    "-sMAXIMUM_MEMORY=$NodeMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasm'",
     "-sENVIRONMENT=node",
     "-sNODERAWFS=1",
@@ -46,8 +50,8 @@ $NodeFlags = @(
 )
 $WebFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
-    "-sINITIAL_MEMORY=67108864",
-    "-sMAXIMUM_MEMORY=167772160",
+    "-sINITIAL_MEMORY=$WebInitialMemory",
+    "-sMAXIMUM_MEMORY=$WebMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasmWeb'",
     "-sENVIRONMENT=web,worker",
     "-sFILESYSTEM=1"
@@ -88,7 +92,11 @@ if ($Quick) {
         "TERRAX_BUILD_COMMIT:STRING=$SourceCommit",
         "TERRAX_BUILD_DIRTY:STRING=$DirtyFlag",
         "TERRAX_OPTIMIZE_FLAG:STRING=$OptimizeFlag",
-        "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag"
+        "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag",
+        "TERRAX_NODE_INITIAL_MEMORY:STRING=$NodeInitialMemory",
+        "TERRAX_NODE_MAXIMUM_MEMORY:STRING=$NodeMaximumMemory",
+        "TERRAX_WEB_INITIAL_MEMORY:STRING=$WebInitialMemory",
+        "TERRAX_WEB_MAXIMUM_MEMORY:STRING=$WebMaximumMemory"
     )) {
         if (-not $cache.Contains($expected)) {
             throw "Quick build cache identity does not match the current source/options; rerun without -Quick"
@@ -108,7 +116,11 @@ if (-not $Quick) {
         "-DTERRAX_BUILD_DIRTY=$DirtyFlag" `
         "-DTERRAX_BUILD_COMPILER=emscripten" `
         "-DTERRAX_OPTIMIZE_FLAG=$OptimizeFlag" `
-        "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" 2>&1
+        "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" `
+        "-DTERRAX_NODE_INITIAL_MEMORY=$NodeInitialMemory" `
+        "-DTERRAX_NODE_MAXIMUM_MEMORY=$NodeMaximumMemory" `
+        "-DTERRAX_WEB_INITIAL_MEMORY=$WebInitialMemory" `
+        "-DTERRAX_WEB_MAXIMUM_MEMORY=$WebMaximumMemory" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "CMake configure failed"
         Pop-Location
@@ -265,5 +277,7 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
     node tests/test_all.js 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }
+    node bench/map_8400x2400.js 2>&1
+    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "8400x2400 MAP benchmark failed" }
     Pop-Location
 }

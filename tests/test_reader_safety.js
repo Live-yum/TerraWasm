@@ -53,6 +53,33 @@ function makeCrossSectionHeader() {
   return candidate;
 }
 
+function makeTruncatedFixedHeader() {
+  // Format section: version 88, two section pointers and zero important tiles.
+  // Header section contains a valid world name and all seven fixed int32 values
+  // through maxTilesY/maxTilesX, then ends before the remaining fixed header.
+  const headerStart = 16;
+  const headerEnd = headerStart + 2 + 7 * 4;
+  const candidate = Buffer.alloc(headerEnd + 1);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(2, 4);
+  candidate.writeUInt32LE(headerStart, 6);
+  candidate.writeUInt32LE(headerEnd, 10);
+  candidate.writeUInt16LE(0, 14);
+
+  let offset = headerStart;
+  candidate[offset++] = 1;
+  candidate[offset++] = 0x41;
+  candidate.writeInt32LE(1, offset); offset += 4; // worldId
+  candidate.writeInt32LE(0, offset); offset += 4; // left
+  candidate.writeInt32LE(8400, offset); offset += 4; // right
+  candidate.writeInt32LE(0, offset); offset += 4; // top
+  candidate.writeInt32LE(2400, offset); offset += 4; // bottom
+  candidate.writeInt32LE(2400, offset); offset += 4; // maxTilesY
+  candidate.writeInt32LE(8400, offset); offset += 4; // maxTilesX
+  assert.equal(offset, headerEnd);
+  return candidate;
+}
+
 test("truncated and corrupted world buffers fail as statuses without crashing", async () => {
   const M = await TerraWorldWasm();
   const candidates = [
@@ -106,6 +133,26 @@ test("a header string cannot cross into the next WLD section", async () => {
     assert.deepEqual(readLastError(M), {
       code: "TERRAX_TRUNCATED_HEADER",
       message: "world name exceeds section bounds",
+    });
+  } finally {
+    M._tx_free(handlePtr);
+    M._tx_free(inputPtr);
+  }
+});
+
+test("a fixed-width WLD header cannot be zero-filled after truncation", async () => {
+  const M = await TerraWorldWasm();
+  const candidate = makeTruncatedFixedHeader();
+  const inputPtr = alloc(M, candidate);
+  const handlePtr = M._tx_malloc(4);
+  assert.notEqual(handlePtr, 0);
+  try {
+    const status = M._terra_world_open_from_buffer(inputPtr, candidate.length, handlePtr);
+    assert.equal(status, 5);
+    assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
+    assert.deepEqual(readLastError(M), {
+      code: "TERRAX_TRUNCATED_HEADER",
+      message: "fixed header fields exceed section bounds",
     });
   } finally {
     M._tx_free(handlePtr);
