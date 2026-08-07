@@ -175,6 +175,107 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   assert.equal(M._tx_native_heap_used(), 0);
 });
 
+test("direct pixel-art ABI validates bridge ranges and retains only addressed RGBA bytes", async () => {
+  const M = await TerraWorldWasm();
+  const worldBytes = fs.readFileSync(WLD_PATH);
+  const txci = fs.readFileSync(TXCI_PATH);
+
+  function alloc(value) {
+    const bytes = typeof value === "number" ? new Uint8Array(value) : new Uint8Array(value);
+    const ptr = M._tx_malloc(bytes.byteLength || 1);
+    assert.notEqual(ptr, 0);
+    if (bytes.byteLength) M.HEAPU8.set(bytes, ptr);
+    return ptr;
+  }
+
+  const inputPtr = alloc(worldBytes);
+  const handlePtr = M._tx_malloc(4);
+  assert.notEqual(handlePtr, 0);
+  assert.equal(M._terra_world_open_from_buffer(inputPtr, worldBytes.byteLength, handlePtr), 0);
+  const handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
+  assert.notEqual(handle, 0);
+  M._tx_free(inputPtr);
+  M._tx_free(handlePtr);
+
+  try {
+    const mapBytes = new Uint8Array(12);
+    mapBytes[10] = 1;
+    const mapPtr = alloc(mapBytes);
+    const tinyPixelsPtr = alloc(Uint8Array.of(1, 2, 3, 255));
+    const nativeBeforeShortQueue = M._tx_native_heap_used();
+    assert.ok(M._txw_queue_pixel_art(
+      handle, 0, 0, 2, 2,
+      tinyPixelsPtr, 16,
+      mapPtr, 1, 1,
+    ) < 0, "short bridge allocation must be rejected before memcpy");
+    assert.equal(M._tx_native_heap_used(), nativeBeforeShortQueue);
+    M._tx_free(tinyPixelsPtr);
+
+    const oversized = new Uint8Array(1024 * 1024);
+    oversized.set([1, 2, 3, 255]);
+    const oversizedPtr = alloc(oversized);
+    const nativeBeforeOversizedQueue = M._tx_native_heap_used();
+    assert.equal(M._txw_queue_pixel_art(
+      handle, 0, 0, 1, 1,
+      oversizedPtr, oversized.byteLength,
+      mapPtr, 1, 1,
+    ), 0);
+    const retainedQueueBytes = M._tx_native_heap_used() - nativeBeforeOversizedQueue;
+    assert.ok(
+      retainedQueueBytes < 1024,
+      `1x1 queue retained ${retainedQueueBytes} bytes instead of only its addressed RGBA/maps prefix`,
+    );
+    M._tx_free(oversizedPtr);
+    M._tx_free(mapPtr);
+
+    const txciPtr = alloc(txci);
+    const palettePtr = alloc(Uint8Array.of(0, 0, 0, 0, 255, 0, 0, 255));
+    const tinyPalettePtr = alloc(Uint8Array.of(0, 0, 0, 0));
+    const nativeBeforeBadBegin = M._tx_native_heap_used();
+    assert.ok(M._txw_begin_pixel_art_indexed(
+      handle, 0, 0, 64, 64,
+      tinyPalettePtr, 2,
+      txciPtr, txci.byteLength,
+      0, 0, 0, 0, 0,
+    ) < 0, "palette count may not exceed the bridge allocation");
+    assert.equal(M._tx_native_heap_used(), nativeBeforeBadBegin);
+    M._tx_free(tinyPalettePtr);
+
+    assert.equal(M._txw_begin_pixel_art_indexed(
+      handle, 0, 0, 64, 64,
+      palettePtr, 2,
+      txciPtr, txci.byteLength,
+      0, 0, 0, 0, 0,
+    ), 0);
+    const tinyIndicesPtr = alloc(new Uint8Array(2));
+    const nativeBeforeBadChunk = M._tx_native_heap_used();
+    assert.ok(M._txw_add_pixel_art_chunk(
+      handle, 0, 0, tinyIndicesPtr, 4096, 1,
+    ) < 0, "chunk count may not outgrow the bridge allocation");
+    assert.equal(M._tx_native_heap_used(), nativeBeforeBadChunk);
+    M._tx_free(tinyIndicesPtr);
+
+    const tinyImagePtr = alloc(Uint8Array.of(1, 2, 3, 255));
+    const nativeBeforeBadApply = M._tx_native_heap_used();
+    assert.ok(M._txw_apply_pixel_art(
+      handle,
+      tinyImagePtr, 16, 2, 2,
+      txciPtr, txci.byteLength,
+      0, 0, 0, 0, 0, 0,
+    ) < 0, "integrated pixel-art must reject a claimed image length beyond its bridge allocation");
+    assert.equal(M._tx_native_heap_used(), nativeBeforeBadApply);
+    M._tx_free(tinyImagePtr);
+
+    M._tx_free(palettePtr);
+    M._tx_free(txciPtr);
+    assert.equal(M._tx_bridge_heap_used(), 0);
+  } finally {
+    assert.equal(M._terra_world_close(handle), 0);
+    assert.equal(M._tx_bridge_heap_used(), 0);
+    assert.equal(M._tx_native_heap_used(), 0);
+  }
+});
+
 test("generic operation output paths cannot escape the working directory", async () => {
   const M = await TerraWorldWasm();
   const worldBytes = fs.readFileSync(WLD_PATH);
