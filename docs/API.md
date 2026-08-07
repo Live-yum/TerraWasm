@@ -82,7 +82,9 @@ powershell -File TerraWasm/build.ps1
 | 目标 | 文件 | 初始内存 | 最大内存 |
 |------|------|----------|----------|
 | Node | `build/terrax_world_wasm.js` + `.wasm` | 128 MiB | 512 MiB |
-| Web  | `build/terrax_world_wasm_web.js` + `.wasm` | 32 MiB | 96 MiB |
+| Web / Mini Program | `build/terrax_world_wasm_web.js` + `.wasm` | 64 MiB | 160 MiB |
+
+内存值由 CMake 的 `TERRAX_*_INITIAL_MEMORY` / `TERRAX_*_MAXIMUM_MEMORY` cache 变量统一驱动，同时写入 linker flags、运行时 build identity 和 `terra.manifest.json`。`build.ps1` 会显式把同一组值传给 CMake 和 manifest 生成器，避免文档、WASM 制品与 manifest 漂移。Viewer 小程序的进程级可控内存预算是宿主侧独立限制，不等同于 WASM linear-memory 上限。
 
 ---
 

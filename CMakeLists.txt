@@ -48,7 +48,32 @@ set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI id
 set(TERRAX_BUILD_DIRTY "false" CACHE STRING "Dirty state embedded in ABI identity")
 set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in ABI identity")
 set(TERRAX_OPTIMIZE_FLAG "-O3" CACHE STRING "Optimization flag for release-style Wasm builds")
+set(TERRAX_NODE_INITIAL_MEMORY "134217728" CACHE STRING "Node WASM initial linear memory in bytes")
+set(TERRAX_NODE_MAXIMUM_MEMORY "536870912" CACHE STRING "Node WASM maximum linear memory in bytes")
+set(TERRAX_WEB_INITIAL_MEMORY "67108864" CACHE STRING "Web/Mini Program WASM initial linear memory in bytes")
+set(TERRAX_WEB_MAXIMUM_MEMORY "167772160" CACHE STRING "Web/Mini Program WASM maximum linear memory in bytes")
 option(TERRAX_ENABLE_LTO "Enable link-time optimization for Wasm targets" OFF)
+
+foreach(TERRAX_MEMORY_VALUE IN ITEMS
+    TERRAX_NODE_INITIAL_MEMORY
+    TERRAX_NODE_MAXIMUM_MEMORY
+    TERRAX_WEB_INITIAL_MEMORY
+    TERRAX_WEB_MAXIMUM_MEMORY
+)
+    if(NOT "${${TERRAX_MEMORY_VALUE}}" MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "${TERRAX_MEMORY_VALUE} must be an integer byte count")
+    endif()
+    math(EXPR TERRAX_MEMORY_REMAINDER "${${TERRAX_MEMORY_VALUE}} % 65536")
+    if(NOT TERRAX_MEMORY_REMAINDER EQUAL 0)
+        message(FATAL_ERROR "${TERRAX_MEMORY_VALUE} must be WebAssembly-page aligned (65536 bytes)")
+    endif()
+endforeach()
+if(TERRAX_NODE_INITIAL_MEMORY GREATER TERRAX_NODE_MAXIMUM_MEMORY)
+    message(FATAL_ERROR "TERRAX_NODE_INITIAL_MEMORY cannot exceed TERRAX_NODE_MAXIMUM_MEMORY")
+endif()
+if(TERRAX_WEB_INITIAL_MEMORY GREATER TERRAX_WEB_MAXIMUM_MEMORY)
+    message(FATAL_ERROR "TERRAX_WEB_INITIAL_MEMORY cannot exceed TERRAX_WEB_MAXIMUM_MEMORY")
+endif()
 
 function(json_escape out_var value)
     string(REPLACE "\\" "\\\\" escaped "${value}")
@@ -148,8 +173,8 @@ if(EMSCRIPTEN)
 
     set(NODE_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
-        "-sINITIAL_MEMORY=134217728"
-        "-sMAXIMUM_MEMORY=536870912"
+        "-sINITIAL_MEMORY=${TERRAX_NODE_INITIAL_MEMORY}"
+        "-sMAXIMUM_MEMORY=${TERRAX_NODE_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasm'"
         "-sENVIRONMENT=node"
         "-sNODERAWFS=1"
@@ -157,8 +182,8 @@ if(EMSCRIPTEN)
     )
     set(WEB_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
-        "-sINITIAL_MEMORY=67108864"
-        "-sMAXIMUM_MEMORY=167772160"
+        "-sINITIAL_MEMORY=${TERRAX_WEB_INITIAL_MEMORY}"
+        "-sMAXIMUM_MEMORY=${TERRAX_WEB_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
         "-sFILESYSTEM=1"
@@ -175,7 +200,11 @@ if(EMSCRIPTEN)
 
     # ---- Node target ----
     add_executable(terrax_world_wasm ${SOURCES})
-    configure_terra_identity(terrax_world_wasm "node" 134217728 536870912 "${COMMON_FLAGS_TEXT}" "${NODE_FLAGS_TEXT}")
+    configure_terra_identity(
+        terrax_world_wasm "node"
+        ${TERRAX_NODE_INITIAL_MEMORY} ${TERRAX_NODE_MAXIMUM_MEMORY}
+        "${COMMON_FLAGS_TEXT}" "${NODE_FLAGS_TEXT}"
+    )
     target_compile_options(terrax_world_wasm PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm PRIVATE
         "${TERRAX_OPTIMIZE_FLAG}"
@@ -186,7 +215,11 @@ if(EMSCRIPTEN)
     # ---- Web/MiniProgram target ----
     # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
     add_executable(terrax_world_wasm_web ${SOURCES})
-    configure_terra_identity(terrax_world_wasm_web "web" 67108864 167772160 "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}")
+    configure_terra_identity(
+        terrax_world_wasm_web "web"
+        ${TERRAX_WEB_INITIAL_MEMORY} ${TERRAX_WEB_MAXIMUM_MEMORY}
+        "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}"
+    )
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
         "${TERRAX_OPTIMIZE_FLAG}"

@@ -60,6 +60,17 @@ test("Node and Web targets use independent export lists", () => {
   assert.match(manifestScript, /sourceCommit:\s*sourceCommit\s*\?\?/);
 });
 
+test("build script and CMake share the declared WASM memory limits", () => {
+  assert.match(cmake, /TERRAX_WEB_INITIAL_MEMORY\s+"67108864"/);
+  assert.match(cmake, /TERRAX_WEB_MAXIMUM_MEMORY\s+"167772160"/);
+  assert.match(cmake, /-sINITIAL_MEMORY=\$\{TERRAX_WEB_INITIAL_MEMORY\}/);
+  assert.match(cmake, /-sMAXIMUM_MEMORY=\$\{TERRAX_WEB_MAXIMUM_MEMORY\}/);
+  assert.match(buildScript, /\$WebInitialMemory\s*=\s*67108864/);
+  assert.match(buildScript, /\$WebMaximumMemory\s*=\s*167772160/);
+  assert.match(buildScript, /TERRAX_WEB_INITIAL_MEMORY=\$WebInitialMemory/);
+  assert.match(buildScript, /TERRAX_WEB_MAXIMUM_MEMORY=\$WebMaximumMemory/);
+  assert.match(buildScript, /bench\/map_8400x2400\.js/);
+});
 test("artifact paths are repository-relative on every host platform", () => {
   assert.match(manifestScript, /path\.posix\.isAbsolute/);
   assert.match(manifestScript, /path\.win32\.isAbsolute/);

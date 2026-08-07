@@ -1388,6 +1388,38 @@ static int map_value_for_requested_tile(const MapBuildRequest* request, const Tx
     return 1;
 }
 
+#define TX_MAP_SINGLE_PASS_STAGING_LIMIT_BYTES (32u * 1024u * 1024u)
+
+typedef struct MapChunkStagingContext {
+    TxBuf* compressed;
+    uint32_t* offsets;
+    uint32_t* sizes;
+    uint32_t count;
+    uint32_t limit;
+    int fallback;
+} MapChunkStagingContext;
+
+static int stage_map_chunk(uint32_t chunk_index, const uint8_t* data, uint32_t size, void* context) {
+    MapChunkStagingContext* stage = (MapChunkStagingContext*)context;
+    if (!stage || !stage->compressed || chunk_index >= stage->count || !data || size == 0u) {
+        tx_set_error("TERRAX_STATE_ERROR", "single-pass map chunk context is invalid");
+        return 0;
+    }
+    if (size > stage->limit || stage->compressed->len > stage->limit - size) {
+        stage->fallback = 1;
+        return 0;
+    }
+    if (!buf_reserve(stage->compressed, size)) {
+        stage->fallback = 1;
+        return 0;
+    }
+    stage->offsets[chunk_index] = stage->compressed->len;
+    stage->sizes[chunk_index] = size;
+    memcpy(stage->compressed->data + stage->compressed->len, data, size);
+    stage->compressed->len += size;
+    return 1;
+}
+
 static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request,
                                       uint32_t* matched_chest_count,
                                       uint32_t* matched_tile_count) {
@@ -1398,6 +1430,7 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     MapChestPoint* chest_points = NULL;
     uint32_t chest_point_count = 0u;
     TxBuf header = { 0 };
+    TxBuf staged = { 0 };
     uint8_t* output = NULL;
     int32_t result = -1;
 
@@ -1414,29 +1447,20 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
         return -1;
     }
     if (!map_layout(w, &width, &height, &cpr, &cpc, &chunk_count, &strip_bytes)) return -1;
-
     if (!collect_matching_chest_points(w, request, width, height, &chest_points, &chest_point_count)) goto cleanup;
 
     if ((uint64_t)chunk_count * sizeof(uint32_t) > UINT32_MAX) {
-        tx_set_error("TERRAX_BAD_DIMENSIONS", "map chunk size table exceeds WASM limits");
+        tx_set_error("TERRAX_BAD_DIMENSIONS", "map chunk tables exceed WASM limits");
         goto cleanup;
     }
     chunk_sizes = (uint32_t*)tx_alloc(chunk_count * sizeof(uint32_t));
     chunk_offsets = (uint32_t*)tx_alloc(chunk_count * sizeof(uint32_t));
     if (!chunk_sizes || !chunk_offsets) {
-        tx_set_error("TERRAX_WASM_OOM", "map chunk size table allocation failed");
+        tx_set_error("TERRAX_WASM_OOM", "map chunk tables allocation failed");
         goto cleanup;
     }
     memset(chunk_sizes, 0, chunk_count * sizeof(uint32_t));
     memset(chunk_offsets, 0, chunk_count * sizeof(uint32_t));
-
-    {
-        MapChunkMeasureContext measure = { chunk_sizes, chunk_count };
-        if (!walk_map_chunks(w, request, chest_points, chest_point_count,
-                             width, height, cpr, cpc, strip_bytes,
-                             matched_tile_count ? &tile_matches : NULL,
-                             measure_map_chunk, &measure)) goto cleanup;
-    }
 
     buf_init(&header, 4096u);
     if (!header.ok) {
@@ -1449,6 +1473,81 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
         goto cleanup;
     }
 
+    /* Fast path: retain only the bytes that compression actually produced.
+     * chunk_offsets maps the x-major WLD scan back to the row-major MAP file.
+     * The 32 MiB staging cap keeps staging + final output bounded; if the
+     * compressed stream would exceed that cap, the exact low-memory two-pass
+     * path below remains available. */
+    buf_init(&staged, 64u * 1024u);
+    if (staged.ok) {
+        MapChunkStagingContext stage = {
+            &staged,
+            chunk_offsets,
+            chunk_sizes,
+            chunk_count,
+            TX_MAP_SINGLE_PASS_STAGING_LIMIT_BYTES,
+            0,
+        };
+        if (walk_map_chunks(w, request, chest_points, chest_point_count,
+                            width, height, cpr, cpc, strip_bytes,
+                            matched_tile_count ? &tile_matches : NULL,
+                            stage_map_chunk, &stage)) {
+            uint64_t final_size = header.len;
+            for (uint32_t index = 0u; index < chunk_count; index++) {
+                uint32_t size = chunk_sizes[index];
+                uint32_t offset = chunk_offsets[index];
+                if (!size || offset > staged.len || size > staged.len - offset ||
+                    final_size > UINT32_MAX - 4u - size ||
+                    final_size + 4u + size > TX_MAP_MAX_OUTPUT_BYTES) {
+                    tx_set_error("TERRAX_RESULT_TOO_LARGE", "map output exceeds the 128 MiB budget");
+                    goto cleanup;
+                }
+                final_size += 4u + size;
+            }
+            output = tx_alloc((uint32_t)final_size);
+            if (!output) {
+                tx_set_error("TERRAX_WASM_OOM", "map output allocation failed");
+                goto cleanup;
+            }
+            memcpy(output, header.data, header.len);
+            {
+                uint32_t write_offset = header.len;
+                for (uint32_t index = 0u; index < chunk_count; index++) {
+                    uint32_t size = chunk_sizes[index];
+                    uint32_t offset = chunk_offsets[index];
+                    write_map_u32le(output + write_offset, size);
+                    memcpy(output + write_offset + 4u, staged.data + offset, size);
+                    write_offset += 4u + size;
+                }
+            }
+            {
+                TxBuf result_buffer = { output, (uint32_t)final_size, (uint32_t)final_size, 1 };
+                result = set_result_buf(&result_buffer);
+                if (result < 0) goto cleanup;
+                output = NULL;
+            }
+            goto finalized;
+        }
+        if (!stage.fallback) goto cleanup;
+    }
+
+    /* Fallback: the previous exact two-pass implementation has lower peak
+     * staging memory for unusually large compressed MAPs. */
+    if (staged.data) {
+        tx_internal_free(staged.data);
+        staged.data = NULL;
+    }
+    memset(chunk_sizes, 0, chunk_count * sizeof(uint32_t));
+    memset(chunk_offsets, 0, chunk_count * sizeof(uint32_t));
+    tile_matches = 0u;
+    tx_clear_error();
+    {
+        MapChunkMeasureContext measure = { chunk_sizes, chunk_count };
+        if (!walk_map_chunks(w, request, chest_points, chest_point_count,
+                             width, height, cpr, cpc, strip_bytes,
+                             matched_tile_count ? &tile_matches : NULL,
+                             measure_map_chunk, &measure)) goto cleanup;
+    }
     {
         uint64_t final_size = header.len;
         for (uint32_t index = 0; index < chunk_count; index++) {
@@ -1469,29 +1568,21 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
             goto cleanup;
         }
         memcpy(output, header.data, header.len);
-
-        MapChunkWriteContext write = {
-            output,
-            (uint32_t)final_size,
-            chunk_offsets,
-            chunk_sizes,
-            chunk_count,
-        };
-        if (!walk_map_chunks(w, request, chest_points, chest_point_count,
-                             width, height, cpr, cpc, strip_bytes, NULL,
-                             write_map_chunk, &write)) goto cleanup;
-
-        TxBuf result_buffer = {
-            output,
-            (uint32_t)final_size,
-            (uint32_t)final_size,
-            1,
-        };
-        result = set_result_buf(&result_buffer);
-        if (result < 0) goto cleanup;
-        output = NULL;
+        {
+            MapChunkWriteContext write = { output, (uint32_t)final_size, chunk_offsets, chunk_sizes, chunk_count };
+            if (!walk_map_chunks(w, request, chest_points, chest_point_count,
+                                 width, height, cpr, cpc, strip_bytes, NULL,
+                                 write_map_chunk, &write)) goto cleanup;
+        }
+        {
+            TxBuf result_buffer = { output, (uint32_t)final_size, (uint32_t)final_size, 1 };
+            result = set_result_buf(&result_buffer);
+            if (result < 0) goto cleanup;
+            output = NULL;
+        }
     }
 
+finalized:
     tx_last_width = width;
     tx_last_height = height;
     tx_last_stride = width * 4u;
@@ -1502,6 +1593,7 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
 
 cleanup:
     if (header.data) tx_internal_free(header.data);
+    if (staged.data) tx_internal_free(staged.data);
     if (chunk_sizes) tx_internal_free(chunk_sizes);
     if (chunk_offsets) tx_internal_free(chunk_offsets);
     if (output) tx_internal_free(output);
@@ -1512,7 +1604,6 @@ cleanup:
 /* ================================================================ */
 /*  Multi-color marker support                                       */
 /* ================================================================ */
-
 static int32_t generate_map(TxWorld* w, const int32_t* item_ids, uint32_t item_id_count,
                             const int32_t* tile_types, uint32_t tile_type_count,
                             uint32_t mark_chests) {
