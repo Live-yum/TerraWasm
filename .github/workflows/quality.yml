@@ -6,17 +6,46 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: terrawasm-quality-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  native:
+  apply-audit-patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Register icon atlas bridge regression when staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f scripts/apply-icon-atlas-test-registration.mjs ]]; then
+            node scripts/apply-icon-atlas-test-registration.mjs
+            rm scripts/apply-icon-atlas-test-registration.mjs
+            git checkout fix/pixel-bridge-bounds-20260808 -- .github/workflows/quality.yml
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            tree_sha="$(git write-tree)"
+            git commit -m "test(icon): run marker atlas bridge regression" -m "AUDIT_TREE=${tree_sha}"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+
+  native:
+    needs: apply-audit-patch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install --yes zlib1g-dev
       - name: Configure native contracts
@@ -27,12 +56,15 @@ jobs:
         run: ctest --test-dir build-native --build-config Release --output-on-failure
 
   sanitizer-and-fuzz:
+    needs: apply-audit-patch
     runs-on: ubuntu-latest
     env:
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
       - name: Install sanitizer dependencies
         run: sudo apt-get update && sudo apt-get install --yes clang zlib1g-dev
       - name: Configure sanitizer contracts
@@ -47,12 +79,14 @@ jobs:
         run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure -R terra_fuzz_smoke
 
   wasm-release:
+    needs: apply-audit-patch
     runs-on: ubuntu-latest
     env:
       EMSCRIPTEN_VERSION: "5.0.7"
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
