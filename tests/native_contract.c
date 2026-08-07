@@ -30,6 +30,9 @@ void terrax_test_fail_save_after_bytes(uint32_t bytes);
 void terrax_test_reset_fail_save(void);
 #endif
 
+void rd_string_copy(const uint8_t* p, uint32_t len, uint32_t* off, char* out, uint32_t cap);
+void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off);
+
 static int read_file_alloc(const char* path, unsigned char** out_data, size_t* out_len) {
     FILE* f = fopen(path, "rb");
     if (!f) return 0;
@@ -293,10 +296,45 @@ cleanup:
 #endif
 }
 
+static int test_string_reader_bounds(void) {
+    static const unsigned char truncated[] = {5u, 'A'};
+    static const unsigned char valid[] = {5u, 'h', 'e', 'l', 'l', 'o'};
+    static const unsigned char malformed_7bit[] = {0x80u, 0x80u, 0x80u, 0x80u, 0x80u};
+    char output[8] = "sentinel";
+    uint32_t off = 0u;
+
+    rd_string_copy(truncated, (uint32_t)sizeof(truncated), &off, output, sizeof(output));
+    if (!expect(off == sizeof(truncated), "native reader contract: truncated string offset did not clamp")) return 0;
+    if (!expect(output[0] == '\0', "native reader contract: truncated string output was not cleared")) return 0;
+
+    off = 0u;
+    memset(output, 0x7f, sizeof(output));
+    rd_string_copy(valid, (uint32_t)sizeof(valid), &off, output, 4u);
+    if (!expect(off == sizeof(valid), "native reader contract: valid string offset did not advance")) return 0;
+    if (!expect(strcmp(output, "hel") == 0, "native reader contract: bounded copy did not terminate correctly")) return 0;
+
+    off = 0u;
+    rd_string_copy(valid, (uint32_t)sizeof(valid), &off, NULL, 0u);
+    if (!expect(off == sizeof(valid), "native reader contract: zero-capacity copy did not consume the string")) return 0;
+
+    off = 0u;
+    output[0] = 'X';
+    rd_string_copy(malformed_7bit, (uint32_t)sizeof(malformed_7bit), &off, output, sizeof(output));
+    if (!expect(off == sizeof(malformed_7bit), "native reader contract: malformed 7-bit length did not clamp")) return 0;
+    if (!expect(output[0] == '\0', "native reader contract: malformed 7-bit output was not cleared")) return 0;
+
+    off = 0u;
+    rd_skip_string_value(truncated, (uint32_t)sizeof(truncated), &off);
+    if (!expect(off == sizeof(truncated), "native reader contract: truncated skipped string did not clamp")) return 0;
+
+    puts("native reader contract: bounded string readers enforced");
+    return 1;
+}
 int main(void) {
     if (!test_native_abi_contract()) return 1;
     if (!test_header_section_bounds()) return 2;
     if (!test_native_terraria_header_layout()) return 3;
-    if (!test_failed_save_preserves_destination()) return 4;
+    if (!test_string_reader_bounds()) return 4;
+    if (!test_failed_save_preserves_destination()) return 5;
     return 0;
 }
