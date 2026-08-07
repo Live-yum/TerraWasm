@@ -74,6 +74,68 @@ extern int json_extract_bool(const char* json, int jlen, int pos, int* out);
 extern int json_array_count(const char* json, int jlen, int pos);
 extern int json_array_element(const char* json, int jlen, int pos, int index);
 
+static int ascii_lower(int value) {
+    if (value >= 'A' && value <= 'Z') return value + ('a' - 'A');
+    return value;
+}
+
+static int path_has_suffix_case_insensitive(const char* path, const char* suffix) {
+    uint32_t path_len = tx_strlen(path);
+    uint32_t suffix_len = tx_strlen(suffix);
+    if (path_len < suffix_len) return 0;
+    for (uint32_t index = 0u; index < suffix_len; index++) {
+        int left = ascii_lower((unsigned char)path[path_len - suffix_len + index]);
+        int right = ascii_lower((unsigned char)suffix[index]);
+        if (left != right) return 0;
+    }
+    return 1;
+}
+
+/* Generic operation JSON can be influenced by a less-trusted caller than the
+ * direct path-based Node API. Node builds use NODERAWFS, so operation output
+ * paths must stay relative to the process working directory and may not walk
+ * through parent segments. Preview writes are additionally limited to PNGs. */
+static int operation_output_path_is_safe(const char* path, const char* required_suffix) {
+    if (!path || !path[0]) return 1;
+    if (path[0] == '/' || path[0] == '\\') return 0;
+    if (path[1] == ':') return 0;
+
+    uint32_t segment_start = 0u;
+    for (uint32_t index = 0u;; index++) {
+        unsigned char value = (unsigned char)path[index];
+        if (value != 0u && value < 32u) return 0;
+        if (value == ':') return 0;
+        if (value == '/' || value == '\\' || value == 0u) {
+            uint32_t segment_len = index - segment_start;
+            if (segment_len == 2u
+                && path[segment_start] == '.'
+                && path[segment_start + 1u] == '.') {
+                return 0;
+            }
+            if (value == 0u) break;
+            segment_start = index + 1u;
+        }
+    }
+
+    return !required_suffix || path_has_suffix_case_insensitive(path, required_suffix);
+}
+
+static int validate_operation_output_path(const char* path, const char* required_suffix) {
+    if (operation_output_path_is_safe(path, required_suffix)) return 1;
+    tx_set_error(
+        "TERRAX_VALIDATION_ERROR",
+        required_suffix
+            ? "operation output_path must be a relative .png path without parent traversal"
+            : "operation output_dir must be relative and must not contain parent traversal");
+    return 0;
+}
+
+#ifdef TERRAX_TESTING
+int terrax_test_operation_output_path_is_safe(const char* path, const char* required_suffix) {
+    return operation_output_path_is_safe(path, required_suffix);
+}
+#endif
+
 /* Hex color parsing helper */
 static uint8_t parse_hex_byte(const char* s) {
     uint8_t v = 0;
@@ -309,10 +371,14 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
     p = json_find_key(request, jlen, "max_h");
     if (p >= 0) json_extract_int(request, jlen, p, &max_h);
 
-    /* Parse output_path */
+    /* Parse and validate output_path before the expensive render. */
     char output_path[512] = {0};
     p = json_find_key(request, jlen, "output_path");
-    if (p >= 0) json_extract_str(request, jlen, p, output_path, 512);
+    if (p >= 0 && !json_extract_str(request, jlen, p, output_path, sizeof(output_path))) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "operation output_path must be a string under 512 bytes");
+        return -1;
+    }
+    if (!validate_operation_output_path(output_path, ".png")) return -1;
 
     /* Render PNG into WASM memory */
     int result = txw_render_preview_png(w, (uint32_t)max_w, (uint32_t)max_h);
@@ -322,13 +388,10 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
     uint32_t png_ptr = tx_last_ptr, png_len = tx_last_len;
     uint32_t png_w = tx_last_width, png_h = tx_last_height;
 
-    /* If output_path specified, write to file */
-    if (output_path[0]) {
-        FILE* f = fopen(output_path, "wb");
-        if (f) {
-            fwrite((void*)(uintptr_t)png_ptr, 1, png_len, f);
-            fclose(f);
-        }
+    if (output_path[0] && !write_file_from_heap(
+            output_path, (const uint8_t*)(uintptr_t)png_ptr, png_len)) {
+        tx_set_error("TERRAX_IO_ERROR", "preview PNG output write failed");
+        return -1;
     }
 
     /* Build response */
@@ -427,9 +490,13 @@ static int execute_txw_render_preview_rgba(TxWorld* w, const char* request, int 
 
 static int execute_render_lit_map(TxWorld* w, const char* request, int jlen,
                                   TxBuf* response) {
-    extern int json_find_key(const char* json, int jlen, const char* key);
-    extern int json_extract_str(const char* json, int jlen, int pos, char* out, int ocap);
-    extern int write_file_from_heap(const char* path, const uint8_t* data, uint32_t len);
+    char dir_buf[512] = {0};
+    int dir_pos = json_find_key(request, jlen, "output_dir");
+    if (dir_pos >= 0 && !json_extract_str(request, jlen, dir_pos, dir_buf, sizeof(dir_buf))) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "operation output_dir must be a string under 512 bytes");
+        return -1;
+    }
+    if (!validate_operation_output_path(dir_buf, NULL)) return -1;
 
     int32_t result = terra_generate_map(w);
     if (result < 0) return -1;
@@ -440,22 +507,18 @@ static int execute_render_lit_map(TxWorld* w, const char* request, int jlen,
     uint32_t map_h = tx_last_height;
 
     int wrote_file = 0;
-    int dir_pos = json_find_key(request, jlen, "output_dir");
-    if (dir_pos >= 0 && map_data && map_len > 0) {
-        char dir_buf[512];
-        if (json_extract_str(request, jlen, dir_pos, dir_buf, sizeof(dir_buf))) {
-            char map_path[768];
-            uint32_t pos = 0;
-            for (uint32_t i = 0; dir_buf[i] && pos < sizeof(map_path) - 32; i++)
-                map_path[pos++] = dir_buf[i];
-            if (pos > 0 && map_path[pos-1] != '/' && map_path[pos-1] != '\\')
-                map_path[pos++] = '/';
-            const char* fname = "world.map";
-            for (uint32_t i = 0; fname[i] && pos < sizeof(map_path) - 1; i++)
-                map_path[pos++] = fname[i];
-            map_path[pos] = 0;
-            wrote_file = write_file_from_heap(map_path, map_data, map_len);
-        }
+    if (dir_buf[0] && map_data && map_len > 0) {
+        char map_path[768];
+        uint32_t pos = 0;
+        for (uint32_t i = 0; dir_buf[i] && pos < sizeof(map_path) - 32; i++)
+            map_path[pos++] = dir_buf[i];
+        if (pos > 0 && map_path[pos-1] != '/' && map_path[pos-1] != '\\')
+            map_path[pos++] = '/';
+        const char* fname = "world.map";
+        for (uint32_t i = 0; fname[i] && pos < sizeof(map_path) - 1; i++)
+            map_path[pos++] = fname[i];
+        map_path[pos] = 0;
+        wrote_file = write_file_from_heap(map_path, map_data, map_len);
     }
 
     buf_cstr(response, "{\"status\":\"ok\",\"width\":");
@@ -537,6 +600,15 @@ static int execute_mark_chest_items_preview(TxWorld* w, const char* request, int
 
 static int execute_mark_chest_items_map(TxWorld* w, const char* request, int jlen,
                                         TxBuf* response) {
+    char output_dir[512] = {0};
+    int output_pos = json_find_key(request, jlen, "output_dir");
+    if (output_pos >= 0 && !json_extract_str(
+            request, jlen, output_pos, output_dir, sizeof(output_dir))) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "operation output_dir must be a string under 512 bytes");
+        return -1;
+    }
+    if (!validate_operation_output_path(output_dir, NULL)) return -1;
+
     MapMarkerEntry* chest_markers = NULL;
     uint32_t chest_count = 0u;
     if (!parse_marker_array(
@@ -561,10 +633,6 @@ static int execute_mark_chest_items_map(TxWorld* w, const char* request, int jle
     uint32_t map_h = tx_last_height;
 
     int wrote_file = 0;
-    char output_dir[512] = {0};
-    int output_pos = json_find_key(request, jlen, "output_dir");
-    if (output_pos >= 0)
-        json_extract_str(request, jlen, output_pos, output_dir, sizeof(output_dir));
     if (output_dir[0] && map_data && map_len > 0) {
         char map_path[768];
         uint32_t pos = 0u;
@@ -670,7 +738,11 @@ static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, in
     /* Parse output_dir */
     char output_dir[512] = {0};
     int p = json_find_key(request, jlen, "output_dir");
-    if (p >= 0) json_extract_str(request, jlen, p, output_dir, sizeof(output_dir));
+    if (p >= 0 && !json_extract_str(request, jlen, p, output_dir, sizeof(output_dir))) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "operation output_dir must be a string under 512 bytes");
+        return -1;
+    }
+    if (!validate_operation_output_path(output_dir, NULL)) return -1;
 
     MapMarkerEntry* chest_markers = NULL;
     MapMarkerEntry* tile_markers = NULL;
