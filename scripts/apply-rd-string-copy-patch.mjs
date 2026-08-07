@@ -92,17 +92,14 @@ function patchReader() {
 function patchNativeContract() {
   const file = 'tests/native_contract.c'
   let source = fs.readFileSync(file, 'utf8')
-  const eol = source.includes('\r\n') ? '\r\n' : '\n'
 
-  const declarationAnchor = '#endif' + eol + eol + 'static int read_file_alloc'
+  const declarationAnchor = 'static int read_file_alloc'
   const declarations = [
-    '#endif',
-    '',
     'void rd_string_copy(const uint8_t* p, uint32_t len, uint32_t* off, char* out, uint32_t cap);',
     'void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off);',
     '',
     'static int read_file_alloc',
-  ].join(eol)
+  ].join('\n')
   source = replaceOnce(source, declarationAnchor, declarations, 'reader declarations')
 
   const testBlock = [
@@ -141,16 +138,19 @@ function patchNativeContract() {
     '    return 1;',
     '}',
     '',
-  ].join(eol)
-  source = replaceOnce(source, 'int main(void) {' + eol, testBlock + 'int main(void) {' + eol, 'reader test insertion')
+  ].join('\n')
+  source = replaceOnce(source, 'int main(void) {', testBlock + 'int main(void) {', 'reader test insertion')
   source = replaceOnce(
     source,
-    '    if (!test_native_terraria_header_layout()) return 3;' + eol +
-      '    if (!test_failed_save_preserves_destination()) return 4;',
-    '    if (!test_native_terraria_header_layout()) return 3;' + eol +
-      '    if (!test_string_reader_bounds()) return 4;' + eol +
-      '    if (!test_failed_save_preserves_destination()) return 5;',
-    'reader test main call',
+    '    if (!test_native_terraria_header_layout()) return 3;',
+    '    if (!test_native_terraria_header_layout()) return 3;\n    if (!test_string_reader_bounds()) return 4;',
+    'reader test main insertion',
+  )
+  source = replaceOnce(
+    source,
+    '    if (!test_failed_save_preserves_destination()) return 4;',
+    '    if (!test_failed_save_preserves_destination()) return 5;',
+    'reader test main renumber',
   )
   fs.writeFileSync(file, source)
 }
