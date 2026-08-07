@@ -209,7 +209,8 @@ async function main() {
         if (r.status === 0) ok("convert_world_biome(" + mode + ")"); else fail("convert_world_biome(" + mode + ")", "st=" + r.status + " " + (r.error || ""));
     }
 
-    const mapDir = path.join(__dirname, "out_isolated");
+    // Generic operation paths are intentionally confined to the process working directory.
+    const mapDir = path.join("tests", "out_isolated");
     if (!fs.existsSync(mapDir)) fs.mkdirSync(mapDir, { recursive: true });
     r = opExec(h, "render_lit_map", JSON.stringify({ output_dir: mapDir }));
     if (r.status === 0) ok("render_lit_map"); else fail("render_lit_map", "st=" + r.status + " " + (r.error || ""));

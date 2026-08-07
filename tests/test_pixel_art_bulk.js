@@ -174,3 +174,79 @@ test("bulk indexed ABI rejects malformed records without leaking either heap", a
   assert.equal(M._tx_bridge_heap_used(), 0);
   assert.equal(M._tx_native_heap_used(), 0);
 });
+
+test("generic operation output paths cannot escape the working directory", async () => {
+  const M = await TerraWorldWasm();
+  const worldBytes = fs.readFileSync(WLD_PATH);
+
+  function allocBytes(bytes) {
+    const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const ptr = M._tx_malloc(value.byteLength);
+    assert.notEqual(ptr, 0);
+    M.HEAPU8.set(value, ptr);
+    return ptr;
+  }
+
+  function allocCString(value) {
+    const size = M.lengthBytesUTF8(value) + 1;
+    const ptr = M._tx_malloc(size);
+    assert.notEqual(ptr, 0);
+    M.stringToUTF8(value, ptr, size);
+    return ptr;
+  }
+
+  function execute(handle, name, request) {
+    const namePtr = allocCString(name);
+    const requestPtr = allocCString(JSON.stringify(request));
+    const requiredPtr = M._tx_malloc(8);
+    assert.notEqual(requiredPtr, 0);
+    try {
+      return M._terra_op_execute_json(handle, namePtr, requestPtr, 0, 0n, requiredPtr);
+    } finally {
+      M._tx_free(requiredPtr);
+      M._tx_free(requestPtr);
+      M._tx_free(namePtr);
+    }
+  }
+
+  const inputPtr = allocBytes(worldBytes);
+  const handlePtr = M._tx_malloc(4);
+  assert.notEqual(handlePtr, 0);
+  assert.equal(M._terra_world_open_from_buffer(
+    inputPtr,
+    worldBytes.byteLength,
+    handlePtr,
+  ), 0);
+  const handle = M.HEAPU32[handlePtr >>> 2] >>> 0;
+  assert.notEqual(handle, 0);
+  M._tx_free(inputPtr);
+  M._tx_free(handlePtr);
+
+  try {
+    assert.notEqual(execute(handle, "render_preview_png", {
+      output_path: "../escaped.png",
+      max_w: 8,
+    }), 0);
+    assert.notEqual(execute(handle, "render_preview_png", {
+      output_path: path.resolve("escaped.png"),
+      max_w: 8,
+    }), 0);
+    assert.notEqual(execute(handle, "render_preview_png", {
+      output_path: "tests/not-a-png.txt",
+      max_w: 8,
+    }), 0);
+    assert.notEqual(execute(handle, "render_lit_map", {
+      output_dir: "../escaped-map",
+    }), 0);
+
+    const missingDirectory = path.join("tests", "missing-operation-output-dir");
+    fs.rmSync(missingDirectory, { recursive: true, force: true });
+    assert.notEqual(execute(handle, "render_preview_png", {
+      output_path: path.join(missingDirectory, "preview.png"),
+      max_w: 8,
+    }), 0, "a failed PNG write must not be reported as success");
+    assert.equal(fs.existsSync(path.join(missingDirectory, "preview.png")), false);
+  } finally {
+    assert.equal(M._terra_world_close(handle), 0);
+  }
+});
