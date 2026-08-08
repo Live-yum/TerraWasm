@@ -1,4 +1,6 @@
 /build/
 /build-native*/
 /build_log.txt
+/cmake_log.txt
+/.claude/settings.local.json
 .sisyphus/
