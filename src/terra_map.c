@@ -48,6 +48,7 @@ extern void*    memset(void* dst, int value, unsigned long n);
 extern void*    memcpy(void* dst, const void* src, unsigned long n);
 extern TxWorld* tx_get_world(uint32_t handle);
 extern uint32_t tx_mark(void);
+extern int      tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern void     tx_clear_error(void);
 
 extern const uint8_t* tx_get_tile_colors(void);
@@ -1137,6 +1138,10 @@ int32_t txw_set_marker_color_index(uint32_t handle, uint32_t data_ptr, uint32_t 
     }
     if (!data_ptr || data_len < TXCI_HEADER_SIZE) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "TXCI data too small or null");
+        return -1;
+    }
+    if (!tx_bridge_range_is_valid(data_ptr, data_len)) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "marker color-index payload exceeds its bridge allocation");
         return -1;
     }
     if (txw_set_marker_color_index_from_buffer(

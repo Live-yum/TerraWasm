@@ -10,6 +10,7 @@ extern TxWorld* tx_get_world(uint32_t handle);
 extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
 extern uint32_t tx_mark(void);
+extern int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern void tx_set_error(const char* code, const char* message);
 extern void tx_clear_error(void);
 
@@ -48,6 +49,7 @@ int32_t txw_set_icon_atlas(
         uint32_t y_offsets_ptr) {
     TxWorld* world = tx_get_world(handle);
     uint32_t rgba_bytes = 0u;
+    uint32_t table_bytes;
     uint8_t* copied_rgba;
     const uint32_t* item_ids;
     const uint32_t* x_offsets;
@@ -70,6 +72,15 @@ int32_t txw_set_icon_atlas(
     if (!rgba_ptr || !item_ids_ptr || !x_offsets_ptr || !y_offsets_ptr ||
         !icon_atlas_dimensions_valid(icon_size, icon_count, atlas_width, atlas_height, &rgba_bytes)) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "invalid marker icon atlas dimensions or pointers");
+        return -1;
+    }
+
+    table_bytes = icon_count * sizeof(uint32_t);
+    if (!tx_bridge_range_is_valid(rgba_ptr, rgba_bytes) ||
+        !tx_bridge_range_is_valid(item_ids_ptr, table_bytes) ||
+        !tx_bridge_range_is_valid(x_offsets_ptr, table_bytes) ||
+        !tx_bridge_range_is_valid(y_offsets_ptr, table_bytes)) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT", "marker icon atlas payload exceeds its bridge allocation");
         return -1;
     }
 
@@ -98,9 +109,9 @@ int32_t txw_set_icon_atlas(
     world->icon_atlas.icon_count = icon_count;
     world->icon_atlas.atlas_width = atlas_width;
     world->icon_atlas.atlas_height = atlas_height;
-    memcpy(world->icon_atlas.item_ids, item_ids, icon_count * sizeof(uint32_t));
-    memcpy(world->icon_atlas.x_offsets, x_offsets, icon_count * sizeof(uint32_t));
-    memcpy(world->icon_atlas.y_offsets, y_offsets, icon_count * sizeof(uint32_t));
+    memcpy(world->icon_atlas.item_ids, item_ids, table_bytes);
+    memcpy(world->icon_atlas.x_offsets, x_offsets, table_bytes);
+    memcpy(world->icon_atlas.y_offsets, y_offsets, table_bytes);
 
     /* Keep the copied atlas above all transient operation allocations. */
     world->heap_mark = tx_mark();
