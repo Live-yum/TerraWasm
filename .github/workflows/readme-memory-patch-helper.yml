@@ -1,0 +1,42 @@
+name: README memory patch helper
+
+on:
+  push:
+    branches:
+      - docs/readme-memory-truth-20260808
+
+permissions:
+  contents: write
+
+jobs:
+  patch-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: docs/readme-memory-truth-20260808
+      - name: Apply byte-preserving README patch and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          data = path.read_bytes()
+          old = ('- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32 MiB 初始内存，96 MiB 最大内存）\r\n').encode('utf-8')
+          new = (
+              '- `build/terrax_world_wasm_web.js` + `.wasm`（Web/MiniProgram 目标，64 MiB 初始内存，160 MiB 最大内存）\r\n'
+              '\r\n'
+              '内存参数以 `CMakeLists.txt` 中的 `TERRAX_*_INITIAL_MEMORY` / `TERRAX_*_MAXIMUM_MEMORY` 为配置真值；实际发布产物再由 `build/terra.manifest.json` 记录并由 CI 校验。README 仅用于说明，不应作为独立的内存配置来源。\r\n'
+          ).encode('utf-8')
+          if data.count(old) != 1:
+              raise SystemExit(f'expected exactly one stale memory line, found {data.count(old)}')
+          path.write_bytes(data.replace(old, new, 1))
+          Path('.github/workflows/readme-memory-patch-helper.yml').unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs(readme): align Web memory limits with build truth'
+          git push origin HEAD:${GITHUB_REF_NAME}
