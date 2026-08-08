@@ -77,7 +77,9 @@ python scripts/build_txci.py
 
 产出：
 - `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128 MiB 初始内存，512 MiB 最大内存）
-- `build/terrax_world_wasm_web.js` + `.wasm`（Web 目标，32 MiB 初始内存，96 MiB 最大内存）
+- `build/terrax_world_wasm_web.js` + `.wasm`（Web/MiniProgram 目标，64 MiB 初始内存，160 MiB 最大内存）
+
+内存参数以 `CMakeLists.txt` 中的 `TERRAX_*_INITIAL_MEMORY` / `TERRAX_*_MAXIMUM_MEMORY` 为配置真值；实际发布产物再由 `build/terra.manifest.json` 记录并由 CI 校验。README 仅用于说明，不应作为独立的内存配置来源。
 
 编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、Node/Web 导出集合与导出哈希、公共与目标专属构建 flags、内存预算，以及每个交付产物的 byte size 和 SHA-256。构建不会自动修改其他仓库。
 
