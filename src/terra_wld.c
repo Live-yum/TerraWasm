@@ -119,19 +119,29 @@ uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok){
     return 0;
     }
 void rd_string_copy(const uint8_t *p,uint32_t len,uint32_t *off,char *out,uint32_t cap){
+    if (!off){
+        if (out&&cap)out[0]=0;
+        return;
+        }
+    if (!p){
+        if (out&&cap)out[0]=0;
+        *off=len;
+        return;
+        }
     int ok=0;
     uint32_t slen=rd_7bit(p,len,off,&ok);
     if (!ok||!terra_reader_has(*off,slen,len)){
-        if (cap)out[0]=0;
+        if (out&&cap)out[0]=0;
         *off=len;
-        ;
+        return;
         }
     uint32_t n=slen;
-    if (n+1u>cap)n=cap?cap-1u:0u;
+    if (!out||cap==0u)n=0u;
+    else if (n>=cap)n=cap-1u;
     for (uint32_t i=0;
     i<n;
     i++)out[i]=(char)p[*off+i];
-    if (cap)out[n]=0;
+    if (out&&cap)out[n]=0;
     (void)terra_reader_take(off,slen,len);
     }
 void uuid_to_string(const uint8_t *p,char *out){
@@ -151,11 +161,16 @@ void uuid_to_string(const uint8_t *p,char *out){
     out[k]=0;
     }
 void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
+    if (!off)return;
+    if (!p){
+        *off=len;
+        return;
+        }
     int ok=0;
     uint32_t slen=rd_7bit(p,len,off,&ok);
     if (!ok||!terra_reader_has(*off,slen,len)){
         *off=len;
-        ;
+        return;
         }
     (void)terra_reader_take(off,slen,len);
     }
