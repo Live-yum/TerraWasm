@@ -1,0 +1,15 @@
+/build/
+/build-native*/
+/build_log.txt
+/cmake_log.txt
+/.claude/settings.local.json
+.sisyphus/
+/.omc/
+/.omx/
+/.cache/
+/output/
+/outputs/
+/artifacts/
+*.log
+/tests/out_isolated/
+/tests/*.wld.TEdit

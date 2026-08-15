@@ -1,0 +1,45 @@
+{
+  "format": "TXCI",
+  "version": 3,
+  "name": "terraria_color_index",
+  "source_file": "data\\extracted\\colors.generated.json",
+  "source_sha256": "5c5d8c6100cd268711560f46e16b12c689a83092f3fcad72735fe5535c959cf2",
+  "generated_at_unix": 1781325983,
+  "metric": {
+    "type": "rgb_squared",
+    "weights": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "entry_count": 20026,
+  "tile_type_count": 290,
+  "wall_type_count": 356,
+  "tile_record_count": 8990,
+  "wall_record_count": 11036,
+  "unique_rgb_group_count": 3578,
+  "duplicate_option_count": 20026,
+  "brick_size": 8,
+  "block_stats": {
+    "brick_size": 8,
+    "brick_count": 32768,
+    "block_types": {
+      "pal8": 5,
+      "pal4": 22785,
+      "uniform": 9978
+    },
+    "avg_unique_groups_per_brick": 3.06121826171875,
+    "max_unique_groups_per_brick": 35,
+    "directory_bytes": 262144,
+    "payload_bytes": 6058935
+  },
+  "artifacts": {
+    "txci": {
+      "path": "terraria_color_index.txci",
+      "bytes": 6466331,
+      "gzip_bytes": 952605,
+      "sha256": "3961e9b365bc776f58bfe0132537efc1ac2c73781605eeb2db27ad4ee89b299e"
+    }
+  }
+}
