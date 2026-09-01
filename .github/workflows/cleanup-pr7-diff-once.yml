@@ -1,0 +1,79 @@
+name: Cleanup PR7 diff once
+
+on:
+  push:
+    branches:
+      - optimize/web-wld-abi-trim
+    paths:
+      - .github/workflows/cleanup-pr7-diff-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: optimize/web-wld-abi-trim
+          fetch-depth: 0
+      - name: Restore formatting and apply only runtime-method split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git show origin/master:CMakeLists.txt > CMakeLists.txt
+          git show origin/master:build.ps1 > build.ps1
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wide = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
+
+          p = Path('CMakeLists.txt')
+          s = p.read_text()
+          old = f'''    list(APPEND COMMON_LINK_OPTIONS\n        "-sALLOW_MEMORY_GROWTH=1"\n        "{wide}"\n        "-sMODULARIZE=1"\n        "-sERROR_ON_UNDEFINED_SYMBOLS=1"\n        "--no-entry"\n    )'''
+          new = '''    list(APPEND COMMON_LINK_OPTIONS\n        "-sALLOW_MEMORY_GROWTH=1"\n        "-sMODULARIZE=1"\n        "-sERROR_ON_UNDEFINED_SYMBOLS=1"\n        "--no-entry"\n    )'''
+          if old not in s: raise SystemExit('CMake COMMON_LINK_OPTIONS anchor not found')
+          s = s.replace(old, new, 1)
+          anchor = '''    if(TERRAX_ENABLE_LTO)\n        list(APPEND COMMON_COMPILE_OPTIONS -flto)\n        list(APPEND COMMON_LINK_OPTIONS -flto)\n        list(APPEND COMMON_MANIFEST_FLAGS -flto)\n    endif()\n\n'''
+          insert = anchor + f'''    set(WIDE_RUNTIME_METHODS "{wide}")\n    if(TERRAWASM_FEATURE_SET STREQUAL "wld")\n        set(WEB_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']")\n    else()\n        set(WEB_RUNTIME_METHODS "${{WIDE_RUNTIME_METHODS}}")\n    endif()\n\n'''
+          if anchor not in s: raise SystemExit('CMake LTO anchor not found')
+          s = s.replace(anchor, insert, 1)
+          node = '''    set(NODE_LINK_OPTIONS\n        "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"\n'''
+          if node not in s: raise SystemExit('CMake node anchor not found')
+          s = s.replace(node, node + '        "${WIDE_RUNTIME_METHODS}"\n', 1)
+          web = '''    set(WEB_LINK_OPTIONS\n        "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"\n'''
+          if web not in s: raise SystemExit('CMake web anchor not found')
+          s = s.replace(web, web + '        "${WEB_RUNTIME_METHODS}"\n', 1)
+          p.write_text(s)
+
+          p = Path('build.ps1')
+          s = p.read_text()
+          common_line = f'    "{wide}",\n'
+          if common_line not in s: raise SystemExit('PowerShell common runtime anchor not found')
+          s = s.replace(common_line, '', 1)
+          anchor = '''if ($EnableLto) {\n    $CommonFlags += "-flto"\n}\n'''
+          insert = anchor + f'''$WideRuntimeMethods = "{wide}"\n$WebRuntimeMethods = if ($Features -eq "wld") {{ "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']" }} else {{ $WideRuntimeMethods }}\n'''
+          if anchor not in s: raise SystemExit('PowerShell LTO anchor not found')
+          s = s.replace(anchor, insert, 1)
+          node = '''$NodeFlags = @(\n    "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",\n'''
+          if node not in s: raise SystemExit('PowerShell node anchor not found')
+          s = s.replace(node, node + '    $WideRuntimeMethods,\n', 1)
+          web = '''$WebFlags = @(\n    "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",\n'''
+          if web not in s: raise SystemExit('PowerShell web anchor not found')
+          s = s.replace(web, web + '    $WebRuntimeMethods,\n', 1)
+          p.write_text(s)
+          PY
+          rm .github/workflows/cleanup-pr7-diff-once.yml
+          git diff --check
+          git diff -- CMakeLists.txt build.ps1
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt build.ps1 .github/workflows/cleanup-pr7-diff-once.yml
+          git commit -m 'chore: minimize Web runtime-method diff'
+          git push origin HEAD:optimize/web-wld-abi-trim
