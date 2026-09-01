@@ -147,6 +147,14 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
     const original = twoCallJson(module, module._terra_player_get_json, [handle]);
     assert.equal(typeof original.name, "string");
     assert.notEqual(original.name.length, 0);
+    if (EXTERNAL_FIXTURE) {
+      assert.equal(original.version, 326, "real fixture version regression");
+      assert.equal(original.taxMoney, 113750, "v326 body-prefix alignment regression");
+      assert.equal(original.numberOfDeathsPve, 11, "v326 death alignment regression");
+      assert.equal(original.voiceVariant, 2, "v326 loadout alignment regression");
+      assert.equal(original.formatExtensions?.v326PrefixFlag, true,
+        "v326 extension byte regression");
+    }
     assert.equal(getField(module, handle, "/name"), original.name);
     assert.deepEqual(encode(module, handle), source, "clean save must preserve bytes");
 
@@ -289,6 +297,13 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
   let pathHandle = 0;
   try {
     handle = openBuffer(module, source);
+    if (EXTERNAL_FIXTURE) {
+      const original = twoCallJson(module, module._terra_player_get_json, [handle]);
+      assert.equal(original.version, 326);
+      assert.equal(original.taxMoney, 113750);
+      assert.equal(original.voiceVariant, 2);
+      assert.equal(original.formatExtensions?.v326PrefixFlag, true);
+    }
     const originalName = getField(module, handle, "/name");
     assert.equal(typeof originalName, "string");
     assert.notEqual(originalName.length, 0);

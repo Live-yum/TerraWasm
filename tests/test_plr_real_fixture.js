@@ -188,6 +188,14 @@ test("Node opens a real Terraria PLR and reuses two-call caches", async () => {
     const jsonSize = probeJsonCache(module, handle);
     const original = getDocumentJson(module, handle, jsonSize);
     assertSemanticShape(original);
+    assert.equal(original.version, 326, "real fixture version changed unexpectedly");
+    assert.equal(original.taxMoney, 113750, "v326 prefix byte alignment regression");
+    assert.equal(original.numberOfDeathsPve, 11, "v326 death-counter alignment regression");
+    assert.equal(original.voiceVariant, 2, "v326 loadout alignment regression");
+    assert.equal(original.voicePitchOffset, 0, "v326 voice pitch alignment regression");
+    assert.equal(original.formatExtensions?.v326PrefixFlag, true,
+      "v326 body-prefix extension byte was not preserved");
+    assert.equal(original.armor[0].itemType, 3381, "v326 main armor layout regression");
 
     const clean = encode(module, handle);
     assert.deepEqual(clean, source,
@@ -218,6 +226,10 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
   let reopened = 0;
   try {
     handle = openBuffer(module, source);
+    assert.equal(getField(module, handle, "/version"), 326);
+    assert.equal(getField(module, handle, "/taxMoney"), 113750);
+    assert.equal(getField(module, handle, "/voiceVariant"), 2);
+    assert.equal(getField(module, handle, "/formatExtensions/v326PrefixFlag"), true);
     const originalName = getField(module, handle, "/name");
     assert.equal(typeof originalName, "string");
     const clean = encode(module, handle);
