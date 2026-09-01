@@ -1599,6 +1599,13 @@ static uint8_t *plr_encrypt(
     return encrypted;
 }
 
+static int plr_version_uses_v326_layout(int32_t version) {
+    /* v326 extends persisted equipment slots with a favorite byte and adds
+     * one body-prefix boolean. Higher versions are attempted using the most
+     * recent known layout; the strict EOF check rejects incompatible layouts. */
+    return version >= 326;
+}
+
 /* -------------------------------------------------------------------------
  * Semantic model readers
  * ------------------------------------------------------------------------- */
@@ -1661,11 +1668,13 @@ static PlrJsonValue *plr_read_full_item(PlrReader *reader, int with_favorited) {
     return plr_make_item(item_type, stack, prefix, favorited);
 }
 
-static PlrJsonValue *plr_read_type_prefix_item(PlrReader *reader) {
+static PlrJsonValue *plr_read_type_prefix_item(
+    PlrReader *reader, int with_favorited) {
     int32_t item_type = plr_read_i32(reader);
     uint8_t prefix = plr_read_u8(reader);
+    int favorited = with_favorited ? (plr_read_u8(reader) != 0u) : 0;
     if (!reader->ok) return NULL;
-    return plr_make_item(item_type, 0, prefix, 0);
+    return plr_make_item(item_type, 0, prefix, favorited);
 }
 
 static PlrJsonValue *plr_read_item_array(
@@ -1674,7 +1683,8 @@ static PlrJsonValue *plr_read_item_array(
     if (!array) return NULL;
     for (uint32_t i = 0u; i < count; i++) {
         PlrJsonValue *item = type_prefix ?
-            plr_read_type_prefix_item(reader) : plr_read_full_item(reader, with_favorited);
+            plr_read_type_prefix_item(reader, with_favorited) :
+            plr_read_full_item(reader, with_favorited);
         if (!item || !plr_json_array_push(array, item)) {
             plr_json_free(item);
             plr_json_free(array);
@@ -1876,13 +1886,16 @@ static PlrJsonValue *plr_read_creative_powers(PlrReader *reader) {
     return powers;
 }
 
-static PlrJsonValue *plr_read_loadouts(PlrReader *reader) {
+static PlrJsonValue *plr_read_loadouts(
+    PlrReader *reader, int with_favorited) {
     PlrJsonValue *loadouts = plr_json_array();
     if (!loadouts) return NULL;
     for (uint32_t i = 0u; i < PLR_LOADOUTS; i++) {
         PlrJsonValue *loadout = plr_json_object();
-        PlrJsonValue *armor = plr_read_item_array(reader, PLR_ARMOR_SLOTS, 0, 0);
-        PlrJsonValue *dyes = plr_read_item_array(reader, PLR_DYE_SLOTS, 0, 0);
+        PlrJsonValue *armor = plr_read_item_array(
+            reader, PLR_ARMOR_SLOTS, with_favorited, 0);
+        PlrJsonValue *dyes = plr_read_item_array(
+            reader, PLR_DYE_SLOTS, with_favorited, 0);
         PlrJsonValue *hide = plr_read_bool_array(reader, PLR_DYE_SLOTS);
         if (!loadout || !armor || !dyes || !hide) {
             plr_json_free(loadout); plr_json_free(armor); plr_json_free(dyes);
@@ -1934,6 +1947,7 @@ static PlrJsonValue *plr_parse_plain(
     PlrReader reader = {plain, plain_length, 0u, 1};
     int32_t version = plr_read_i32(&reader);
     if (!reader.ok) return NULL;
+    const int v326_layout = plr_version_uses_v326_layout(version);
 
     uint64_t magic_and_type = plr_read_u64(&reader);
     uint32_t revision = plr_read_u32(&reader);
@@ -2027,8 +2041,23 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_bool(root, "usedGalaxyPearl", &reader) ||
         !plr_put_reader_bool(root, "usedGummyWorm", &reader) ||
         !plr_put_reader_bool(root, "usedAmbrosia", &reader) ||
-        !plr_put_reader_bool(root, "downedDd2EventAnyDifficulty", &reader) ||
-        !plr_put_reader_i32(root, "taxMoney", &reader) ||
+        !plr_put_reader_bool(root, "downedDd2EventAnyDifficulty", &reader) || !reader.ok) {
+        plr_json_free(root);
+        return NULL;
+    }
+    if (v326_layout) {
+        int extension_flag = plr_read_u8(&reader) != 0u;
+        PlrJsonValue *extensions = plr_json_object();
+        if (!reader.ok || !extensions ||
+            !plr_json_object_put_bool(extensions, "v326PrefixFlag", extension_flag) ||
+            !plr_root_put(root, "formatExtensions", extensions)) {
+            plr_json_free(extensions);
+            plr_json_free(root);
+            return NULL;
+        }
+        extensions = NULL;
+    }
+    if (!plr_put_reader_i32(root, "taxMoney", &reader) ||
         !plr_put_reader_i32(root, "numberOfDeathsPve", &reader) ||
         !plr_put_reader_i32(root, "numberOfDeathsPvp", &reader) || !reader.ok) {
         plr_json_free(root);
@@ -2052,8 +2081,10 @@ static PlrJsonValue *plr_parse_plain(
         }
     }
 
-    PlrJsonValue *armor = plr_read_item_array(&reader, PLR_ARMOR_SLOTS, 0, 1);
-    PlrJsonValue *dyes = plr_read_item_array(&reader, PLR_DYE_SLOTS, 0, 1);
+    PlrJsonValue *armor = plr_read_item_array(
+        &reader, PLR_ARMOR_SLOTS, v326_layout, 1);
+    PlrJsonValue *dyes = plr_read_item_array(
+        &reader, PLR_DYE_SLOTS, v326_layout, 1);
     PlrJsonValue *inventory = plr_read_item_array(&reader, PLR_INVENTORY_SLOTS, 1, 0);
     PlrJsonValue *misc_equips = plr_json_array();
     PlrJsonValue *misc_dyes = plr_json_array();
@@ -2063,8 +2094,8 @@ static PlrJsonValue *plr_parse_plain(
         return NULL;
     }
     for (uint32_t i = 0u; i < PLR_MISC_SLOTS; i++) {
-        PlrJsonValue *equip = plr_read_type_prefix_item(&reader);
-        PlrJsonValue *dye = plr_read_type_prefix_item(&reader);
+        PlrJsonValue *equip = plr_read_type_prefix_item(&reader, 0);
+        PlrJsonValue *dye = plr_read_type_prefix_item(&reader, 0);
         if (!equip || !dye) {
             plr_json_free(equip); plr_json_free(dye);
             plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
@@ -2245,7 +2276,7 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_i32(root, "currentLoadoutIndex", &reader) || !reader.ok) {
         plr_json_free(root); return NULL;
     }
-    PlrJsonValue *loadouts = plr_read_loadouts(&reader);
+    PlrJsonValue *loadouts = plr_read_loadouts(&reader, v326_layout);
     if (!loadouts) {
         plr_json_free(root); return NULL;
     }
@@ -2524,8 +2555,17 @@ static int plr_validate_loadouts(const PlrJsonValue *object) {
 
 static int plr_validate_model(const PlrJsonValue *root) {
     if (!root || root->type != PLR_JSON_OBJECT) return plr_model_error("PLR model must be an object");
-    if (!plr_required_i32(root, "version"))
+    int32_t model_version = 0;
+    if (!plr_value_i32(plr_json_object_get(root, "version"), &model_version))
         return plr_model_error("PLR version is missing or invalid");
+    const PlrJsonValue *format_extensions =
+        plr_json_object_get(root, "formatExtensions");
+    if (format_extensions) {
+        if (!plr_version_uses_v326_layout(model_version) ||
+            format_extensions->type != PLR_JSON_OBJECT ||
+            !plr_required_bool(format_extensions, "v326PrefixFlag"))
+            return plr_model_error("PLR formatExtensions is invalid for this version");
+    }
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -2722,16 +2762,19 @@ static void plr_writer_item(
 }
 
 static void plr_writer_type_prefix_item(
-    PlrWriter *writer, const PlrJsonValue *item) {
+    PlrWriter *writer, const PlrJsonValue *item, int with_favorited) {
     int32_t item_type = 0;
     uint8_t prefix = 0;
+    int favorited = 0;
     if (!plr_field_i32(item, "itemType", &item_type) ||
-        !plr_field_u8(item, "prefix", &prefix)) {
+        !plr_field_u8(item, "prefix", &prefix) ||
+        (with_favorited && !plr_field_bool(item, "favorited", &favorited))) {
         writer->ok = 0;
         return;
     }
     plr_writer_i32(writer, item_type);
     plr_writer_u8(writer, prefix);
+    if (with_favorited) plr_writer_u8(writer, favorited ? 1u : 0u);
 }
 
 static void plr_writer_item_array(
@@ -2743,7 +2786,9 @@ static void plr_writer_item_array(
         return;
     }
     for (uint32_t i = 0u; i < expected; i++) {
-        if (type_prefix) plr_writer_type_prefix_item(writer, array->as.array.items[i]);
+        if (type_prefix)
+            plr_writer_type_prefix_item(
+                writer, array->as.array.items[i], with_favorited);
         else plr_writer_item(writer, array->as.array.items[i], with_favorited);
     }
 }
@@ -2887,7 +2932,8 @@ static void plr_writer_creative_powers(PlrWriter *writer, const PlrJsonValue *ro
     plr_writer_u8(writer, 0u);
 }
 
-static void plr_writer_loadouts(PlrWriter *writer, const PlrJsonValue *root) {
+static void plr_writer_loadouts(
+    PlrWriter *writer, const PlrJsonValue *root, int with_favorited) {
     const PlrJsonValue *array = plr_field_array(root, "loadouts");
     if (!array || array->as.array.count != PLR_LOADOUTS) {
         writer->ok = 0;
@@ -2895,8 +2941,10 @@ static void plr_writer_loadouts(PlrWriter *writer, const PlrJsonValue *root) {
     }
     for (uint32_t i = 0u; i < PLR_LOADOUTS; i++) {
         const PlrJsonValue *loadout = array->as.array.items[i];
-        plr_writer_item_array(writer, loadout, "armor", PLR_ARMOR_SLOTS, 0, 0);
-        plr_writer_item_array(writer, loadout, "dyes", PLR_DYE_SLOTS, 0, 0);
+        plr_writer_item_array(
+            writer, loadout, "armor", PLR_ARMOR_SLOTS, with_favorited, 0);
+        plr_writer_item_array(
+            writer, loadout, "dyes", PLR_DYE_SLOTS, with_favorited, 0);
         plr_writer_bool_array(writer, loadout, "hide", PLR_DYE_SLOTS);
     }
 }
@@ -2908,6 +2956,7 @@ static uint8_t *plr_encode_plain(
     PlrWriter writer = {NULL, 0u, 0u, 1};
     int32_t version = 0;
     if (!plr_field_i32(root, "version", &version)) writer.ok = 0;
+    const int v326_layout = plr_version_uses_v326_layout(version);
     plr_writer_i32(&writer, version);
 
     const PlrJsonValue *metadata = plr_field(root, "metadata");
@@ -2972,6 +3021,16 @@ static uint8_t *plr_encode_plain(
         if (!plr_field_bool(root, body_bool_fields[index], &boolean)) writer.ok = 0;
         plr_writer_u8(&writer, boolean ? 1u : 0u);
     }
+    if (v326_layout) {
+        int extension_flag = 0;
+        const PlrJsonValue *extensions = plr_field(root, "formatExtensions");
+        if (extensions) {
+            if (extensions->type != PLR_JSON_OBJECT ||
+                !plr_field_bool(extensions, "v326PrefixFlag", &extension_flag))
+                writer.ok = 0;
+        }
+        plr_writer_u8(&writer, extension_flag ? 1u : 0u);
+    }
     const char *death_fields[] = {"taxMoney", "numberOfDeathsPve", "numberOfDeathsPvp"};
     for (uint32_t index = 0u; index < 3u; index++) {
         if (!plr_field_i32(root, death_fields[index], &i32)) writer.ok = 0;
@@ -2984,16 +3043,18 @@ static uint8_t *plr_encode_plain(
     for (uint32_t index = 0u; index < 7u; index++)
         plr_writer_color(&writer, root, color_fields[index]);
 
-    plr_writer_item_array(&writer, root, "armor", PLR_ARMOR_SLOTS, 0, 1);
-    plr_writer_item_array(&writer, root, "dyes", PLR_DYE_SLOTS, 0, 1);
+    plr_writer_item_array(
+        &writer, root, "armor", PLR_ARMOR_SLOTS, v326_layout, 1);
+    plr_writer_item_array(
+        &writer, root, "dyes", PLR_DYE_SLOTS, v326_layout, 1);
     plr_writer_item_array(&writer, root, "inventory", PLR_INVENTORY_SLOTS, 1, 0);
     const PlrJsonValue *misc_equips = plr_field_array(root, "miscEquips");
     const PlrJsonValue *misc_dyes = plr_field_array(root, "miscDyes");
     if (!misc_equips || !misc_dyes || misc_equips->as.array.count != PLR_MISC_SLOTS ||
         misc_dyes->as.array.count != PLR_MISC_SLOTS) writer.ok = 0;
     else for (uint32_t index = 0u; index < PLR_MISC_SLOTS; index++) {
-        plr_writer_type_prefix_item(&writer, misc_equips->as.array.items[index]);
-        plr_writer_type_prefix_item(&writer, misc_dyes->as.array.items[index]);
+        plr_writer_type_prefix_item(&writer, misc_equips->as.array.items[index], 0);
+        plr_writer_type_prefix_item(&writer, misc_dyes->as.array.items[index], 0);
     }
     plr_writer_item_array(&writer, root, "piggyBank", PLR_BANK_SLOTS, 0, 0);
     plr_writer_item_array(&writer, root, "safe", PLR_BANK_SLOTS, 0, 0);
@@ -3045,7 +3106,7 @@ static uint8_t *plr_encode_plain(
     plr_writer_u8(&writer, (uint8_t)((unlocked ? 1u : 0u) | (enabled ? 2u : 0u)));
     if (!plr_field_i32(root, "currentLoadoutIndex", &i32)) writer.ok = 0;
     plr_writer_i32(&writer, i32);
-    plr_writer_loadouts(&writer, root);
+    plr_writer_loadouts(&writer, root, v326_layout);
     if (!plr_field_u8(root, "voiceVariant", &u8)) writer.ok = 0;
     plr_writer_u8(&writer, u8);
     float voice_pitch = 0.0f;

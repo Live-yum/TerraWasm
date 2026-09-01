@@ -99,9 +99,22 @@ int main(void) {
 
     char *name = NULL;
     char *version = NULL;
+    char *tax_money = NULL;
+    char *deaths_pve = NULL;
+    char *voice_variant = NULL;
+    char *extension_flag = NULL;
     CHECK(get_field(handle, "/name", &name), "read real player name");
     CHECK(name[0] == '"' && name[1] != '"', "real player name is empty");
     CHECK(get_field(handle, "/version", &version), "read real player version");
+    CHECK(text_equal(version, "326"), "real fixture is not the expected v326 player");
+    CHECK(get_field(handle, "/taxMoney", &tax_money) && text_equal(tax_money, "113750"),
+        "v326 body prefix is misaligned before taxMoney");
+    CHECK(get_field(handle, "/numberOfDeathsPve", &deaths_pve) && text_equal(deaths_pve, "11"),
+        "v326 death counters are misaligned");
+    CHECK(get_field(handle, "/voiceVariant", &voice_variant) && text_equal(voice_variant, "2"),
+        "v326 loadout favorite bytes are misaligned before voiceVariant");
+    CHECK(get_field(handle, "/formatExtensions/v326PrefixFlag", &extension_flag) &&
+        text_equal(extension_flag, "true"), "v326 prefix extension byte was not preserved");
 
     uint32_t required = 0u;
     uint32_t before_clean_probe = tx_heap_used();
@@ -169,6 +182,10 @@ int main(void) {
     free(versioned);
     free(edited_name);
     free(edited);
+    free(extension_flag);
+    free(voice_variant);
+    free(deaths_pve);
+    free(tax_money);
     free(version);
     free(name);
     CHECK(terra_plr_close(versioned_handle) == TERRAX_WORLD_STATUS_OK, "close versioned handle");
