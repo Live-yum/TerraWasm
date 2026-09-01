@@ -4,12 +4,12 @@
 
 ## 功能
 
-- **世界解析**：版本 88-400，所有 11 个 section 的只读 JSON 序列化
+- **世界解析**：版本 88-326（Terraria 当前源码上限），所有 11 个 section 的只读 JSON 序列化
 - **渲染**：RGBA 预览、PNG 缩略图、.map 地图文件生成
 - **编辑**：安全 header 布尔补丁、宝箱/图鉴二进制替换、批量方块更新、生物群系转换、可见性切换、电线移除
 - **像素画映射**：将 RGBA/索引像素映射为 Terraria 方块（TXCI v3 色彩索引）
 - **地图标记**：在 .map 文件中标记指定箱子和方块位置
-- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持 JSON Pointer 和结构化补丁；不按版本号硬编码白名单，而以实际二进制布局是否兼容为准
+- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持现代布局版本 280-326、JSON Pointer 和结构化补丁，并按 Terraria `Player.cs` 的 release gate 对称读写
 
 ## 项目结构
 
@@ -149,7 +149,7 @@ node tests/test_mark_tiles_map.js    # 地图标记（13 项）
 
 ### 加密玩家文件 `.plr`
 
-PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。解析器不再把 318/319 作为硬性版本白名单：它会保留文件中的 `version` 并按当前语义布局尝试解析；布局不兼容或数据损坏时返回解析错误。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。
+PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 的现代 PLR profile 明确支持版本 280-326：281 起保存 voice pitch，283 起保存 team，300 起保存 pending refunds，310 起保存 one-time dialogues，322 起在主装备/染料及 loadout 装备/染料中保存 favorite，324 起在 `ateArtisanBread` 后消费/写入一个保留 bool；327 及以上在 Terraria 定义新布局前直接拒绝。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。
 
 ```c
 uint32_t handle = 0;
