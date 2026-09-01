@@ -6,7 +6,10 @@ import { validateManifest } from './generate-manifest.mjs'
 
 export const WEB_ARTIFACT_LIMITS = Object.freeze({
   wrapperBytes: 128 * 1024,
-  wasmBytes: 256 * 1024,
+  // PLR editing adds the AES/JSON implementation to the shared artifact.
+  // The default O3 build keeps the cold schema paths at -Oz and remains
+  // below this revised Mini Program budget.
+  wasmBytes: 320 * 1024,
 })
 
 function fail(message) {

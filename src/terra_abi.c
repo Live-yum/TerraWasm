@@ -50,7 +50,8 @@ static const char g_capabilities[] =
     "\"thumbnail-png\","
     "\"map-output\","
     "\"pixel-art\","
-    "\"sha256\""
+    "\"sha256\","
+    "\"plr-read-write\""
     "]}";
 
 static const char g_build_info_json[] =

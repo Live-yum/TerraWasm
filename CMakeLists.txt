@@ -36,6 +36,7 @@ set(SOURCES
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
+    "${SRC_DIR}/terra_plr.c"
 )
 
 # Keep the established decoder internal and expose only the guarded entry point.
@@ -111,11 +112,12 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
-    # Header/format patching is a cold administrative path. Keep the global
-    # release profile at -O3, but size-optimize this schema-heavy encoder so
-    # the Web artifact remains inside the Mini Program budget.
+    # Header/format and player patching are cold administrative paths. Keep
+    # the global release profile at -O3, but size-optimize these schema-heavy
+    # encoders so the Web artifact remains inside the Mini Program budget.
     set_source_files_properties(
         "${SRC_DIR}/terra_mutators.c"
+        "${SRC_DIR}/terra_plr.c"
         PROPERTIES COMPILE_OPTIONS "-Oz"
     )
 
@@ -260,6 +262,27 @@ else()
         endif()
         add_test(NAME terra_native_contract COMMAND terra_native_contract)
 
+        # The PLR contract uses the repository-level TerraR fixture when this
+        # superproject is present, but keeps standalone TerraWasm checkouts
+        # buildable by allowing the fixture path to be overridden or omitted.
+        set(TERRAWASM_PLR_FIXTURE_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}/../TerraR/players/yanhua.plr"
+            CACHE FILEPATH "Terraria .plr fixture used by the native PLR contract")
+        if(EXISTS "${TERRAWASM_PLR_FIXTURE_PATH}")
+            file(TO_CMAKE_PATH "${TERRAWASM_PLR_FIXTURE_PATH}" TERRAWASM_PLR_FIXTURE_DEFINE)
+            add_executable(terra_plr_contract tests/plr_contract.c)
+            target_link_libraries(terra_plr_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+            target_compile_definitions(terra_plr_contract PRIVATE
+                TERRAX_STATIC
+                TERRAWASM_PLR_FIXTURE_PATH="${TERRAWASM_PLR_FIXTURE_DEFINE}"
+            )
+            if(TERRAWASM_SANITIZERS)
+                target_compile_options(terra_plr_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(terra_plr_contract PRIVATE -fsanitize=address,undefined)
+            endif()
+            add_test(NAME terra_plr_contract COMMAND terra_plr_contract)
+        endif()
+
         add_executable(terra_error_json_contract tests/error_json_contract.c)
         target_link_libraries(terra_error_json_contract PRIVATE terrax_world_static ZLIB::ZLIB)
         target_compile_definitions(terra_error_json_contract PRIVATE TERRAX_STATIC)
@@ -325,6 +348,7 @@ else()
         # invariants, so force assertions on for every test target.
         foreach(TERRAWASM_CONTRACT_TARGET IN ITEMS
             terra_native_contract
+            terra_plr_contract
             terra_error_json_contract
             terra_zlib_bridge_contract
             terra_json_parser_contract

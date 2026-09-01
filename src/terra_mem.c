@@ -57,6 +57,7 @@ int tx_streq_n(const char* a, uint32_t alen, const char* b) {
 #define TX_ALLOC_MAGIC 0x54585254u
 #define TX_DOMAIN_BRIDGE 0x42524447u
 #define TX_DOMAIN_NATIVE 0x4e415456u
+#define TX_DOMAIN_PERSISTENT 0x504c5250u
 
 typedef union TxAllocHeader TxAllocHeader;
 union TxAllocHeader {
@@ -78,11 +79,15 @@ static TxAllocHeader* tx_bridge_head = NULL;
 static TxAllocHeader* tx_bridge_tail = NULL;
 static TxAllocHeader* tx_native_head = NULL;
 static TxAllocHeader* tx_native_tail = NULL;
+static TxAllocHeader* tx_persistent_head = NULL;
+static TxAllocHeader* tx_persistent_tail = NULL;
 static uint32_t tx_native_sequence = 0;
 static uint64_t tx_bridge_live_bytes = 0;
 static uint64_t tx_native_live_bytes = 0;
+static uint64_t tx_persistent_live_bytes = 0;
 static uint64_t tx_bridge_peak_bytes = 0;
 static uint64_t tx_native_peak_bytes = 0;
+static uint64_t tx_persistent_peak_bytes = 0;
 static uint64_t tx_total_peak_bytes = 0;
 
 /* Result pointers (set by operations, read by JS) */
@@ -113,8 +118,36 @@ static int tx_allocation_size(uint32_t payload_size, size_t* total) {
     return *total >= sizeof(TxAllocHeader);
 }
 
+static TxAllocHeader** tx_domain_head(uint32_t domain) {
+    if (domain == TX_DOMAIN_BRIDGE) return &tx_bridge_head;
+    if (domain == TX_DOMAIN_PERSISTENT) return &tx_persistent_head;
+    return &tx_native_head;
+}
+
+static TxAllocHeader** tx_domain_tail(uint32_t domain) {
+    if (domain == TX_DOMAIN_BRIDGE) return &tx_bridge_tail;
+    if (domain == TX_DOMAIN_PERSISTENT) return &tx_persistent_tail;
+    return &tx_native_tail;
+}
+
+static uint64_t* tx_domain_live(uint32_t domain) {
+    if (domain == TX_DOMAIN_BRIDGE) return &tx_bridge_live_bytes;
+    if (domain == TX_DOMAIN_PERSISTENT) return &tx_persistent_live_bytes;
+    return &tx_native_live_bytes;
+}
+
+static uint64_t* tx_domain_peak(uint32_t domain) {
+    if (domain == TX_DOMAIN_BRIDGE) return &tx_bridge_peak_bytes;
+    if (domain == TX_DOMAIN_PERSISTENT) return &tx_persistent_peak_bytes;
+    return &tx_native_peak_bytes;
+}
+
+static uint64_t tx_total_live_bytes(void) {
+    return tx_bridge_live_bytes + tx_native_live_bytes + tx_persistent_live_bytes;
+}
+
 static TxAllocHeader* tx_find_root(void* payload, uint32_t domain) {
-    TxAllocHeader* root = domain == TX_DOMAIN_BRIDGE ? tx_bridge_head : tx_native_head;
+    TxAllocHeader* root = *tx_domain_head(domain);
     while (root) {
         if ((uint8_t*)root + sizeof(TxAllocHeader) == payload &&
             root->root.magic == TX_ALLOC_MAGIC &&
@@ -126,8 +159,8 @@ static TxAllocHeader* tx_find_root(void* payload, uint32_t domain) {
 }
 
 static void tx_append_root(TxAllocHeader* header, uint32_t domain) {
-    TxAllocHeader** head = domain == TX_DOMAIN_BRIDGE ? &tx_bridge_head : &tx_native_head;
-    TxAllocHeader** tail = domain == TX_DOMAIN_BRIDGE ? &tx_bridge_tail : &tx_native_tail;
+    TxAllocHeader** head = tx_domain_head(domain);
+    TxAllocHeader** tail = tx_domain_tail(domain);
     header->root.prev = *tail;
     header->root.next = NULL;
     if (*tail) (*tail)->root.next = header;
@@ -136,8 +169,8 @@ static void tx_append_root(TxAllocHeader* header, uint32_t domain) {
 }
 
 static void tx_unlink_root(TxAllocHeader* header, uint32_t domain) {
-    TxAllocHeader** head = domain == TX_DOMAIN_BRIDGE ? &tx_bridge_head : &tx_native_head;
-    TxAllocHeader** tail = domain == TX_DOMAIN_BRIDGE ? &tx_bridge_tail : &tx_native_tail;
+    TxAllocHeader** head = tx_domain_head(domain);
+    TxAllocHeader** tail = tx_domain_tail(domain);
     if (header->root.prev) header->root.prev->root.next = header->root.next;
     else *head = header->root.next;
     if (header->root.next) header->root.next->root.prev = header->root.prev;
@@ -147,8 +180,9 @@ static void tx_unlink_root(TxAllocHeader* header, uint32_t domain) {
 static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
     if (!header) return;
     tx_unlink_root(header, domain);
-    if (domain == TX_DOMAIN_NATIVE) tx_native_live_bytes -= header->root.size;
-    else tx_bridge_live_bytes -= header->root.size;
+    uint64_t* live = tx_domain_live(domain);
+    if (*live >= header->root.size) *live -= header->root.size;
+    else *live = 0;
     header->root.magic = 0;
     header->root.self = 0;
     free(header);
@@ -169,18 +203,13 @@ static void* tx_new_root(uint32_t size, uint32_t domain) {
     header->root.next = NULL;
     header->root.reserved = 0;
     tx_append_root(header, domain);
-    if (domain == TX_DOMAIN_NATIVE) {
-        header->root.sequence = ++tx_native_sequence;
-        tx_native_live_bytes += size;
-        if (tx_native_live_bytes > tx_native_peak_bytes)
-            tx_native_peak_bytes = tx_native_live_bytes;
-    } else {
-        tx_bridge_live_bytes += size;
-        if (tx_bridge_live_bytes > tx_bridge_peak_bytes)
-            tx_bridge_peak_bytes = tx_bridge_live_bytes;
-    }
-    if (tx_bridge_live_bytes + tx_native_live_bytes > tx_total_peak_bytes)
-        tx_total_peak_bytes = tx_bridge_live_bytes + tx_native_live_bytes;
+    if (domain == TX_DOMAIN_NATIVE) header->root.sequence = ++tx_native_sequence;
+    uint64_t* live = tx_domain_live(domain);
+    uint64_t* peak = tx_domain_peak(domain);
+    *live += size;
+    if (*live > *peak) *peak = *live;
+    uint64_t total_live = tx_total_live_bytes();
+    if (total_live > tx_total_peak_bytes) tx_total_peak_bytes = total_live;
     return (uint8_t*)header + sizeof(TxAllocHeader);
 }
 
@@ -230,9 +259,10 @@ void tx_internal_free(void* payload) {
     tx_release_root(tx_find_root(payload, TX_DOMAIN_NATIVE), TX_DOMAIN_NATIVE);
 }
 
-void* tx_internal_realloc(void* payload, uint32_t size) {
-    if (!payload) return tx_alloc(size);
-    TxAllocHeader* old = tx_find_root(payload, TX_DOMAIN_NATIVE);
+static void* tx_internal_realloc_domain(
+    void* payload, uint32_t size, uint32_t domain) {
+    if (!payload) return tx_new_root(size ? size : 1u, domain);
+    TxAllocHeader* old = tx_find_root(payload, domain);
     if (!old) return NULL;
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
@@ -245,20 +275,39 @@ void* tx_internal_realloc(void* payload, uint32_t size) {
     resized->root.self = (uintptr_t)resized;
     resized->root.prev = prev;
     resized->root.next = next;
+    TxAllocHeader** head = tx_domain_head(domain);
+    TxAllocHeader** tail = tx_domain_tail(domain);
     if (prev) prev->root.next = resized;
-    else tx_native_head = resized;
+    else *head = resized;
     if (next) next->root.prev = resized;
-    else tx_native_tail = resized;
-    tx_native_live_bytes = tx_native_live_bytes - old_size + size;
-    if (tx_native_live_bytes > tx_native_peak_bytes)
-        tx_native_peak_bytes = tx_native_live_bytes;
-    if (tx_bridge_live_bytes + tx_native_live_bytes > tx_total_peak_bytes)
-        tx_total_peak_bytes = tx_bridge_live_bytes + tx_native_live_bytes;
+    else *tail = resized;
+    uint64_t* live = tx_domain_live(domain);
+    uint64_t* peak = tx_domain_peak(domain);
+    *live = *live - old_size + size;
+    if (*live > *peak) *peak = *live;
+    uint64_t total_live = tx_total_live_bytes();
+    if (total_live > tx_total_peak_bytes) tx_total_peak_bytes = total_live;
     return (uint8_t*)resized + sizeof(TxAllocHeader);
 }
 
+void* tx_internal_realloc(void* payload, uint32_t size) {
+    return tx_internal_realloc_domain(payload, size, TX_DOMAIN_NATIVE);
+}
+
+uint8_t* tx_persistent_alloc(uint32_t size) {
+    return (uint8_t*)tx_new_root(size ? size : 1u, TX_DOMAIN_PERSISTENT);
+}
+
+void tx_persistent_free(void* payload) {
+    tx_release_root(tx_find_root(payload, TX_DOMAIN_PERSISTENT), TX_DOMAIN_PERSISTENT);
+}
+
+void* tx_persistent_realloc(void* payload, uint32_t size) {
+    return tx_internal_realloc_domain(payload, size, TX_DOMAIN_PERSISTENT);
+}
+
 uint32_t tx_heap_used(void) {
-    uint64_t total = tx_bridge_live_bytes + tx_native_live_bytes;
+    uint64_t total = tx_total_live_bytes();
     return total > UINT32_MAX ? UINT32_MAX : (uint32_t)total;
 }
 

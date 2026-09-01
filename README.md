@@ -9,6 +9,7 @@
 - **编辑**：安全 header 布尔补丁、宝箱/图鉴二进制替换、批量方块更新、生物群系转换、可见性切换、电线移除
 - **像素画映射**：将 RGBA/索引像素映射为 Terraria 方块（TXCI v3 色彩索引）
 - **地图标记**：在 .map 文件中标记指定箱子和方块位置
+- **玩家文件**：读取、编辑并写回 Terraria 318/319 的加密 `.plr`，支持 JSON Pointer 和结构化补丁
 
 ## 项目结构
 
@@ -93,19 +94,19 @@ python scripts/build_txci.py
 
 这条命令只用于对比正确性、体积和运行表现；当前仓库不会在没有重新验证的情况下把发布默认值从 `-O3` 改成 `-Oz + LTO`。
 
-2026-07-29 使用 Emscripten 5.0.7 的实测结果：
+2026-09-01 使用 Emscripten 5.0.7 的实测结果（包含 PLR AES/JSON ABI）：
 
 | 配置 | Web wrapper | Web Wasm | 回归结果 |
 |---|---:|---:|---|
-| `-O3` | 64,184 B | 204,336 B | Node 48/48、兼容套件 41/41 通过 |
-| `-Oz + LTO` | 65,094 B | 150,439 B | Node 48/50；两项多实例化内存回归失败，兼容套件未继续 |
+| `-O3`（PLR/metadata 冷路径使用 `-Oz`） | 67,748 B | 294,825 B | Node/Web PLR 合约与既有 WLD 回归通过 |
+| `-Oz + LTO` | 68,658 B | 227,505 B | Node/Web PLR 合约与既有 WLD 回归通过 |
 
-因此发布配置保留 `-O3`。`-Oz + LTO` 虽减少约 53 KiB Wasm，但未通过正确性门禁；在该问题解决前不比较或采用其运行时性能数据。
+发布配置仍保留全局 `-O3`，并只对 schema-heavy 的 metadata/PLR 源文件使用 `-Oz`。如需更小的诊断构建，可使用 `-Oz + LTO`。
 
 Web 交付包有显式体积门禁：
 
 - wrapper 上限：`128 KiB`
-- wasm 上限：`256 KiB`
+- wasm 上限：`320 KiB`
 
 可以单独运行：
 
@@ -129,6 +130,7 @@ CI 工作流位于 `.github/workflows/quality.yml`，当前包含：
 node tests/test_all.js               # 综合兼容测试
 node --test tests/test_section_mutators.js # 安全 section mutator/内存测试
 node tests/test_thumbnail.js         # 缩略图渲染
+node --test tests/test_plr.js         # 加密玩家文件读写与编辑合约
 node tests/test_pixel_art_mapping.js # 像素画映射（13 项）
 node tests/test_mark_tiles_map.js    # 地图标记（13 项）
 ```
