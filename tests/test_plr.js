@@ -8,8 +8,8 @@ const test = require("node:test");
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 const TerraWorldWasmWeb = require(path.join(__dirname, "..", "build", "terrax_world_wasm_web.js"));
 
-const FIXTURE = process.env.TERRAWASM_PLR_FIXTURE ||
-  path.join(__dirname, "..", "..", "TerraR", "players", "yanhua.plr");
+const EXTERNAL_FIXTURE = process.env.TERRAWASM_PLR_FIXTURE || "";
+const MODEL_FIXTURE = path.join(__dirname, "fixtures", "minimal-player.json");
 
 function allocBytes(module, bytes) {
   const value = Buffer.from(bytes);
@@ -96,12 +96,43 @@ function encode(module, handle) {
   }
 }
 
-test("Node PLR ABI reads, edits, encrypts, and reopens a Terraria player", {
-  skip: !fs.existsSync(FIXTURE),
-}, async () => {
-  const source = fs.readFileSync(FIXTURE);
+function openJson(module, value) {
+  const input = allocString(module, JSON.stringify(value));
+  const output = module._tx_malloc(4);
+  assert(output, "JSON handle allocation failed");
+  try {
+    assert.equal(module._terra_player_open_json(input, output), 0,
+      "semantic PLR fixture was rejected");
+    const handle = module.HEAPU32[output >>> 2] >>> 0;
+    assert(handle, "JSON PLR handle was not returned");
+    return handle;
+  } finally {
+    module._tx_free(output);
+    module._tx_free(input);
+  }
+}
+
+function fixtureBytes(module) {
+  if (EXTERNAL_FIXTURE) {
+    assert.equal(fs.existsSync(EXTERNAL_FIXTURE), true,
+      `TERRAWASM_PLR_FIXTURE does not exist: ${EXTERNAL_FIXTURE}`);
+    return fs.readFileSync(EXTERNAL_FIXTURE);
+  }
+  const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+  const handle = openJson(module, model);
+  try {
+    return encode(module, handle);
+  } finally {
+    assert.equal(module._terra_player_close(handle), 0);
+  }
+}
+
+test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria player", async () => {
   const module = await TerraWorldWasm();
   const originalHeap = module._tx_heap_used();
+  const source = fixtureBytes(module);
+  assert.equal(module._tx_heap_used(), originalHeap,
+    "building the self-contained PLR fixture leaked allocations");
   let handle = 0;
   let reopened = 0;
   let pathHandle = 0;
@@ -114,8 +145,9 @@ test("Node PLR ABI reads, edits, encrypts, and reopens a Terraria player", {
     assert(module._tx_heap_used() > originalHeap, "PLR allocations are not tracked");
 
     const original = twoCallJson(module, module._terra_player_get_json, [handle]);
-    assert.equal(original.name, "yanhua");
-    assert.equal(getField(module, handle, "/name"), "yanhua");
+    assert.equal(typeof original.name, "string");
+    assert.notEqual(original.name.length, 0);
+    assert.equal(getField(module, handle, "/name"), original.name);
     assert.deepEqual(encode(module, handle), source, "clean save must preserve bytes");
 
     assert.equal(setField(module, handle, "/name", "terrawasm-node"), 0);
@@ -184,7 +216,7 @@ test("Node PLR ABI reads, edits, encrypts, and reopens a Terraria player", {
       assert.equal(module._terra_player_open_json(jsonInput, jsonOutput), 0);
       const jsonHandle = module.HEAPU32[jsonOutput >>> 2] >>> 0;
       assert(jsonHandle);
-      assert.equal(getField(module, jsonHandle, "/name"), "yanhua");
+      assert.equal(getField(module, jsonHandle, "/name"), original.name);
       assert.equal(module._terra_player_close(jsonHandle), 0);
     } finally {
       module._tx_free(jsonOutput);
@@ -245,19 +277,21 @@ test("Node PLR ABI reads, edits, encrypts, and reopens a Terraria player", {
   assert.equal(module._tx_heap_used(), originalHeap, "closing PLR handles must release allocations");
 });
 
-test("Web PLR ABI processes buffer and virtual-FS player files", {
-  skip: !fs.existsSync(FIXTURE),
-}, async () => {
-  const source = fs.readFileSync(FIXTURE);
+test("Web PLR ABI creates and processes buffer and virtual-FS player files", async () => {
   const module = await TerraWorldWasmWeb({
     wasmBinary: fs.readFileSync(path.join(__dirname, "..", "build", "terrax_world_wasm_web.wasm")),
   });
   const originalHeap = module._tx_heap_used();
+  const source = fixtureBytes(module);
+  assert.equal(module._tx_heap_used(), originalHeap,
+    "building the Web PLR fixture leaked allocations");
   let handle = 0;
   let pathHandle = 0;
   try {
     handle = openBuffer(module, source);
-    assert.equal(getField(module, handle, "/name"), "yanhua");
+    const originalName = getField(module, handle, "/name");
+    assert.equal(typeof originalName, "string");
+    assert.notEqual(originalName.length, 0);
     assert.equal(setField(module, handle, "/name", "terrawasm-web"), 0);
     const edited = encode(module, handle);
     const reopened = openBuffer(module, edited);

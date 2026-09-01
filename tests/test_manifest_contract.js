@@ -42,6 +42,7 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     memory: { initialBytes: 67108864, maxBytes: 167772160 },
     build: {
       compiler: "test-compiler",
+      featureSet: "all",
       flags: {
         common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
         node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
@@ -89,6 +90,7 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     ["artifact path", (manifest) => { manifest.artifacts[0].path = "C:/outside/wrapper.js"; }],
     ["artifact path", (manifest) => { manifest.targets.node.artifacts[0].path = "//server/share/wrapper.js"; }],
     ["build flags", (manifest) => { manifest.build.flags = ["-O3"]; }],
+    ["feature set", (manifest) => { manifest.build.featureSet = "invalid"; }],
   ]) {
     const candidate = structuredClone(base);
     mutate(candidate);
@@ -134,6 +136,7 @@ test("manifest artifact hashes match the files on disk", async () => {
     assert.equal(manifest.targets.node.artifacts[0].sha256, sha256(Buffer.from(nodeWrapperText)));
     assert.match(manifest.targets.node.artifacts[0].path, /node-wrapper\.js$/);
     assert.deepEqual(manifest.build.flags.common, ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"]);
+    assert.equal(manifest.build.featureSet, "all");
     assert.doesNotThrow(() => validateManifest(manifest));
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
