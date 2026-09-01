@@ -1,129 +1,128 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const test = require("node:test");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
+const test = require("node:test");
+const {
+  CORRUPTED_FIXTURE_DIR,
+  TRUNCATED_FIXTURE_DIR,
+  readFixtureDirectory,
+} = require("./helpers/fixtures");
+
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 
 function alloc(M, bytes) {
-  const ptr = M._tx_malloc(bytes.length || 1);
+  const ptr = M._tx_malloc(bytes.length);
   assert.notEqual(ptr, 0);
-  if (bytes.length) M.HEAPU8.set(bytes, ptr);
+  M.HEAPU8.set(bytes, ptr);
   return ptr;
 }
 
 function readLastError(M) {
-  const requiredPtr = M._tx_malloc(4);
+  const requiredPtr = M._tx_malloc(8);
   assert.notEqual(requiredPtr, 0);
-  let bufferPtr = 0;
+  let outputPtr = 0;
   try {
-    assert.equal(M._terra_get_last_error_json(0, 0, requiredPtr), 0);
-    const required = M.HEAPU32[requiredPtr >>> 2] >>> 0;
-    assert(required > 1);
-    bufferPtr = M._tx_malloc(required);
-    assert.notEqual(bufferPtr, 0);
-    assert.equal(M._terra_get_last_error_json(bufferPtr, required, requiredPtr), 0);
-    return JSON.parse(M.UTF8ToString(bufferPtr, required));
+    assert.equal(M._terra_info_get_last_error_json(0, 0n, requiredPtr), 0);
+    const required = Number(new DataView(M.wasmMemory.buffer).getBigUint64(requiredPtr, true));
+    outputPtr = M._tx_malloc(required);
+    assert.notEqual(outputPtr, 0);
+    assert.equal(
+      M._terra_info_get_last_error_json(outputPtr, BigInt(required), requiredPtr),
+      0,
+    );
+    return JSON.parse(M.UTF8ToString(outputPtr));
   } finally {
-    if (bufferPtr) M._tx_free(bufferPtr);
+    if (outputPtr) M._tx_free(outputPtr);
     M._tx_free(requiredPtr);
   }
 }
 
-function makeOverlongHeaderString() {
-  const bytes = Buffer.alloc(96);
-  let offset = 0;
-  bytes.writeUInt32LE(135, offset); offset += 4;
-  Buffer.from("relogic", "ascii").copy(bytes, offset); offset += 7;
-  bytes[offset++] = 2;
-  bytes.writeUInt32LE(0, offset); offset += 4;
-  bytes.writeBigUInt64LE(0n, offset); offset += 8;
-  bytes.writeUInt16LE(1, offset); offset += 2;
-  bytes.writeUInt32LE(32, offset); offset += 4;
-  bytes.writeUInt16LE(0, offset); offset += 2;
-  assert.equal(offset, 32);
-  bytes[offset++] = 0x7f;
-  return bytes.subarray(0, offset);
-}
-
-function makeCrossSectionHeaderString() {
-  const bytes = Buffer.alloc(96);
-  let offset = 0;
-  bytes.writeUInt32LE(135, offset); offset += 4;
-  Buffer.from("relogic", "ascii").copy(bytes, offset); offset += 7;
-  bytes[offset++] = 2;
-  bytes.writeUInt32LE(0, offset); offset += 4;
-  bytes.writeBigUInt64LE(0n, offset); offset += 8;
-  bytes.writeUInt16LE(2, offset); offset += 2;
-  bytes.writeUInt32LE(36, offset); offset += 4;
-  bytes.writeUInt32LE(40, offset); offset += 4;
-  bytes.writeUInt16LE(0, offset); offset += 2;
-  assert.equal(offset, 36);
-  bytes[offset++] = 5;
-  bytes[offset++] = 0x41;
-  bytes[offset++] = 0x42;
-  bytes[offset++] = 0x43;
-  bytes[offset++] = 0x44;
-  bytes[offset++] = 0x45;
-  return bytes.subarray(0, offset);
+function makeCrossSectionHeader() {
+  const candidate = Buffer.alloc(32);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(2, 4);
+  candidate.writeUInt32LE(16, 6);
+  candidate.writeUInt32LE(18, 10);
+  candidate.writeUInt16LE(0, 14);
+  candidate[16] = 2;
+  candidate[17] = 0x41;
+  candidate[18] = 0x42;
+  return candidate;
 }
 
 function makeTruncatedFixedHeader() {
-  const bytes = Buffer.alloc(96);
-  let offset = 0;
-  bytes.writeUInt32LE(135, offset); offset += 4;
-  Buffer.from("relogic", "ascii").copy(bytes, offset); offset += 7;
-  bytes[offset++] = 2;
-  bytes.writeUInt32LE(0, offset); offset += 4;
-  bytes.writeBigUInt64LE(0n, offset); offset += 8;
-  bytes.writeUInt16LE(2, offset); offset += 2;
-  bytes.writeUInt32LE(36, offset); offset += 4;
-  bytes.writeUInt32LE(40, offset); offset += 4;
-  bytes.writeUInt16LE(0, offset); offset += 2;
-  assert.equal(offset, 36);
-  bytes[offset++] = 0;
-  return bytes.subarray(0, offset);
+  // Format section: version 88, two section pointers and zero important tiles.
+  // Header section contains a valid world name and all seven fixed int32 values
+  // through maxTilesY/maxTilesX, then ends before the remaining fixed header.
+  const headerStart = 16;
+  const headerEnd = headerStart + 2 + 7 * 4;
+  const candidate = Buffer.alloc(headerEnd + 1);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(2, 4);
+  candidate.writeUInt32LE(headerStart, 6);
+  candidate.writeUInt32LE(headerEnd, 10);
+  candidate.writeUInt16LE(0, 14);
+
+  let offset = headerStart;
+  candidate[offset++] = 1;
+  candidate[offset++] = 0x41;
+  candidate.writeInt32LE(1, offset); offset += 4; // worldId
+  candidate.writeInt32LE(0, offset); offset += 4; // left
+  candidate.writeInt32LE(8400, offset); offset += 4; // right
+  candidate.writeInt32LE(0, offset); offset += 4; // top
+  candidate.writeInt32LE(2400, offset); offset += 4; // bottom
+  candidate.writeInt32LE(2400, offset); offset += 4; // maxTilesY
+  candidate.writeInt32LE(8400, offset); offset += 4; // maxTilesX
+  assert.equal(offset, headerEnd);
+  return candidate;
 }
 
 test("truncated and corrupted world buffers fail as statuses without crashing", async () => {
   const M = await TerraWorldWasm();
-  for (const candidate of [
-    Buffer.alloc(16),
-    Buffer.from([88, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-  ]) {
+  const candidates = [
+    ...readFixtureDirectory(TRUNCATED_FIXTURE_DIR).map((fixturePath) => fs.readFileSync(fixturePath)),
+    ...readFixtureDirectory(CORRUPTED_FIXTURE_DIR).map((fixturePath) => fs.readFileSync(fixturePath)),
+    Uint8Array.from({ length: 4096 }, (_, index) => (index * 73) & 0xff),
+    crypto.randomBytes(4096),
+  ];
+  for (const candidate of candidates) {
     const inputPtr = alloc(M, candidate);
-    const handlePtr = M._tx_malloc(4);
-    assert.notEqual(handlePtr, 0);
-    try {
-      const status = M._terra_world_open_from_buffer(inputPtr, candidate.length, handlePtr);
-      assert.notEqual(status, 0);
-      assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
-    } finally {
-      M._tx_free(handlePtr);
-      M._tx_free(inputPtr);
-    }
+    const task = M._terra_world_open_begin(inputPtr, candidate.length);
+    assert.notEqual(task, 0);
+    const status = M._terra_world_open_step(task, 1);
+    assert.notEqual(status, 0, `unexpected success for ${candidate.length}-byte invalid input`);
+    assert.ok(status >= 1 && status <= 11);
+    assert.equal(M._terra_world_task_get_world_handle(task), 0);
+    assert.equal(M._terra_world_task_close(task), 0);
+    M._tx_free(inputPtr);
   }
 });
 
 test("an overlong header string is rejected without reading beyond the world buffer", async () => {
   const M = await TerraWorldWasm();
-  const candidate = makeOverlongHeaderString();
+  const candidate = Buffer.alloc(16);
+  candidate.writeUInt32LE(88, 0);
+  candidate.writeUInt16LE(1, 4);
+  candidate.writeUInt32LE(12, 6);
+  candidate.writeUInt16LE(0, 10);
+  candidate[12] = 0x7f;
+
   const inputPtr = alloc(M, candidate);
-  const handlePtr = M._tx_malloc(4);
-  assert.notEqual(handlePtr, 0);
-  try {
-    const status = M._terra_world_open_from_buffer(inputPtr, candidate.length, handlePtr);
-    assert.notEqual(status, 0);
-    assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
-  } finally {
-    M._tx_free(handlePtr);
-    M._tx_free(inputPtr);
-  }
+  const task = M._terra_world_open_begin(inputPtr, candidate.length);
+  assert.notEqual(task, 0);
+  const status = M._terra_world_open_step(task, 1);
+  assert.notEqual(status, 0);
+  assert.equal(M._terra_world_task_get_world_handle(task), 0);
+  assert.equal(M._terra_world_task_close(task), 0);
+  M._tx_free(inputPtr);
 });
 
 test("a header string cannot cross into the next WLD section", async () => {
   const M = await TerraWorldWasm();
-  const candidate = makeCrossSectionHeaderString();
+  const candidate = makeCrossSectionHeader();
   const inputPtr = alloc(M, candidate);
   const handlePtr = M._tx_malloc(4);
   assert.notEqual(handlePtr, 0);
@@ -133,7 +132,7 @@ test("a header string cannot cross into the next WLD section", async () => {
     assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
     assert.deepEqual(readLastError(M), {
       code: "TERRAX_TRUNCATED_HEADER",
-      message: "string exceeds header section bounds",
+      message: "world name exceeds section bounds",
     });
   } finally {
     M._tx_free(handlePtr);
@@ -170,7 +169,7 @@ test("WLD current-version guard matches Terraria release 326", async () => {
     [327, "TERRAX_UNSUPPORTED_VERSION"],
   ]) {
     // The public open ABI rejects buffers shorter than 16 bytes before the
-    // WLD parser runs. Keep the candidate at that minimum so release 326
+    // WLD parser runs. Keep this candidate at that minimum so release 326
     // reaches parse_format() and fails on missing metadata, while release 327
     // is rejected by the version guard before metadata is consumed.
     const candidate = Buffer.alloc(16);
