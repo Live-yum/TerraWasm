@@ -111,3 +111,13 @@ jobs:
       - name: Build and test selected capability set
         shell: pwsh
         run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Upload WLD viewer artifacts
+        if: matrix.features == 'wld'
+        uses: actions/upload-artifact@v7
+        with:
+          name: terrawasm-wld-${{ github.sha }}
+          path: |
+            build/terra.manifest.json
+            build/terrax_world_wasm_web.js
+            build/terrax_world_wasm_web.wasm
+          if-no-files-found: error
