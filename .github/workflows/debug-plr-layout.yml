@@ -1,0 +1,78 @@
+name: Debug PLR v326 layout
+
+on:
+  push:
+    branches:
+      - fix/plr-real-fixtures-and-performance
+    paths:
+      - .github/workflows/debug-plr-layout.yml
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Trace old semantic layout against real v326 player
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY=6800330079005f006700550079005a00
+          openssl enc -d -aes-128-cbc -K "$KEY" -iv "$KEY" \
+            -in 'tests/files/烟花.plr' -out /tmp/player.bin
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+
+          data = Path('/tmp/player.bin').read_bytes()
+          p = 0
+          def need(n, label):
+              global p
+              if p+n > len(data): raise RuntimeError(f'{label}: EOF at {p}, need {n}')
+          def u8(label):
+              global p; need(1,label); v=data[p]; p+=1; print(f'{p-1:04x}..{p:04x} {label} u8={v}'); return v
+          def i32(label):
+              global p; need(4,label); s=p; v=struct.unpack_from('<i',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} i32={v}'); return v
+          def u32(label):
+              global p; need(4,label); s=p; v=struct.unpack_from('<I',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} u32={v}'); return v
+          def i64(label):
+              global p; need(8,label); s=p; v=struct.unpack_from('<q',data,p)[0]; p+=8; print(f'{s:04x}..{p:04x} {label} i64={v}'); return v
+          def u64(label):
+              global p; need(8,label); s=p; v=struct.unpack_from('<Q',data,p)[0]; p+=8; print(f'{s:04x}..{p:04x} {label} u64={v}'); return v
+          def f32(label):
+              global p; need(4,label); s=p; v=struct.unpack_from('<f',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} f32={v}'); return v
+          def string(label):
+              global p
+              s=p; shift=0; n=0
+              for _ in range(5):
+                  b=u8(label+'.lenbyte')
+                  n |= (b&0x7f)<<shift
+                  if not b&0x80: break
+                  shift += 7
+              need(n,label); raw=data[p:p+n]; p+=n
+              try: text=raw.decode('utf-8')
+              except Exception as e: text=f'<invalid utf8 {e}: {raw.hex()}>'
+              print(f'{s:04x}..{p:04x} {label} str[{n}]={text!r}')
+              return text
+          def item(label, fav=False, typeprefix=False):
+              t=i32(label+'.type')
+              if typeprefix:
+                  pref=u8(label+'.prefix'); return
+              st=i32(label+'.stack'); pref=u8(label+'.prefix')
+              if fav: u8(label+'.fav')
+          def mark(label): print(f'---- {label}: offset={p} 0x{p:x}, next={data[p:p+48].hex()}')
+
+          i32('version'); u64('magic'); u32('revision'); u64('favoriteFlags'); string('name')
+          u8('difficulty'); i64('playTimeTicks'); i32('hair'); u8('hairDye'); u8('team')
+          u8('hideAccessoryLow'); u8('hideAccessoryHigh'); u8('hideMisc'); u8('skinVariant')
+          for x in ['statLife','statLifeMax','statMana','statManaMax']: i32(x)
+          for x in ['extraAccessory','unlockedBiomeTorches','usingBiomeTorches','ateArtisanBread','usedAegisCrystal','usedAegisFruit','usedArcaneCrystal','usedGalaxyPearl','usedGummyWorm','usedAmbrosia','downedDD2']: u8(x)
+          for x in ['taxMoney','deathsPVE','deathsPVP']: i32(x)
+          for c in ['hair','skin','eye','shirt','undershirt','pants','shoe']:
+              u8(c+'.r');u8(c+'.g');u8(c+'.b')
+          mark('after prefix/colors using old layout')
+          # sample first two armor/dye/inventory slots to see whether alignment is plausible
+          for i in range(2): item(f'armor[{i}]', typeprefix=True)
+          mark('after first 2 armor')
+          PY
