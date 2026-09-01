@@ -2393,11 +2393,16 @@ static PlrJsonValue *plr_parse_plain(
         plr_read_temporary_slots(&reader) : plr_json_array();
     if (!temporary) { plr_json_free(root); return NULL; }
     if (!plr_version_has_temporary_slots(version)) {
-        for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++)
-            if (!plr_json_array_push(temporary, plr_json_null())) {
-                plr_json_free(temporary); plr_json_free(root); return NULL;
-            }
+    for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++) {
+        PlrJsonValue *empty_slot = plr_json_null();
+        if (!empty_slot || !plr_json_array_push(temporary, empty_slot)) {
+            plr_json_free(empty_slot);
+            plr_json_free(temporary);
+            plr_json_free(root);
+            return NULL;
+        }
     }
+}
     PlrJsonValue *powers = plr_version_has_creative_powers(version) ?
         plr_read_creative_powers(&reader) : plr_json_object();
     if (!powers) { plr_json_free(temporary); plr_json_free(root); return NULL; }
