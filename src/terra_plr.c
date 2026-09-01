@@ -1599,39 +1599,100 @@ static uint8_t *plr_encrypt(
     return encrypted;
 }
 
-#define PLR_MIN_SUPPORTED_VERSION 280
-#define PLR_CURRENT_VERSION 326
+#define PLR_CURRENT_KNOWN_VERSION 326
 
+/* Player.Deserialize has no lower version rejection. Releases before 135 use
+ * the legacy body without FileMetadata; releases 1-37 additionally use item
+ * names instead of numeric item ids. Keep 326 as a known-layout marker only:
+ * newer releases are attempted with the latest known layout and rejected only
+ * when their bytes no longer match it. */
 static int plr_version_supported(int32_t version) {
-    return version >= PLR_MIN_SUPPORTED_VERSION && version <= PLR_CURRENT_VERSION;
+    return version > 0;
 }
 
-static int plr_version_has_equipment_favorites(int32_t version) {
-    /* Player.LoadPlayer_Version2 and EquipmentLoadout.Deserialize start
-     * persisting armor/dye favorites at release 322. */
-    return version >= 322;
-}
+static int plr_version_has_metadata(int32_t version) { return version >= 135; }
+static int plr_version_has_difficulty(int32_t version) { return version >= 10; }
+static int plr_version_has_byte_difficulty(int32_t version) { return version >= 17; }
+static int plr_version_has_play_time(int32_t version) { return version >= 138; }
+static int plr_version_has_hair_dye(int32_t version) { return version >= 82; }
+static int plr_version_has_team(int32_t version) { return version >= 283; }
+static int plr_version_has_hide_lower(int32_t version) { return version >= 83; }
+static int plr_version_has_hide_upper(int32_t version) { return version >= 124; }
+static int plr_version_has_hide_misc(int32_t version) { return version >= 119; }
+static int plr_version_has_skin_variant(int32_t version) { return version >= 107; }
+static int plr_version_has_gender_bool(int32_t version) { return version >= 18 && version < 107; }
+static int plr_version_has_extra_accessory(int32_t version) { return version >= 125; }
+static int plr_version_has_biome_torches(int32_t version) { return version >= 229; }
+static int plr_version_has_artisan_bread(int32_t version) { return version >= 256; }
+static int plr_version_has_reserved_324(int32_t version) { return version >= 324; }
+static int plr_version_has_permanent_upgrades(int32_t version) { return version >= 260; }
+static int plr_version_has_dd2_flag(int32_t version) { return version >= 182; }
+static int plr_version_has_tax_money(int32_t version) { return version >= 128; }
+static int plr_version_has_death_counts(int32_t version) { return version >= 254; }
+static int plr_version_has_numeric_items(int32_t version) { return version >= 38; }
+static int plr_version_has_dyes(int32_t version) { return version >= 47; }
+static int plr_version_has_inventory_favorites(int32_t version) { return version >= 114; }
+static int plr_version_has_misc_equips(int32_t version) { return version >= 117; }
+static int plr_version_has_forge(int32_t version) { return version >= 182; }
+static int plr_version_has_void_vault(int32_t version) { return version >= 198; }
+static int plr_version_has_void_info(int32_t version) { return version >= 199; }
+static int plr_version_has_void_favorites(int32_t version) { return version >= 255; }
+static int plr_version_has_buffs(int32_t version) { return version >= 11; }
+static int plr_version_has_hb_locked(int32_t version) { return version >= 16; }
+static int plr_version_has_hide_info(int32_t version) { return version >= 115; }
+static int plr_version_has_angler(int32_t version) { return version >= 98; }
+static int plr_version_has_dpad(int32_t version) { return version >= 162; }
+static int plr_version_has_builder_status(int32_t version) { return version >= 164; }
+static int plr_version_has_bartender(int32_t version) { return version >= 181; }
+static int plr_version_has_death_metadata(int32_t version) { return version >= 200; }
+static int plr_version_has_last_save(int32_t version) { return version >= 202; }
+static int plr_version_has_golfer_score(int32_t version) { return version >= 206; }
+static int plr_version_has_temporary_slots(int32_t version) { return version >= 214; }
+static int plr_version_has_creative_tracker(int32_t version) { return version >= 218; }
+static int plr_version_has_creative_powers(int32_t version) { return version >= 220; }
+static int plr_version_has_super_cart(int32_t version) { return version >= 253; }
+static int plr_version_has_loadouts(int32_t version) { return version >= 262; }
+static int plr_version_has_voice_variant(int32_t version) { return version >= 280; }
+static int plr_version_has_voice_pitch(int32_t version) { return version >= 281; }
+static int plr_version_has_tracker_new_unlock_flag(int32_t version) { return version >= 282; }
+static int plr_version_has_pending_refunds(int32_t version) { return version >= 300; }
+static int plr_version_has_dialogues(int32_t version) { return version >= 310; }
+static int plr_version_has_equipment_favorites(int32_t version) { return version >= 322; }
 
-static int plr_version_has_voice_pitch(int32_t version) {
-    return version >= 281;
+static uint32_t plr_version_armor_slots(int32_t version) {
+    if (version < 38) return 0u;
+    if (version < 81) return 11u;
+    if (version < 124) return 16u;
+    return 20u;
 }
-
-static int plr_version_has_team(int32_t version) {
-    return version >= 283;
+static uint32_t plr_version_dye_slots(int32_t version) {
+    if (version < 47) return 0u;
+    if (version < 81) return 3u;
+    if (version < 124) return 8u;
+    return 10u;
 }
-
-static int plr_version_has_pending_refunds(int32_t version) {
-    return version >= 300;
+static uint32_t plr_version_inventory_disk_slots(int32_t version) {
+    return version >= 58 ? 58u : 48u;
 }
-
-static int plr_version_has_dialogues(int32_t version) {
-    return version >= 310;
+static uint32_t plr_version_bank_slots(int32_t version) {
+    return version >= 58 ? 40u : 20u;
 }
-
-static int plr_version_has_reserved_324(int32_t version) {
-    /* Player.SavePlayer writes a reserved false boolean immediately after
-     * ateArtisanBread; Player.LoadPlayer_Version2 consumes it from release 324. */
-    return version >= 324;
+static uint32_t plr_version_buff_slots(int32_t version) {
+    if (version < 11) return 0u;
+    if (version < 74) return 10u;
+    if (version < 252) return 22u;
+    return 44u;
+}
+static uint32_t plr_version_builder_slots(int32_t version) {
+    if (version < 164) return 0u;
+    if (version < 167) return 8u;
+    if (version < 197) return 10u;
+    if (version < 230) return 11u;
+    return 12u;
+}
+static int plr_skin_variant_is_male(uint8_t value) {
+    return value == 0u || value == 1u || value == 2u || value == 3u ||
+        value == 8u || value == 10u;
 }
 
 /* -------------------------------------------------------------------------
@@ -1722,12 +1783,72 @@ static PlrJsonValue *plr_read_item_array(
     return array;
 }
 
-static PlrJsonValue *plr_read_buffs(PlrReader *reader) {
+static PlrJsonValue *plr_make_default_item_array(uint32_t count) {
+    PlrJsonValue *array = plr_json_array();
+    if (!array) return NULL;
+    for (uint32_t i = 0u; i < count; i++) {
+        PlrJsonValue *item = plr_make_item(0, 0, 0u, 0);
+        if (!item || !plr_json_array_push(array, item)) {
+            plr_json_free(item); plr_json_free(array); return NULL;
+        }
+    }
+    return array;
+}
+
+static int plr_array_replace_owned(
+    PlrJsonValue *array, uint32_t index, PlrJsonValue *value) {
+    if (!array || array->type != PLR_JSON_ARRAY || index >= array->as.array.count || !value) {
+        plr_json_free(value); return 0;
+    }
+    plr_json_free(array->as.array.items[index]);
+    array->as.array.items[index] = value;
+    return 1;
+}
+
+static PlrJsonValue *plr_read_legacy_item(
+    PlrReader *reader, int32_t version, int with_stack) {
+    char *legacy_name = plr_read_string(reader);
+    int32_t stack = with_stack ? plr_read_i32(reader) : 0;
+    uint8_t prefix = version >= 36 ? plr_read_u8(reader) : 0u;
+    if (!reader->ok || !legacy_name) { free(legacy_name); return NULL; }
+    if (!with_stack) stack = legacy_name[0] ? 1 : 0;
+    PlrJsonValue *item = plr_make_item(0, stack, prefix, 0);
+    if (!item || !plr_json_object_put_string_owned(item, "legacyName", legacy_name)) {
+        plr_json_free(item); return NULL;
+    }
+    return item;
+}
+
+static PlrJsonValue *plr_make_default_bool_array(uint32_t count) {
+    PlrJsonValue *array = plr_json_array();
+    if (!array) return NULL;
+    for (uint32_t i = 0u; i < count; i++) {
+        PlrJsonValue *value = plr_json_bool(0);
+        if (!value || !plr_json_array_push(array, value)) {
+            plr_json_free(value); plr_json_free(array); return NULL;
+        }
+    }
+    return array;
+}
+
+static PlrJsonValue *plr_make_default_i32_array(uint32_t count) {
+    PlrJsonValue *array = plr_json_array();
+    if (!array) return NULL;
+    for (uint32_t i = 0u; i < count; i++) {
+        PlrJsonValue *value = plr_json_i64(0);
+        if (!value || !plr_json_array_push(array, value)) {
+            plr_json_free(value); plr_json_free(array); return NULL;
+        }
+    }
+    return array;
+}
+
+static PlrJsonValue *plr_read_buffs(PlrReader *reader, uint32_t stored_count) {
     PlrJsonValue *array = plr_json_array();
     if (!array) return NULL;
     for (uint32_t i = 0u; i < PLR_BUFF_SLOTS; i++) {
-        int32_t buff_type = plr_read_i32(reader);
-        int32_t buff_time = plr_read_i32(reader);
+        int32_t buff_type = i < stored_count ? plr_read_i32(reader) : 0;
+        int32_t buff_time = i < stored_count ? plr_read_i32(reader) : 0;
         PlrJsonValue *buff = plr_json_object();
         if (!buff || !reader->ok ||
             !plr_json_object_put_i64(buff, "buffTime", buff_time) ||
@@ -1825,8 +1946,9 @@ static int plr_read_count(PlrReader *reader, uint32_t maximum, uint32_t minimum_
     return 1;
 }
 
-static PlrJsonValue *plr_read_sacrifices(PlrReader *reader) {
-    int has_new_unlocks = plr_read_u8(reader) != 0u;
+static PlrJsonValue *plr_read_sacrifices(PlrReader *reader, int32_t version) {
+    int has_new_unlocks = plr_version_has_tracker_new_unlock_flag(version) ?
+        (plr_read_u8(reader) != 0u) : 0;
     uint32_t count = 0u;
     if (!plr_read_count(reader, PLR_MAX_SACRIFICES, 5u, &count)) return NULL;
     PlrJsonValue *result = plr_json_object();
@@ -1974,389 +2096,357 @@ static PlrJsonValue *plr_parse_plain(
     const uint8_t *plain, uint32_t plain_length) {
     PlrReader reader = {plain, plain_length, 0u, 1};
     int32_t version = plr_read_i32(&reader);
-    if (!reader.ok) return NULL;
-    if (!plr_version_supported(version)) return NULL;
-    const int voice_pitch = plr_version_has_voice_pitch(version);
-    const int team = plr_version_has_team(version);
-    const int pending_refunds = plr_version_has_pending_refunds(version);
-    const int dialogues_seen = plr_version_has_dialogues(version);
-    const int equipment_favorites = plr_version_has_equipment_favorites(version);
-    const int reserved_324 = plr_version_has_reserved_324(version);
+    if (!reader.ok || !plr_version_supported(version)) return NULL;
 
-    uint64_t magic_and_type = plr_read_u64(&reader);
-    uint32_t revision = plr_read_u32(&reader);
-    uint64_t favorite_flags = plr_read_u64(&reader);
-    if (!reader.ok || (magic_and_type & UINT64_C(0x00ffffffffffffff)) !=
-        PLR_METADATA_MAGIC_LOW_56 ||
-        ((magic_and_type >> 56u) & 0xffu) != PLR_PLAYER_FILE_TYPE) {
-        reader.ok = 0;
-        return NULL;
-    }
     PlrJsonValue *root = plr_json_object();
-    PlrJsonValue *metadata = plr_json_object();
-    if (!root || !metadata) {
-        plr_json_free(metadata);
-        plr_json_free(root);
-        return NULL;
-    }
-    if (!plr_json_object_put_u64(metadata, "favoriteFlags", favorite_flags) ||
-        !plr_json_object_put_u64(metadata, "magicAndType", magic_and_type) ||
-        !plr_json_object_put_u64(metadata, "revision", revision)) {
-        plr_json_free(metadata);
-        plr_json_free(root);
-        return NULL;
-    }
-    if (!plr_root_put(root, "metadata", metadata)) {
-        /* plr_root_put owns metadata even when insertion fails. */
-        plr_json_free(root);
-        return NULL;
-    }
-    metadata = NULL;
+    if (!root) return NULL;
     if (!plr_json_object_put_i64(root, "version", version)) {
-        plr_json_free(root);
-        return NULL;
+        plr_json_free(root); return NULL;
+    }
+
+    if (plr_version_has_metadata(version)) {
+        uint64_t magic_and_type = plr_read_u64(&reader);
+        uint32_t revision = plr_read_u32(&reader);
+        uint64_t favorite_flags = plr_read_u64(&reader);
+        if (!reader.ok || (magic_and_type & UINT64_C(0x00ffffffffffffff)) !=
+            PLR_METADATA_MAGIC_LOW_56 ||
+            ((magic_and_type >> 56u) & 0xffu) != PLR_PLAYER_FILE_TYPE) {
+            plr_json_free(root); return NULL;
+        }
+        PlrJsonValue *metadata = plr_json_object();
+        if (!metadata ||
+            !plr_json_object_put_u64(metadata, "favoriteFlags", favorite_flags) ||
+            !plr_json_object_put_u64(metadata, "magicAndType", magic_and_type) ||
+            !plr_json_object_put_u64(metadata, "revision", revision) ||
+            !plr_root_put(root, "metadata", metadata)) {
+            plr_json_free(metadata); plr_json_free(root); return NULL;
+        }
+    } else if (!plr_root_put(root, "metadata", plr_json_null())) {
+        plr_json_free(root); return NULL;
     }
 
     char *name = plr_read_string(&reader);
-    if (!name) {
-        plr_json_free(root);
-        return NULL;
-    }
-    /* The string-value constructor takes ownership on both success and failure. */
-    char *owned_name = name;
-    name = NULL;
-    if (!plr_json_object_put_string_owned(root, "name", owned_name) ||
-        !plr_json_object_put_u64(root, "difficulty", plr_read_u8(&reader)) ||
-        !plr_put_reader_i64(root, "playTimeTicks", &reader) ||
-        !plr_put_reader_i32(root, "hair", &reader) ||
-        !plr_put_reader_u8(root, "hairDye", &reader) || !reader.ok) {
-        plr_json_free(root);
-        return NULL;
-    }
-    uint8_t team_value = team ? plr_read_u8(&reader) : 0u;
-    if (!reader.ok || !plr_json_object_put_u64(root, "team", team_value)) {
-        plr_json_free(root);
-        return NULL;
+    if (!name || !plr_json_object_put_string_owned(root, "name", name)) {
+        free(name); plr_json_free(root); return NULL;
     }
 
-    uint8_t hide_lower = plr_read_u8(&reader);
-    uint8_t hide_upper = plr_read_u8(&reader);
-    PlrJsonValue *hide_accessory = plr_json_array();
-    if (!hide_accessory) {
-        plr_json_free(root);
-        return NULL;
+    uint8_t difficulty = 0u;
+    if (plr_version_has_difficulty(version)) {
+        if (plr_version_has_byte_difficulty(version)) difficulty = plr_read_u8(&reader);
+        else difficulty = plr_read_u8(&reader) ? 2u : 0u;
     }
+    int64_t play_time = plr_version_has_play_time(version) ? plr_read_i64(&reader) : 0;
+    int32_t hair = plr_read_i32(&reader);
+    uint8_t hair_dye = plr_version_has_hair_dye(version) ? plr_read_u8(&reader) : 0u;
+    uint8_t team = plr_version_has_team(version) ? plr_read_u8(&reader) : 0u;
+    if (!reader.ok ||
+        !plr_json_object_put_u64(root, "difficulty", difficulty) ||
+        !plr_json_object_put_i64(root, "playTimeTicks", play_time) ||
+        !plr_json_object_put_i64(root, "hair", hair) ||
+        !plr_json_object_put_u64(root, "hairDye", hair_dye) ||
+        !plr_json_object_put_u64(root, "team", team)) {
+        plr_json_free(root); return NULL;
+    }
+
+    uint8_t hide_lower = plr_version_has_hide_lower(version) ? plr_read_u8(&reader) : 0u;
+    uint8_t hide_upper = plr_version_has_hide_upper(version) ? plr_read_u8(&reader) : 0u;
+    PlrJsonValue *hide_accessory = plr_json_array();
+    if (!hide_accessory) { plr_json_free(root); return NULL; }
     for (uint32_t i = 0u; i < PLR_DYE_SLOTS; i++) {
         int value = i < 8u ? ((hide_lower >> i) & 1u) != 0u :
             ((hide_upper >> (i - 8u)) & 1u) != 0u;
         PlrJsonValue *boolean = plr_json_bool(value);
         if (!boolean || !plr_json_array_push(hide_accessory, boolean)) {
-            plr_json_free(boolean);
-            plr_json_free(hide_accessory);
-            plr_json_free(root);
-            return NULL;
+            plr_json_free(boolean); plr_json_free(hide_accessory); plr_json_free(root); return NULL;
         }
     }
     if (!plr_root_put(root, "hideVisibleAccessory", hide_accessory)) {
-        /* plr_root_put owns hide_accessory on insertion failure. */
-        plr_json_free(root);
-        return NULL;
+        plr_json_free(root); return NULL;
     }
-    hide_accessory = NULL;
-    if (!plr_put_reader_u8(root, "hideMisc", &reader) ||
-        !plr_put_reader_u8(root, "skinVariant", &reader) ||
-        !plr_put_reader_i32(root, "statLife", &reader) ||
-        !plr_put_reader_i32(root, "statLifeMax", &reader) ||
-        !plr_put_reader_i32(root, "statMana", &reader) ||
-        !plr_put_reader_i32(root, "statManaMax", &reader) ||
-        !plr_put_reader_bool(root, "extraAccessory", &reader) ||
-        !plr_put_reader_bool(root, "unlockedBiomeTorches", &reader) ||
-        !plr_put_reader_bool(root, "usingBiomeTorches", &reader) ||
-        !plr_put_reader_bool(root, "ateArtisanBread", &reader) || !reader.ok) {
-        plr_json_free(root);
-        return NULL;
-    }
-    if (reserved_324) {
-        /* Terraria intentionally discards this reserved boolean. Do not expose
-         * it as semantic player state. BinaryReader.ReadBoolean accepts any
-         * nonzero byte, so consuming one bounded byte is the compatible form. */
-        (void)plr_read_u8(&reader);
-        if (!reader.ok) {
-            plr_json_free(root);
-            return NULL;
-        }
-    }
-    if (!plr_put_reader_bool(root, "usedAegisCrystal", &reader) ||
-        !plr_put_reader_bool(root, "usedAegisFruit", &reader) ||
-        !plr_put_reader_bool(root, "usedArcaneCrystal", &reader) ||
-        !plr_put_reader_bool(root, "usedGalaxyPearl", &reader) ||
-        !plr_put_reader_bool(root, "usedGummyWorm", &reader) ||
-        !plr_put_reader_bool(root, "usedAmbrosia", &reader) ||
-        !plr_put_reader_bool(root, "downedDd2EventAnyDifficulty", &reader) || !reader.ok) {
-        plr_json_free(root);
-        return NULL;
-    }
-    if (!plr_put_reader_i32(root, "taxMoney", &reader) ||
-        !plr_put_reader_i32(root, "numberOfDeathsPve", &reader) ||
-        !plr_put_reader_i32(root, "numberOfDeathsPvp", &reader) || !reader.ok) {
-        plr_json_free(root);
-        return NULL;
+    uint8_t hide_misc = plr_version_has_hide_misc(version) ? plr_read_u8(&reader) : 0u;
+    uint8_t skin_variant = 0u;
+    if (plr_version_has_skin_variant(version)) skin_variant = plr_read_u8(&reader);
+    else if (plr_version_has_gender_bool(version)) skin_variant = plr_read_u8(&reader) ? 0u : 4u;
+    else skin_variant = (hair == 5 || hair == 6 || hair == 9 || hair == 11) ? 4u : 0u;
+    if (!reader.ok ||
+        !plr_json_object_put_u64(root, "hideMisc", hide_misc) ||
+        !plr_json_object_put_u64(root, "skinVariant", skin_variant)) {
+        plr_json_free(root); return NULL;
     }
 
-    const char *colors[] = {
-        "hairColor", "skinColor", "eyeColor", "shirtColor",
-        "underShirtColor", "pantsColor", "shoeColor"
-    };
+    int32_t stat_life = plr_read_i32(&reader);
+    int32_t stat_life_max = plr_read_i32(&reader);
+    int32_t stat_mana = plr_read_i32(&reader);
+    int32_t stat_mana_max = plr_read_i32(&reader);
+    int extra_accessory = plr_version_has_extra_accessory(version) ? (plr_read_u8(&reader) != 0u) : 0;
+    int unlocked_torches = 0, using_torches = 0, artisan_bread = 0;
+    int upgrades[6] = {0, 0, 0, 0, 0, 0};
+    if (plr_version_has_biome_torches(version)) {
+        unlocked_torches = plr_read_u8(&reader) != 0u;
+        using_torches = plr_read_u8(&reader) != 0u;
+        if (plr_version_has_artisan_bread(version)) artisan_bread = plr_read_u8(&reader) != 0u;
+        if (plr_version_has_reserved_324(version)) (void)plr_read_u8(&reader);
+        if (plr_version_has_permanent_upgrades(version))
+            for (uint32_t i = 0u; i < 6u; i++) upgrades[i] = plr_read_u8(&reader) != 0u;
+    }
+    int dd2 = plr_version_has_dd2_flag(version) ? (plr_read_u8(&reader) != 0u) : 0;
+    int32_t tax_money = plr_version_has_tax_money(version) ? plr_read_i32(&reader) : 0;
+    int32_t deaths_pve = plr_version_has_death_counts(version) ? plr_read_i32(&reader) : 0;
+    int32_t deaths_pvp = plr_version_has_death_counts(version) ? plr_read_i32(&reader) : 0;
+    if (!reader.ok ||
+        !plr_json_object_put_i64(root, "statLife", stat_life) ||
+        !plr_json_object_put_i64(root, "statLifeMax", stat_life_max) ||
+        !plr_json_object_put_i64(root, "statMana", stat_mana) ||
+        !plr_json_object_put_i64(root, "statManaMax", stat_mana_max) ||
+        !plr_json_object_put_bool(root, "extraAccessory", extra_accessory) ||
+        !plr_json_object_put_bool(root, "unlockedBiomeTorches", unlocked_torches) ||
+        !plr_json_object_put_bool(root, "usingBiomeTorches", using_torches) ||
+        !plr_json_object_put_bool(root, "ateArtisanBread", artisan_bread) ||
+        !plr_json_object_put_bool(root, "usedAegisCrystal", upgrades[0]) ||
+        !plr_json_object_put_bool(root, "usedAegisFruit", upgrades[1]) ||
+        !plr_json_object_put_bool(root, "usedArcaneCrystal", upgrades[2]) ||
+        !plr_json_object_put_bool(root, "usedGalaxyPearl", upgrades[3]) ||
+        !plr_json_object_put_bool(root, "usedGummyWorm", upgrades[4]) ||
+        !plr_json_object_put_bool(root, "usedAmbrosia", upgrades[5]) ||
+        !plr_json_object_put_bool(root, "downedDd2EventAnyDifficulty", dd2) ||
+        !plr_json_object_put_i64(root, "taxMoney", tax_money) ||
+        !plr_json_object_put_i64(root, "numberOfDeathsPve", deaths_pve) ||
+        !plr_json_object_put_i64(root, "numberOfDeathsPvp", deaths_pvp)) {
+        plr_json_free(root); return NULL;
+    }
+
+    const char *colors[] = {"hairColor", "skinColor", "eyeColor", "shirtColor",
+        "underShirtColor", "pantsColor", "shoeColor"};
     for (uint32_t i = 0u; i < 7u; i++) {
         PlrJsonValue *color = plr_read_color(&reader);
-        if (!color) {
-            plr_json_free(root);
-            return NULL;
-        }
-        /* root insertion owns color on failure as well as success. */
-        if (!plr_root_put(root, colors[i], color)) {
-            plr_json_free(root);
-            return NULL;
+        if (!color || !plr_root_put(root, colors[i], color)) {
+            plr_json_free(color); plr_json_free(root); return NULL;
         }
     }
 
-    PlrJsonValue *armor = plr_read_item_array(
-        &reader, PLR_ARMOR_SLOTS, equipment_favorites, 1);
-    PlrJsonValue *dyes = plr_read_item_array(
-        &reader, PLR_DYE_SLOTS, equipment_favorites, 1);
-    PlrJsonValue *inventory = plr_read_item_array(&reader, PLR_INVENTORY_SLOTS, 1, 0);
-    PlrJsonValue *misc_equips = plr_json_array();
-    PlrJsonValue *misc_dyes = plr_json_array();
-    if (!armor || !dyes || !inventory || !misc_equips || !misc_dyes) {
-        plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
-        plr_json_free(misc_equips); plr_json_free(misc_dyes); plr_json_free(root);
-        return NULL;
-    }
-    for (uint32_t i = 0u; i < PLR_MISC_SLOTS; i++) {
-        PlrJsonValue *equip = plr_read_type_prefix_item(&reader, 0);
-        PlrJsonValue *dye = plr_read_type_prefix_item(&reader, 0);
-        if (!equip || !dye) {
-            plr_json_free(equip); plr_json_free(dye);
-            plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
-            plr_json_free(misc_equips); plr_json_free(misc_dyes); plr_json_free(root);
-            return NULL;
+    PlrJsonValue *armor = plr_make_default_item_array(PLR_ARMOR_SLOTS);
+    PlrJsonValue *dyes = plr_make_default_item_array(PLR_DYE_SLOTS);
+    PlrJsonValue *inventory = plr_make_default_item_array(PLR_INVENTORY_SLOTS);
+    PlrJsonValue *misc_equips = plr_make_default_item_array(PLR_MISC_SLOTS);
+    PlrJsonValue *misc_dyes = plr_make_default_item_array(PLR_MISC_SLOTS);
+    PlrJsonValue *piggy = plr_make_default_item_array(PLR_BANK_SLOTS);
+    PlrJsonValue *safe = plr_make_default_item_array(PLR_BANK_SLOTS);
+    PlrJsonValue *forge = plr_make_default_item_array(PLR_BANK_SLOTS);
+    PlrJsonValue *vault = plr_make_default_item_array(PLR_BANK_SLOTS);
+    if (!armor || !dyes || !inventory || !misc_equips || !misc_dyes ||
+        !piggy || !safe || !forge || !vault) goto parse_items_fail;
+
+    if (plr_version_has_numeric_items(version)) {
+        uint32_t armor_count = plr_version_armor_slots(version);
+        for (uint32_t i = 0u; i < armor_count; i++)
+            if (!plr_array_replace_owned(armor, i,
+                    plr_read_type_prefix_item(&reader, plr_version_has_equipment_favorites(version))))
+                goto parse_items_fail;
+        uint32_t dye_count = plr_version_dye_slots(version);
+        for (uint32_t i = 0u; i < dye_count; i++)
+            if (!plr_array_replace_owned(dyes, i,
+                    plr_read_type_prefix_item(&reader, plr_version_has_equipment_favorites(version))))
+                goto parse_items_fail;
+        uint32_t inventory_count = plr_version_inventory_disk_slots(version);
+        for (uint32_t disk = 0u; disk < inventory_count; disk++) {
+            uint32_t model_index = version < 58 && disk >= 40u ? disk + 10u : disk;
+            if (!plr_array_replace_owned(inventory, model_index,
+                    plr_read_full_item(&reader, plr_version_has_inventory_favorites(version))))
+                goto parse_items_fail;
         }
-        if (!plr_json_array_push(misc_equips, equip)) {
-            plr_json_free(equip); plr_json_free(dye);
-            plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
-            plr_json_free(misc_equips); plr_json_free(misc_dyes); plr_json_free(root);
-            return NULL;
+        if (plr_version_has_misc_equips(version)) {
+            for (uint32_t i = 0u; i < PLR_MISC_SLOTS; i++) {
+                if (version < 136 && i == 1u) continue;
+                if (!plr_array_replace_owned(misc_equips, i, plr_read_type_prefix_item(&reader, 0)) ||
+                    !plr_array_replace_owned(misc_dyes, i, plr_read_type_prefix_item(&reader, 0)))
+                    goto parse_items_fail;
+            }
         }
-        equip = NULL;
-        if (!plr_json_array_push(misc_dyes, dye)) {
-            plr_json_free(dye);
-            plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
-            plr_json_free(misc_equips); plr_json_free(misc_dyes); plr_json_free(root);
-            return NULL;
+        uint32_t bank_count = plr_version_bank_slots(version);
+        for (uint32_t i = 0u; i < bank_count; i++)
+            if (!plr_array_replace_owned(piggy, i, plr_read_full_item(&reader, 0))) goto parse_items_fail;
+        for (uint32_t i = 0u; i < bank_count; i++)
+            if (!plr_array_replace_owned(safe, i, plr_read_full_item(&reader, 0))) goto parse_items_fail;
+        if (plr_version_has_forge(version))
+            for (uint32_t i = 0u; i < PLR_BANK_SLOTS; i++)
+                if (!plr_array_replace_owned(forge, i, plr_read_full_item(&reader, 0))) goto parse_items_fail;
+        if (plr_version_has_void_vault(version))
+            for (uint32_t i = 0u; i < PLR_BANK_SLOTS; i++)
+                if (!plr_array_replace_owned(vault, i,
+                        plr_read_full_item(&reader, plr_version_has_void_favorites(version))))
+                    goto parse_items_fail;
+    } else {
+        for (uint32_t i = 0u; i < 8u; i++)
+            if (!plr_array_replace_owned(armor, i, plr_read_legacy_item(&reader, version, 0))) goto parse_items_fail;
+        if (version >= 6)
+            for (uint32_t i = 10u; i < 13u; i++)
+                if (!plr_array_replace_owned(armor, i, plr_read_legacy_item(&reader, version, 0))) goto parse_items_fail;
+        uint32_t legacy_inventory = version >= 15 ? 48u : 44u;
+        for (uint32_t disk = 0u; disk < legacy_inventory; disk++) {
+            uint32_t model_index = disk >= 40u ? disk + 10u : disk;
+            if (!plr_array_replace_owned(inventory, model_index,
+                    plr_read_legacy_item(&reader, version, 1))) goto parse_items_fail;
         }
+        for (uint32_t i = 0u; i < 20u; i++)
+            if (!plr_array_replace_owned(piggy, i, plr_read_legacy_item(&reader, version, 1))) goto parse_items_fail;
+        if (version >= 20)
+            for (uint32_t i = 0u; i < 20u; i++)
+                if (!plr_array_replace_owned(safe, i, plr_read_legacy_item(&reader, version, 1))) goto parse_items_fail;
     }
-    PlrJsonValue *piggy = plr_read_item_array(&reader, PLR_BANK_SLOTS, 0, 0);
-    PlrJsonValue *safe = plr_read_item_array(&reader, PLR_BANK_SLOTS, 0, 0);
-    PlrJsonValue *forge = plr_read_item_array(&reader, PLR_BANK_SLOTS, 0, 0);
-    PlrJsonValue *vault = plr_read_item_array(&reader, PLR_BANK_SLOTS, 1, 0);
-    if (!piggy || !safe || !forge || !vault) {
-        plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
-        plr_json_free(misc_equips); plr_json_free(misc_dyes);
-        plr_json_free(piggy); plr_json_free(safe); plr_json_free(forge); plr_json_free(vault);
-        plr_json_free(root);
-        return NULL;
-    }
-    if (!plr_root_put(root, "armor", armor)) {
-        plr_json_free(dyes); plr_json_free(inventory);
-        plr_json_free(misc_equips); plr_json_free(misc_dyes);
-        plr_json_free(piggy); plr_json_free(safe); plr_json_free(forge);
-        plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    armor = NULL;
-    if (!plr_root_put(root, "dyes", dyes)) {
-        plr_json_free(inventory); plr_json_free(misc_equips); plr_json_free(misc_dyes);
-        plr_json_free(piggy); plr_json_free(safe); plr_json_free(forge);
-        plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    dyes = NULL;
-    if (!plr_root_put(root, "inventory", inventory)) {
-        plr_json_free(misc_equips); plr_json_free(misc_dyes);
-        plr_json_free(piggy); plr_json_free(safe); plr_json_free(forge);
-        plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    inventory = NULL;
-    if (!plr_root_put(root, "miscEquips", misc_equips)) {
-        plr_json_free(misc_dyes); plr_json_free(piggy); plr_json_free(safe);
-        plr_json_free(forge); plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    misc_equips = NULL;
-    if (!plr_root_put(root, "miscDyes", misc_dyes)) {
-        plr_json_free(piggy); plr_json_free(safe); plr_json_free(forge);
-        plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    misc_dyes = NULL;
-    if (!plr_root_put(root, "piggyBank", piggy)) {
-        plr_json_free(safe); plr_json_free(forge); plr_json_free(vault);
+    if (!reader.ok) goto parse_items_fail;
+    if (!plr_root_put(root, "armor", armor) || !plr_root_put(root, "dyes", dyes) ||
+        !plr_root_put(root, "inventory", inventory) ||
+        !plr_root_put(root, "miscEquips", misc_equips) ||
+        !plr_root_put(root, "miscDyes", misc_dyes) ||
+        !plr_root_put(root, "piggyBank", piggy) || !plr_root_put(root, "safe", safe) ||
+        !plr_root_put(root, "defendersForge", forge) || !plr_root_put(root, "voidVault", vault)) {
         plr_json_free(root); return NULL;
     }
-    piggy = NULL;
-    if (!plr_root_put(root, "safe", safe)) {
-        plr_json_free(forge); plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    safe = NULL;
-    if (!plr_root_put(root, "defendersForge", forge)) {
-        plr_json_free(vault); plr_json_free(root); return NULL;
-    }
-    forge = NULL;
-    if (!plr_root_put(root, "voidVault", vault)) {
-        plr_json_free(root); return NULL;
-    }
-    vault = NULL;
-    if (!plr_put_reader_u8(root, "voidVaultInfo", &reader) || !reader.ok) {
-        plr_json_free(root); return NULL;
-    }
-    PlrJsonValue *buffs = plr_read_buffs(&reader);
-    if (!buffs) {
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "buffs", buffs)) {
+    armor = dyes = inventory = misc_equips = misc_dyes = piggy = safe = forge = vault = NULL;
+    if (!plr_json_object_put_u64(root, "voidVaultInfo",
+            plr_version_has_void_info(version) ? plr_read_u8(&reader) : 0u) || !reader.ok) {
         plr_json_free(root); return NULL;
     }
 
+    PlrJsonValue *buffs = plr_read_buffs(&reader, plr_version_buff_slots(version));
+    if (!buffs || !plr_root_put(root, "buffs", buffs)) {
+        plr_json_free(buffs); plr_json_free(root); return NULL;
+    }
     PlrJsonValue *spawn_points = plr_read_spawn_points(&reader);
-    if (!spawn_points) {
-        plr_json_free(root); return NULL;
+    if (!spawn_points || !plr_root_put(root, "spawnPoints", spawn_points)) {
+        plr_json_free(spawn_points); plr_json_free(root); return NULL;
     }
-    if (!plr_root_put(root, "spawnPoints", spawn_points)) {
-        plr_json_free(root); return NULL;
+    int hb_locked = plr_version_has_hb_locked(version) ? (plr_read_u8(&reader) != 0u) : 0;
+    PlrJsonValue *hide_info = plr_version_has_hide_info(version) ?
+        plr_read_bool_array(&reader, PLR_HIDE_INFO_SLOTS) :
+        plr_make_default_bool_array(PLR_HIDE_INFO_SLOTS);
+    int32_t angler = plr_version_has_angler(version) ? plr_read_i32(&reader) : 0;
+    PlrJsonValue *dpad = plr_version_has_dpad(version) ?
+        plr_read_i32_array(&reader, PLR_DPAD_SLOTS) : plr_make_default_i32_array(PLR_DPAD_SLOTS);
+    uint32_t builder_count = plr_version_builder_slots(version);
+    PlrJsonValue *builder = builder_count ? plr_read_i32_array(&reader, builder_count) :
+        plr_make_default_i32_array(PLR_BUILDER_STATUS_SLOTS);
+    int32_t bartender = plr_version_has_bartender(version) ? plr_read_i32(&reader) : 0;
+    int dead = plr_version_has_death_metadata(version) ? (plr_read_u8(&reader) != 0u) : 0;
+    PlrJsonValue *respawn = dead ? plr_json_i64(plr_read_i32(&reader)) : plr_json_null();
+    int64_t last_save = plr_version_has_last_save(version) ? plr_read_i64(&reader) : 0;
+    int32_t golfer = plr_version_has_golfer_score(version) ? plr_read_i32(&reader) : 0;
+    if (!hide_info || !dpad || !builder || !respawn || !reader.ok ||
+        !plr_json_object_put_bool(root, "hbLocked", hb_locked) ||
+        !plr_root_put(root, "hideInfo", hide_info) ||
+        !plr_json_object_put_i64(root, "anglerQuestsFinished", angler) ||
+        !plr_root_put(root, "dpadRadialBindings", dpad) ||
+        !plr_root_put(root, "builderAccStatus", builder) ||
+        !plr_json_object_put_i64(root, "bartenderQuestLog", bartender) ||
+        !plr_json_object_put_bool(root, "dead", dead) ||
+        !plr_root_put(root, "respawnTimer", respawn) ||
+        !plr_json_object_put_i64(root, "lastSaveUtcTicks", last_save) ||
+        !plr_json_object_put_i64(root, "golferScoreAccumulated", golfer)) {
+        plr_json_free(hide_info); plr_json_free(dpad); plr_json_free(builder);
+        plr_json_free(respawn); plr_json_free(root); return NULL;
     }
-    if (!plr_put_reader_bool(root, "hbLocked", &reader) || !reader.ok) {
-        plr_json_free(root); return NULL;
+
+    PlrJsonValue *sacrifices = plr_version_has_creative_tracker(version) ?
+        plr_read_sacrifices(&reader, version) : NULL;
+    PlrJsonValue *sacrifice_items = sacrifices ? plr_json_object_get(sacrifices, "items") : NULL;
+    PlrJsonValue *sacrifice_flag = sacrifices ? plr_json_object_get(sacrifices, "hasNewUnlocks") : NULL;
+    if (sacrifices) {
+        if (!sacrifice_items || !sacrifice_flag ||
+            !plr_root_put(root, "creativeItemSacrifices", plr_json_clone(sacrifice_items)) ||
+            !plr_root_put(root, "creativeTrackerHasNewUnlocks", plr_json_clone(sacrifice_flag))) {
+            plr_json_free(sacrifices); plr_json_free(root); return NULL;
+        }
+        plr_json_free(sacrifices);
+    } else {
+        if (!plr_root_put(root, "creativeItemSacrifices", plr_json_array()) ||
+            !plr_json_object_put_bool(root, "creativeTrackerHasNewUnlocks", 0)) {
+            plr_json_free(root); return NULL;
+        }
     }
-    PlrJsonValue *hide_info = plr_read_bool_array(&reader, PLR_HIDE_INFO_SLOTS);
-    int32_t angler_quests_finished = plr_read_i32(&reader);
-    PlrJsonValue *dpad = plr_read_i32_array(&reader, PLR_DPAD_SLOTS);
-    PlrJsonValue *builder_status = plr_read_i32_array(&reader, PLR_BUILDER_STATUS_SLOTS);
-    int32_t bartender_quest_log = plr_read_i32(&reader);
-    uint8_t dead = plr_read_u8(&reader);
-    if (!hide_info || !dpad || !builder_status || !reader.ok) {
-        plr_json_free(hide_info); plr_json_free(dpad); plr_json_free(builder_status);
-        plr_json_free(root); return NULL;
+
+    PlrJsonValue *temporary = plr_version_has_temporary_slots(version) ?
+        plr_read_temporary_slots(&reader) : plr_json_array();
+    if (!temporary) { plr_json_free(root); return NULL; }
+    if (!plr_version_has_temporary_slots(version)) {
+        for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++)
+            if (!plr_json_array_push(temporary, plr_json_null())) {
+                plr_json_free(temporary); plr_json_free(root); return NULL;
+            }
     }
-    if (!plr_root_put(root, "hideInfo", hide_info)) {
-        plr_json_free(dpad); plr_json_free(builder_status); plr_json_free(root); return NULL;
+    PlrJsonValue *powers = plr_version_has_creative_powers(version) ?
+        plr_read_creative_powers(&reader) : plr_json_object();
+    if (!powers) { plr_json_free(temporary); plr_json_free(root); return NULL; }
+    if (!plr_version_has_creative_powers(version) &&
+        (!plr_json_object_put_bool(powers, "farPlacementEnabled", 0) ||
+         !plr_json_object_put_bool(powers, "godmodeEnabled", 0) ||
+         !plr_json_object_put_float(powers, "spawnRateSlider", 0.0))) {
+        plr_json_free(temporary); plr_json_free(powers); plr_json_free(root); return NULL;
     }
-    if (!plr_json_object_put_i64(root, "anglerQuestsFinished", angler_quests_finished)) {
-        plr_json_free(dpad); plr_json_free(builder_status); plr_json_free(root); return NULL;
+    uint8_t super_flags = plr_version_has_super_cart(version) ? plr_read_u8(&reader) : 0u;
+    int32_t loadout_index = plr_version_has_loadouts(version) ? plr_read_i32(&reader) : 0;
+    PlrJsonValue *loadouts = NULL;
+    if (plr_version_has_loadouts(version)) loadouts = plr_read_loadouts(
+        &reader, plr_version_has_equipment_favorites(version));
+    else {
+        loadouts = plr_json_array();
+        for (uint32_t i = 0u; loadouts && i < PLR_LOADOUTS; i++) {
+            PlrJsonValue *loadout = plr_json_object();
+            PlrJsonValue *a = plr_make_default_item_array(PLR_ARMOR_SLOTS);
+            PlrJsonValue *d = plr_make_default_item_array(PLR_DYE_SLOTS);
+            PlrJsonValue *h = plr_make_default_bool_array(PLR_DYE_SLOTS);
+            if (!loadout || !a || !d || !h || !plr_root_put(loadout, "armor", a) ||
+                !plr_root_put(loadout, "dyes", d) || !plr_root_put(loadout, "hide", h) ||
+                !plr_json_array_push(loadouts, loadout)) {
+                plr_json_free(loadout); plr_json_free(a); plr_json_free(d); plr_json_free(h);
+                plr_json_free(loadouts); loadouts = NULL; break;
+            }
+        }
     }
-    if (!plr_root_put(root, "dpadRadialBindings", dpad)) {
-        plr_json_free(builder_status); plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "builderAccStatus", builder_status)) {
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_json_object_put_i64(root, "bartenderQuestLog", bartender_quest_log) ||
-        !plr_json_object_put_bool(root, "dead", dead != 0u)) {
-        plr_json_free(root); return NULL;
-    }
-    PlrJsonValue *respawn = plr_json_null();
-    PlrJsonValue *dead_value = plr_json_object_get(root, "dead");
-    if (dead_value && dead_value->type == PLR_JSON_BOOL && dead_value->as.boolean) {
-        plr_json_free(respawn);
-        respawn = plr_json_i64(plr_read_i32(&reader));
-    }
-    if (!respawn) {
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "respawnTimer", respawn)) {
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_put_reader_i64(root, "lastSaveUtcTicks", &reader) ||
-        !plr_put_reader_i32(root, "golferScoreAccumulated", &reader) || !reader.ok) {
+    uint8_t voice_variant = plr_version_has_voice_variant(version) ? plr_read_u8(&reader) :
+        (plr_skin_variant_is_male(skin_variant) ? 1u : 2u);
+    float voice_pitch = plr_version_has_voice_pitch(version) ? plr_read_f32(&reader) : 0.0f;
+    if (!temporary || !powers || !loadouts || !reader.ok ||
+        !plr_root_put(root, "temporarySlots", temporary) ||
+        !plr_root_put(root, "creativePowers", powers) ||
+        !plr_json_object_put_bool(root, "unlockedSuperCart", (super_flags & 1u) != 0u) ||
+        !plr_json_object_put_bool(root, "enabledSuperCart", (super_flags & 2u) != 0u) ||
+        !plr_json_object_put_i64(root, "currentLoadoutIndex", loadout_index) ||
+        !plr_root_put(root, "loadouts", loadouts) ||
+        !plr_json_object_put_u64(root, "voiceVariant", voice_variant) ||
+        !plr_json_object_put_float(root, "voicePitchOffset", voice_pitch)) {
+        plr_json_free(temporary); plr_json_free(powers); plr_json_free(loadouts);
         plr_json_free(root); return NULL;
     }
 
-    PlrJsonValue *sacrifices = plr_read_sacrifices(&reader);
-    PlrJsonValue *creative_sacrifice_items = sacrifices ?
-        plr_json_object_get(sacrifices, "items") : NULL;
-    PlrJsonValue *creative_unlocks = sacrifices ?
-        plr_json_object_get(sacrifices, "hasNewUnlocks") : NULL;
-    if (!sacrifices || !creative_sacrifice_items || !creative_unlocks ||
-        !plr_root_put(root, "creativeTrackerHasNewUnlocks",
-            plr_json_clone(creative_unlocks)) ||
-        !plr_root_put(root, "creativeItemSacrifices",
-            plr_json_clone(creative_sacrifice_items))) {
-        plr_json_free(sacrifices); plr_json_free(root); return NULL;
-    }
-    plr_json_free(sacrifices);
-
-    PlrJsonValue *temporary = plr_read_temporary_slots(&reader);
-    PlrJsonValue *powers = plr_read_creative_powers(&reader);
-    uint8_t super_flags = plr_read_u8(&reader);
-    PlrJsonValue *unlocked_super = plr_json_bool((super_flags & 1u) != 0u);
-    PlrJsonValue *enabled_super = plr_json_bool((super_flags & 2u) != 0u);
-    if (!temporary || !powers || !unlocked_super || !enabled_super || !reader.ok) {
-        plr_json_free(temporary); plr_json_free(powers);
-        plr_json_free(unlocked_super); plr_json_free(enabled_super);
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "temporarySlots", temporary)) {
-        plr_json_free(powers); plr_json_free(unlocked_super); plr_json_free(enabled_super);
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "creativePowers", powers)) {
-        plr_json_free(unlocked_super); plr_json_free(enabled_super);
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "unlockedSuperCart", unlocked_super)) {
-        plr_json_free(enabled_super); plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "enabledSuperCart", enabled_super) ||
-        !plr_put_reader_i32(root, "currentLoadoutIndex", &reader) || !reader.ok) {
-        plr_json_free(root); return NULL;
-    }
-    PlrJsonValue *loadouts = plr_read_loadouts(&reader, equipment_favorites);
-    if (!loadouts) {
-        plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "loadouts", loadouts) ||
-        !plr_put_reader_u8(root, "voiceVariant", &reader) || !reader.ok) {
-        plr_json_free(root); return NULL;
-    }
-    float voice_pitch_value = voice_pitch ? plr_read_f32(&reader) : 0.0f;
-    if (!reader.ok || !plr_json_object_put_float(root, "voicePitchOffset", voice_pitch_value)) {
-        plr_json_free(root); return NULL;
-    }
     uint32_t pending_count = 0u;
-    if (pending_refunds &&
+    if (plr_version_has_pending_refunds(version) &&
         !plr_read_count(&reader, PLR_MAX_PENDING_REFUNDS, 9u, &pending_count)) {
         plr_json_free(root); return NULL;
     }
     PlrJsonValue *pending = plr_read_item_array(&reader, pending_count, 0, 0);
-    PlrJsonValue *dialogues = dialogues_seen ? plr_read_dialogues(&reader) : plr_json_array();
-    if (!pending || !dialogues) {
-        plr_json_free(pending); plr_json_free(dialogues); plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "pendingRefunds", pending)) {
-        plr_json_free(dialogues); plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "oneTimeDialoguesSeen", dialogues)) {
-        plr_json_free(root); return NULL;
-    }
-
+    PlrJsonValue *dialogues = plr_version_has_dialogues(version) ?
+        plr_read_dialogues(&reader) : plr_json_array();
     PlrJsonValue *layout = plr_json_object();
-    if (!layout ||
-        !plr_json_object_put_u64(layout, "builderAccStatusCount", PLR_BUILDER_STATUS_SLOTS) ||
-        !plr_json_object_put_bool(layout, "includesDeathMetadata", 1)) {
-        plr_json_free(layout); plr_json_free(root); return NULL;
-    }
-    if (!plr_root_put(root, "tailLayout", layout)) {
+    if (!pending || !dialogues || !layout ||
+        !plr_root_put(root, "pendingRefunds", pending) ||
+        !plr_root_put(root, "oneTimeDialoguesSeen", dialogues) ||
+        !plr_json_object_put_u64(layout, "builderAccStatusCount", builder_count) ||
+        !plr_json_object_put_bool(layout, "includesDeathMetadata", plr_version_has_death_metadata(version)) ||
+        !plr_root_put(root, "tailLayout", layout)) {
+        plr_json_free(pending); plr_json_free(dialogues); plr_json_free(layout);
         plr_json_free(root); return NULL;
     }
     if (!reader.ok || reader.offset != reader.length) {
         plr_json_free(root); return NULL;
     }
     return root;
+
+parse_items_fail:
+    plr_json_free(armor); plr_json_free(dyes); plr_json_free(inventory);
+    plr_json_free(misc_equips); plr_json_free(misc_dyes); plr_json_free(piggy);
+    plr_json_free(safe); plr_json_free(forge); plr_json_free(vault);
+    plr_json_free(root);
+    return NULL;
 }
 
 /* -------------------------------------------------------------------------
@@ -2599,7 +2689,7 @@ static int plr_validate_model(const PlrJsonValue *root) {
     if (!plr_value_i32(plr_json_object_get(root, "version"), &model_version))
         return plr_model_error("PLR version is missing or invalid");
     if (!plr_version_supported(model_version))
-        return plr_model_error("PLR version must be within TerraWasm's modern Terraria 280-326 range");
+        return plr_model_error("PLR version must be a positive Terraria release number");
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -2811,6 +2901,30 @@ static void plr_writer_type_prefix_item(
     if (with_favorited) plr_writer_u8(writer, favorited ? 1u : 0u);
 }
 
+static void plr_writer_legacy_item(
+    PlrWriter *writer, const PlrJsonValue *item, int32_t version, int with_stack) {
+    int32_t item_type = 0, stack = 0;
+    uint8_t prefix = 0u;
+    const PlrJsonValue *legacy = plr_field(item, "legacyName");
+    const char *legacy_name = NULL;
+    if (!plr_field_i32(item, "itemType", &item_type) ||
+        !plr_field_i32(item, "stack", &stack) || !plr_field_u8(item, "prefix", &prefix)) {
+        writer->ok = 0; return;
+    }
+    if (legacy && !plr_value_string(legacy, &legacy_name)) { writer->ok = 0; return; }
+    if (!legacy_name) {
+        if (item_type != 0) {
+            tx_set_error("TERRAX_PLR_LEGACY_ITEM_NAME_REQUIRED",
+                "release 1-37 item edits require legacyName because the file stores item names, not ids");
+            writer->ok = 0; return;
+        }
+        legacy_name = "";
+    }
+    plr_writer_string(writer, legacy_name);
+    if (with_stack) plr_writer_i32(writer, stack);
+    if (version >= 36) plr_writer_u8(writer, prefix);
+}
+
 static void plr_writer_item_array(
     PlrWriter *writer, const PlrJsonValue *object, const char *key,
     uint32_t expected, int with_favorited, int type_prefix) {
@@ -2901,7 +3015,7 @@ static void plr_writer_spawn_points(PlrWriter *writer, const PlrJsonValue *root)
     plr_writer_i32(writer, -1);
 }
 
-static void plr_writer_sacrifices(PlrWriter *writer, const PlrJsonValue *root) {
+static void plr_writer_sacrifices(PlrWriter *writer, const PlrJsonValue *root, int32_t version) {
     int has_new_unlocks = 0;
     const PlrJsonValue *array = plr_field_array(root, "creativeItemSacrifices");
     if (!plr_field_bool(root, "creativeTrackerHasNewUnlocks", &has_new_unlocks) ||
@@ -2910,7 +3024,8 @@ static void plr_writer_sacrifices(PlrWriter *writer, const PlrJsonValue *root) {
         writer->ok = 0;
         return;
     }
-    plr_writer_u8(writer, has_new_unlocks ? 1u : 0u);
+    if (plr_version_has_tracker_new_unlock_flag(version))
+        plr_writer_u8(writer, has_new_unlocks ? 1u : 0u);
     plr_writer_i32(writer, (int32_t)array->as.array.count);
     for (uint32_t i = 0u; i < array->as.array.count; i++) {
         const PlrJsonValue *item = array->as.array.items[i];
@@ -2989,29 +3104,21 @@ static uint8_t *plr_encode_plain(
     if (!plr_validate_model(root)) return NULL;
     PlrWriter writer = {NULL, 0u, 0u, 1};
     int32_t version = 0;
-    if (!plr_field_i32(root, "version", &version)) writer.ok = 0;
-    if (!plr_version_supported(version)) return NULL;
-    const int voice_pitch = plr_version_has_voice_pitch(version);
-    const int team = plr_version_has_team(version);
-    const int pending_refunds = plr_version_has_pending_refunds(version);
-    const int dialogues_seen = plr_version_has_dialogues(version);
-    const int equipment_favorites = plr_version_has_equipment_favorites(version);
-    const int reserved_324 = plr_version_has_reserved_324(version);
+    if (!plr_field_i32(root, "version", &version) || !plr_version_supported(version)) return NULL;
     plr_writer_i32(&writer, version);
 
     const PlrJsonValue *metadata = plr_field(root, "metadata");
-    uint64_t magic_and_type = PLR_DEFAULT_MAGIC_AND_TYPE;
-    uint64_t favorite_flags = 0u;
-    uint32_t revision = 0u;
-    if (metadata->type != PLR_JSON_NULL &&
-        (!plr_field_u64(metadata, "magicAndType", &magic_and_type) ||
-         !plr_field_u32(metadata, "revision", &revision) ||
-         !plr_field_u64(metadata, "favoriteFlags", &favorite_flags))) {
-        writer.ok = 0;
+    if (plr_version_has_metadata(version)) {
+        uint64_t magic_and_type = PLR_DEFAULT_MAGIC_AND_TYPE, favorite_flags = 0u;
+        uint32_t revision = 0u;
+        if (metadata && metadata->type != PLR_JSON_NULL &&
+            (!plr_field_u64(metadata, "magicAndType", &magic_and_type) ||
+             !plr_field_u32(metadata, "revision", &revision) ||
+             !plr_field_u64(metadata, "favoriteFlags", &favorite_flags))) writer.ok = 0;
+        plr_writer_u64(&writer, magic_and_type);
+        plr_writer_u32(&writer, revision);
+        plr_writer_u64(&writer, favorite_flags);
     }
-    plr_writer_u64(&writer, magic_and_type);
-    plr_writer_u32(&writer, revision);
-    plr_writer_u64(&writer, favorite_flags);
 
     const char *name = NULL;
     int32_t i32 = 0;
@@ -3021,15 +3128,18 @@ static uint8_t *plr_encode_plain(
     if (!plr_field_string(root, "name", &name)) writer.ok = 0;
     plr_writer_string(&writer, name ? name : "");
     if (!plr_field_u8(root, "difficulty", &u8)) writer.ok = 0;
-    plr_writer_u8(&writer, u8);
+    if (plr_version_has_difficulty(version)) {
+        if (plr_version_has_byte_difficulty(version)) plr_writer_u8(&writer, u8);
+        else plr_writer_u8(&writer, u8 == 2u ? 1u : 0u);
+    }
     if (!plr_field_i64(root, "playTimeTicks", &i64)) writer.ok = 0;
-    plr_writer_i64(&writer, i64);
+    if (plr_version_has_play_time(version)) plr_writer_i64(&writer, i64);
     if (!plr_field_i32(root, "hair", &i32)) writer.ok = 0;
     plr_writer_i32(&writer, i32);
     if (!plr_field_u8(root, "hairDye", &u8)) writer.ok = 0;
-    plr_writer_u8(&writer, u8);
+    if (plr_version_has_hair_dye(version)) plr_writer_u8(&writer, u8);
     if (!plr_field_u8(root, "team", &u8)) writer.ok = 0;
-    if (team) plr_writer_u8(&writer, u8);
+    if (plr_version_has_team(version)) plr_writer_u8(&writer, u8);
 
     const PlrJsonValue *hide = plr_field_array(root, "hideVisibleAccessory");
     uint8_t hide_lower = 0u, hide_upper = 0u;
@@ -3039,143 +3149,178 @@ static uint8_t *plr_encode_plain(
         else if (boolean && index < 8u) hide_lower |= (uint8_t)(1u << index);
         else if (boolean) hide_upper |= (uint8_t)(1u << (index - 8u));
     }
-    plr_writer_u8(&writer, hide_lower);
-    plr_writer_u8(&writer, hide_upper);
-    const char *body_u8_fields[] = {"hideMisc", "skinVariant"};
-    for (uint32_t index = 0u; index < 2u; index++) {
-        if (!plr_field_u8(root, body_u8_fields[index], &u8)) writer.ok = 0;
-        plr_writer_u8(&writer, u8);
-    }
-    const char *body_i32_fields[] = {"statLife", "statLifeMax", "statMana", "statManaMax"};
-    for (uint32_t index = 0u; index < 4u; index++) {
-        if (!plr_field_i32(root, body_i32_fields[index], &i32)) writer.ok = 0;
-        plr_writer_i32(&writer, i32);
-    }
-    const char *body_bool_prefix_fields[] = {
-        "extraAccessory", "unlockedBiomeTorches", "usingBiomeTorches", "ateArtisanBread"
-    };
-    for (uint32_t index = 0u; index < 4u; index++) {
-        if (!plr_field_bool(root, body_bool_prefix_fields[index], &boolean)) writer.ok = 0;
-        plr_writer_u8(&writer, boolean ? 1u : 0u);
-    }
-    if (reserved_324) {
-        /* Match Player.SavePlayer exactly: the reserved release-324 byte is
-         * always written as false and is not editable semantic state. */
-        plr_writer_u8(&writer, 0u);
-    }
-    const char *body_bool_suffix_fields[] = {
-        "usedAegisCrystal", "usedAegisFruit", "usedArcaneCrystal",
-        "usedGalaxyPearl", "usedGummyWorm", "usedAmbrosia",
-        "downedDd2EventAnyDifficulty"
-    };
-    for (uint32_t index = 0u; index < 7u; index++) {
-        if (!plr_field_bool(root, body_bool_suffix_fields[index], &boolean)) writer.ok = 0;
-        plr_writer_u8(&writer, boolean ? 1u : 0u);
-    }
-    const char *death_fields[] = {"taxMoney", "numberOfDeathsPve", "numberOfDeathsPvp"};
-    for (uint32_t index = 0u; index < 3u; index++) {
-        if (!plr_field_i32(root, death_fields[index], &i32)) writer.ok = 0;
-        plr_writer_i32(&writer, i32);
-    }
-    const char *color_fields[] = {
-        "hairColor", "skinColor", "eyeColor", "shirtColor",
-        "underShirtColor", "pantsColor", "shoeColor"
-    };
-    for (uint32_t index = 0u; index < 7u; index++)
-        plr_writer_color(&writer, root, color_fields[index]);
+    if (plr_version_has_hide_lower(version)) plr_writer_u8(&writer, hide_lower);
+    if (plr_version_has_hide_upper(version)) plr_writer_u8(&writer, hide_upper);
+    if (!plr_field_u8(root, "hideMisc", &u8)) writer.ok = 0;
+    if (plr_version_has_hide_misc(version)) plr_writer_u8(&writer, u8);
+    uint8_t skin_variant = 0u;
+    if (!plr_field_u8(root, "skinVariant", &skin_variant)) writer.ok = 0;
+    if (plr_version_has_skin_variant(version)) plr_writer_u8(&writer, skin_variant);
+    else if (plr_version_has_gender_bool(version))
+        plr_writer_u8(&writer, plr_skin_variant_is_male(skin_variant) ? 1u : 0u);
 
-    plr_writer_item_array(
-        &writer, root, "armor", PLR_ARMOR_SLOTS, equipment_favorites, 1);
-    plr_writer_item_array(
-        &writer, root, "dyes", PLR_DYE_SLOTS, equipment_favorites, 1);
-    plr_writer_item_array(&writer, root, "inventory", PLR_INVENTORY_SLOTS, 1, 0);
+    const char *stats[] = {"statLife", "statLifeMax", "statMana", "statManaMax"};
+    for (uint32_t i = 0u; i < 4u; i++) {
+        if (!plr_field_i32(root, stats[i], &i32)) writer.ok = 0;
+        plr_writer_i32(&writer, i32);
+    }
+    if (!plr_field_bool(root, "extraAccessory", &boolean)) writer.ok = 0;
+    if (plr_version_has_extra_accessory(version)) plr_writer_u8(&writer, boolean ? 1u : 0u);
+    if (plr_version_has_biome_torches(version)) {
+        if (!plr_field_bool(root, "unlockedBiomeTorches", &boolean)) writer.ok = 0;
+        plr_writer_u8(&writer, boolean ? 1u : 0u);
+        if (!plr_field_bool(root, "usingBiomeTorches", &boolean)) writer.ok = 0;
+        plr_writer_u8(&writer, boolean ? 1u : 0u);
+        if (plr_version_has_artisan_bread(version)) {
+            if (!plr_field_bool(root, "ateArtisanBread", &boolean)) writer.ok = 0;
+            plr_writer_u8(&writer, boolean ? 1u : 0u);
+        }
+        if (plr_version_has_reserved_324(version)) plr_writer_u8(&writer, 0u);
+        if (plr_version_has_permanent_upgrades(version)) {
+            const char *upgrades[] = {"usedAegisCrystal", "usedAegisFruit", "usedArcaneCrystal",
+                "usedGalaxyPearl", "usedGummyWorm", "usedAmbrosia"};
+            for (uint32_t i = 0u; i < 6u; i++) {
+                if (!plr_field_bool(root, upgrades[i], &boolean)) writer.ok = 0;
+                plr_writer_u8(&writer, boolean ? 1u : 0u);
+            }
+        }
+    }
+    if (!plr_field_bool(root, "downedDd2EventAnyDifficulty", &boolean)) writer.ok = 0;
+    if (plr_version_has_dd2_flag(version)) plr_writer_u8(&writer, boolean ? 1u : 0u);
+    if (!plr_field_i32(root, "taxMoney", &i32)) writer.ok = 0;
+    if (plr_version_has_tax_money(version)) plr_writer_i32(&writer, i32);
+    if (!plr_field_i32(root, "numberOfDeathsPve", &i32)) writer.ok = 0;
+    if (plr_version_has_death_counts(version)) plr_writer_i32(&writer, i32);
+    if (!plr_field_i32(root, "numberOfDeathsPvp", &i32)) writer.ok = 0;
+    if (plr_version_has_death_counts(version)) plr_writer_i32(&writer, i32);
+
+    const char *colors[] = {"hairColor", "skinColor", "eyeColor", "shirtColor",
+        "underShirtColor", "pantsColor", "shoeColor"};
+    for (uint32_t i = 0u; i < 7u; i++) plr_writer_color(&writer, root, colors[i]);
+
+    const PlrJsonValue *armor = plr_field_array(root, "armor");
+    const PlrJsonValue *dyes = plr_field_array(root, "dyes");
+    const PlrJsonValue *inventory = plr_field_array(root, "inventory");
     const PlrJsonValue *misc_equips = plr_field_array(root, "miscEquips");
     const PlrJsonValue *misc_dyes = plr_field_array(root, "miscDyes");
-    if (!misc_equips || !misc_dyes || misc_equips->as.array.count != PLR_MISC_SLOTS ||
-        misc_dyes->as.array.count != PLR_MISC_SLOTS) writer.ok = 0;
-    else for (uint32_t index = 0u; index < PLR_MISC_SLOTS; index++) {
-        plr_writer_type_prefix_item(&writer, misc_equips->as.array.items[index], 0);
-        plr_writer_type_prefix_item(&writer, misc_dyes->as.array.items[index], 0);
+    const PlrJsonValue *piggy = plr_field_array(root, "piggyBank");
+    const PlrJsonValue *safe = plr_field_array(root, "safe");
+    const PlrJsonValue *forge = plr_field_array(root, "defendersForge");
+    const PlrJsonValue *vault = plr_field_array(root, "voidVault");
+    if (!armor || !dyes || !inventory || !misc_equips || !misc_dyes || !piggy || !safe || !forge || !vault)
+        writer.ok = 0;
+    else if (plr_version_has_numeric_items(version)) {
+        for (uint32_t i = 0u; i < plr_version_armor_slots(version); i++)
+            plr_writer_type_prefix_item(&writer, armor->as.array.items[i], plr_version_has_equipment_favorites(version));
+        for (uint32_t i = 0u; i < plr_version_dye_slots(version); i++)
+            plr_writer_type_prefix_item(&writer, dyes->as.array.items[i], plr_version_has_equipment_favorites(version));
+        for (uint32_t disk = 0u; disk < plr_version_inventory_disk_slots(version); disk++) {
+            uint32_t model_index = version < 58 && disk >= 40u ? disk + 10u : disk;
+            plr_writer_item(&writer, inventory->as.array.items[model_index], plr_version_has_inventory_favorites(version));
+        }
+        if (plr_version_has_misc_equips(version))
+            for (uint32_t i = 0u; i < PLR_MISC_SLOTS; i++) {
+                if (version < 136 && i == 1u) continue;
+                plr_writer_type_prefix_item(&writer, misc_equips->as.array.items[i], 0);
+                plr_writer_type_prefix_item(&writer, misc_dyes->as.array.items[i], 0);
+            }
+        for (uint32_t i = 0u; i < plr_version_bank_slots(version); i++)
+            plr_writer_item(&writer, piggy->as.array.items[i], 0);
+        for (uint32_t i = 0u; i < plr_version_bank_slots(version); i++)
+            plr_writer_item(&writer, safe->as.array.items[i], 0);
+        if (plr_version_has_forge(version))
+            for (uint32_t i = 0u; i < PLR_BANK_SLOTS; i++) plr_writer_item(&writer, forge->as.array.items[i], 0);
+        if (plr_version_has_void_vault(version))
+            for (uint32_t i = 0u; i < PLR_BANK_SLOTS; i++)
+                plr_writer_item(&writer, vault->as.array.items[i], plr_version_has_void_favorites(version));
+    } else {
+        for (uint32_t i = 0u; i < 8u; i++) plr_writer_legacy_item(&writer, armor->as.array.items[i], version, 0);
+        if (version >= 6)
+            for (uint32_t i = 10u; i < 13u; i++) plr_writer_legacy_item(&writer, armor->as.array.items[i], version, 0);
+        uint32_t legacy_inventory = version >= 15 ? 48u : 44u;
+        for (uint32_t disk = 0u; disk < legacy_inventory; disk++) {
+            uint32_t model_index = disk >= 40u ? disk + 10u : disk;
+            plr_writer_legacy_item(&writer, inventory->as.array.items[model_index], version, 1);
+        }
+        for (uint32_t i = 0u; i < 20u; i++) plr_writer_legacy_item(&writer, piggy->as.array.items[i], version, 1);
+        if (version >= 20)
+            for (uint32_t i = 0u; i < 20u; i++) plr_writer_legacy_item(&writer, safe->as.array.items[i], version, 1);
     }
-    plr_writer_item_array(&writer, root, "piggyBank", PLR_BANK_SLOTS, 0, 0);
-    plr_writer_item_array(&writer, root, "safe", PLR_BANK_SLOTS, 0, 0);
-    plr_writer_item_array(&writer, root, "defendersForge", PLR_BANK_SLOTS, 0, 0);
-    plr_writer_item_array(&writer, root, "voidVault", PLR_BANK_SLOTS, 1, 0);
     if (!plr_field_u8(root, "voidVaultInfo", &u8)) writer.ok = 0;
-    plr_writer_u8(&writer, u8);
+    if (plr_version_has_void_info(version)) plr_writer_u8(&writer, u8);
+
     const PlrJsonValue *buffs = plr_field_array(root, "buffs");
+    uint32_t buff_count = plr_version_buff_slots(version);
     if (!buffs || buffs->as.array.count != PLR_BUFF_SLOTS) writer.ok = 0;
-    else for (uint32_t index = 0u; index < PLR_BUFF_SLOTS; index++) {
-        if (!plr_field_i32(buffs->as.array.items[index], "buffType", &i32)) writer.ok = 0;
+    else for (uint32_t i = 0u; i < buff_count; i++) {
+        if (!plr_field_i32(buffs->as.array.items[i], "buffType", &i32)) writer.ok = 0;
         plr_writer_i32(&writer, i32);
-        if (!plr_field_i32(buffs->as.array.items[index], "buffTime", &i32)) writer.ok = 0;
+        if (!plr_field_i32(buffs->as.array.items[i], "buffTime", &i32)) writer.ok = 0;
         plr_writer_i32(&writer, i32);
     }
-
     plr_writer_spawn_points(&writer, root);
     if (!plr_field_bool(root, "hbLocked", &boolean)) writer.ok = 0;
-    plr_writer_u8(&writer, boolean ? 1u : 0u);
-    plr_writer_bool_array(&writer, root, "hideInfo", PLR_HIDE_INFO_SLOTS);
+    if (plr_version_has_hb_locked(version)) plr_writer_u8(&writer, boolean ? 1u : 0u);
+    if (plr_version_has_hide_info(version)) plr_writer_bool_array(&writer, root, "hideInfo", PLR_HIDE_INFO_SLOTS);
     if (!plr_field_i32(root, "anglerQuestsFinished", &i32)) writer.ok = 0;
-    plr_writer_i32(&writer, i32);
-    plr_writer_i32_array(&writer, root, "dpadRadialBindings", PLR_DPAD_SLOTS);
-    const PlrJsonValue *layout = plr_field(root, "tailLayout");
-    uint32_t builder_count = 0u;
-    if (!plr_field_u32(layout, "builderAccStatusCount", &builder_count)) writer.ok = 0;
-    if (builder_count == 0u) builder_count = PLR_BUILDER_STATUS_SLOTS;
-    plr_writer_i32_array(&writer, root, "builderAccStatus", builder_count);
+    if (plr_version_has_angler(version)) plr_writer_i32(&writer, i32);
+    if (plr_version_has_dpad(version)) plr_writer_i32_array(&writer, root, "dpadRadialBindings", PLR_DPAD_SLOTS);
+    uint32_t builder_count = plr_version_builder_slots(version);
+    if (builder_count) plr_writer_i32_array(&writer, root, "builderAccStatus", builder_count);
     if (!plr_field_i32(root, "bartenderQuestLog", &i32)) writer.ok = 0;
-    plr_writer_i32(&writer, i32);
+    if (plr_version_has_bartender(version)) plr_writer_i32(&writer, i32);
     if (!plr_field_bool(root, "dead", &boolean)) writer.ok = 0;
-    plr_writer_u8(&writer, boolean ? 1u : 0u);
-    if (boolean) {
-        const PlrJsonValue *respawn = plr_field(root, "respawnTimer");
-        if (respawn->type == PLR_JSON_NULL) i32 = 0;
-        else if (!plr_value_i32(respawn, &i32)) writer.ok = 0;
-        plr_writer_i32(&writer, i32);
+    if (plr_version_has_death_metadata(version)) {
+        plr_writer_u8(&writer, boolean ? 1u : 0u);
+        if (boolean) {
+            const PlrJsonValue *respawn = plr_field(root, "respawnTimer");
+            if (!respawn || (respawn->type != PLR_JSON_NULL && !plr_value_i32(respawn, &i32))) writer.ok = 0;
+            if (respawn && respawn->type == PLR_JSON_NULL) i32 = 0;
+            plr_writer_i32(&writer, i32);
+        }
     }
     if (!plr_field_i64(root, "lastSaveUtcTicks", &i64)) writer.ok = 0;
-    plr_writer_i64(&writer, i64);
+    if (plr_version_has_last_save(version)) plr_writer_i64(&writer, i64);
     if (!plr_field_i32(root, "golferScoreAccumulated", &i32)) writer.ok = 0;
-    plr_writer_i32(&writer, i32);
-    plr_writer_sacrifices(&writer, root);
-    plr_writer_temporary_slots(&writer, root);
-    plr_writer_creative_powers(&writer, root);
-    int unlocked = 0, enabled = 0;
-    if (!plr_field_bool(root, "unlockedSuperCart", &unlocked) ||
-        !plr_field_bool(root, "enabledSuperCart", &enabled)) writer.ok = 0;
-    plr_writer_u8(&writer, (uint8_t)((unlocked ? 1u : 0u) | (enabled ? 2u : 0u)));
-    if (!plr_field_i32(root, "currentLoadoutIndex", &i32)) writer.ok = 0;
-    plr_writer_i32(&writer, i32);
-    plr_writer_loadouts(&writer, root, equipment_favorites);
+    if (plr_version_has_golfer_score(version)) plr_writer_i32(&writer, i32);
+    if (plr_version_has_creative_tracker(version)) plr_writer_sacrifices(&writer, root, version);
+    if (plr_version_has_temporary_slots(version)) plr_writer_temporary_slots(&writer, root);
+    if (plr_version_has_creative_powers(version)) plr_writer_creative_powers(&writer, root);
+    if (plr_version_has_super_cart(version)) {
+        int unlocked = 0, enabled = 0;
+        if (!plr_field_bool(root, "unlockedSuperCart", &unlocked) ||
+            !plr_field_bool(root, "enabledSuperCart", &enabled)) writer.ok = 0;
+        plr_writer_u8(&writer, (uint8_t)((unlocked ? 1u : 0u) | (enabled ? 2u : 0u)));
+    }
+    if (plr_version_has_loadouts(version)) {
+        if (!plr_field_i32(root, "currentLoadoutIndex", &i32)) writer.ok = 0;
+        plr_writer_i32(&writer, i32);
+        plr_writer_loadouts(&writer, root, plr_version_has_equipment_favorites(version));
+    }
     if (!plr_field_u8(root, "voiceVariant", &u8)) writer.ok = 0;
-    plr_writer_u8(&writer, u8);
-    float voice_pitch_value = 0.0f;
-    if (!plr_field_float(root, "voicePitchOffset", &voice_pitch_value)) writer.ok = 0;
-    if (voice_pitch) plr_writer_f32(&writer, voice_pitch_value);
+    if (plr_version_has_voice_variant(version)) plr_writer_u8(&writer, u8);
+    float voice_pitch = 0.0f;
+    if (!plr_field_float(root, "voicePitchOffset", &voice_pitch)) writer.ok = 0;
+    if (plr_version_has_voice_pitch(version)) plr_writer_f32(&writer, voice_pitch);
     const PlrJsonValue *pending = plr_field_array(root, "pendingRefunds");
-    if (!pending || pending->as.array.count > PLR_MAX_PENDING_REFUNDS ||
-        pending->as.array.count > INT32_MAX) writer.ok = 0;
-    else if (pending_refunds) {
+    if (!pending || pending->as.array.count > PLR_MAX_PENDING_REFUNDS || pending->as.array.count > INT32_MAX)
+        writer.ok = 0;
+    else if (plr_version_has_pending_refunds(version)) {
         plr_writer_i32(&writer, (int32_t)pending->as.array.count);
-        for (uint32_t index = 0u; index < pending->as.array.count; index++)
-            plr_writer_item(&writer, pending->as.array.items[index], 0);
+        for (uint32_t i = 0u; i < pending->as.array.count; i++) plr_writer_item(&writer, pending->as.array.items[i], 0);
     }
     const PlrJsonValue *dialogues = plr_field_array(root, "oneTimeDialoguesSeen");
-    if (!dialogues || dialogues->as.array.count > PLR_MAX_DIALOGUES ||
-        dialogues->as.array.count > INT32_MAX) writer.ok = 0;
-    else if (dialogues_seen) {
+    if (!dialogues || dialogues->as.array.count > PLR_MAX_DIALOGUES || dialogues->as.array.count > INT32_MAX)
+        writer.ok = 0;
+    else if (plr_version_has_dialogues(version)) {
         plr_writer_i32(&writer, (int32_t)dialogues->as.array.count);
-        for (uint32_t index = 0u; index < dialogues->as.array.count; index++) {
+        for (uint32_t i = 0u; i < dialogues->as.array.count; i++) {
             const char *dialogue = NULL;
-            if (!plr_value_string(dialogues->as.array.items[index], &dialogue)) writer.ok = 0;
+            if (!plr_value_string(dialogues->as.array.items[i], &dialogue)) writer.ok = 0;
             plr_writer_string(&writer, dialogue ? dialogue : "");
         }
     }
-    if (!writer.ok || writer.length == 0u) {
-        free(writer.data);
-        return NULL;
-    }
+    if (!writer.ok || writer.length == 0u) { free(writer.data); return NULL; }
     if (out_length) *out_length = writer.length;
     return writer.data;
 }
@@ -3375,12 +3520,19 @@ static terrax_world_status plr_commit_root(
     return TERRAX_WORLD_STATUS_OK;
 }
 
-static terrax_world_status plr_parse_error(void) {
+static terrax_world_status plr_parse_error_for_version(int32_t version) {
+    if (g_plr_oom) return plr_status_error(
+        TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM", "out of memory while parsing PLR");
+    if (version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_PARSE_ERROR, "TERRAX_PLR_NEWER_LAYOUT_ERROR",
+        "PLR release is newer than the known release 326 layout and could not be parsed with that layout");
     return plr_status_error(
-        g_plr_oom ? TERRAX_WORLD_STATUS_INTERNAL_ERROR : TERRAX_WORLD_STATUS_PARSE_ERROR,
-        g_plr_oom ? "TERRAX_WASM_OOM" : "TERRAX_PLR_PARSE_ERROR",
-        g_plr_oom ? "out of memory while parsing PLR" :
-            "PLR payload is invalid or its version uses an incompatible binary layout");
+        TERRAX_WORLD_STATUS_PARSE_ERROR, "TERRAX_PLR_PARSE_ERROR",
+        "PLR payload is invalid or its historical binary layout could not be parsed");
+}
+
+static terrax_world_status plr_parse_error(void) {
+    return plr_parse_error_for_version(0);
 }
 
 static terrax_world_status plr_json_error(void) {
@@ -3427,11 +3579,15 @@ static terrax_world_status plr_open_from_encrypted(
         free(original);
         return plr_parse_error();
     }
+    int32_t detected_version = 0;
+    if (plain_length >= 4u) detected_version = (int32_t)(
+        (uint32_t)plain[0] | ((uint32_t)plain[1] << 8u) |
+        ((uint32_t)plain[2] << 16u) | ((uint32_t)plain[3] << 24u));
     PlrJsonValue *root = plr_parse_plain(plain, plain_length);
     free(plain);
     if (!root) {
         free(original);
-        return plr_parse_error();
+        return plr_parse_error_for_version(detected_version);
     }
     return plr_open_parsed(root, original, buffer_length, out_handle);
 }

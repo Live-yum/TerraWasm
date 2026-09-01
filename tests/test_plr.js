@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -334,86 +335,191 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
 });
 
 
-test("PLR releases 280-326 follow Terraria's modern history gates", async () => {
+function makeAirItem() {
+  return { itemType: 0, stack: 0, prefix: 0, favorited: false };
+}
+
+function historicalModel(version) {
+  const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+  model.version = version;
+  if (version < 135) model.metadata = null;
+  const clearItems = (items) => items.map(() => makeAirItem());
+  model.armor = clearItems(model.armor);
+  model.dyes = clearItems(model.dyes);
+  model.inventory = clearItems(model.inventory);
+  model.miscEquips = clearItems(model.miscEquips);
+  model.miscDyes = clearItems(model.miscDyes);
+  model.piggyBank = clearItems(model.piggyBank);
+  model.safe = clearItems(model.safe);
+  model.defendersForge = clearItems(model.defendersForge);
+  model.voidVault = clearItems(model.voidVault);
+  model.pendingRefunds = [];
+  model.oneTimeDialoguesSeen = [];
+  model.creativeItemSacrifices = [];
+  model.creativeTrackerHasNewUnlocks = false;
+  model.temporarySlots = [null, null, null, null];
+  for (const loadout of model.loadouts) {
+    loadout.armor = clearItems(loadout.armor);
+    loadout.dyes = clearItems(loadout.dyes);
+    loadout.hide = loadout.hide.map(() => false);
+  }
+  model.buffs = model.buffs.map(() => ({ buffType: 0, buffTime: 0 }));
+  const builderCount = version < 164 ? 0 : version < 167 ? 8 : version < 197 ? 10 : version < 230 ? 11 : 12;
+  model.tailLayout.builderAccStatusCount = builderCount;
+  model.tailLayout.includesDeathMetadata = version >= 200;
+  model.builderAccStatus = Array(builderCount || 12).fill(0);
+  return model;
+}
+
+function decryptPlr(bytes) {
+  const key = Buffer.from([104,0,51,0,121,0,95,0,103,0,85,0,121,0,90,0]);
+  const decipher = crypto.createDecipheriv("aes-128-cbc", key, key);
+  return Buffer.concat([decipher.update(bytes), decipher.final()]);
+}
+
+function encryptPlr(plain) {
+  const key = Buffer.from([104,0,51,0,121,0,95,0,103,0,85,0,121,0,90,0]);
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, key);
+  return Buffer.concat([cipher.update(plain), cipher.final()]);
+}
+
+function lastError(module) {
+  return twoCallJson(module, module._terra_info_get_last_error_json, []);
+}
+
+test("PLR recognizes every historical Terraria release 1-326", async () => {
   const module = await TerraWorldWasm();
   const baseline = module._tx_heap_used();
-  const versions = [280, 281, 282, 283, 299, 300, 309, 310, 321, 322, 323, 324, 325, 326];
-
-  for (const version of versions) {
-    const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-    model.version = version;
-    model.team = 7;
-    model.voiceVariant = 3;
-    model.voicePitchOffset = 0.25;
-    model.pendingRefunds = [{ itemType: 1, stack: 2, prefix: 0, favorited: false }];
-    model.oneTimeDialoguesSeen = ["source-gate"];
-    model.armor[0].favorited = true;
-    model.dyes[0].favorited = true;
-    model.inventory[0].favorited = true;
-    model.loadouts[0].armor[0].favorited = true;
-    model.loadouts[0].dyes[0].favorited = true;
-    model.ateArtisanBread = true;
-    model.usedAegisCrystal = false;
-    model.usedAegisFruit = true;
-    model.usedArcaneCrystal = false;
-    model.usedGalaxyPearl = true;
-    model.usedGummyWorm = false;
-    model.usedAmbrosia = true;
-
+  for (let version = 1; version <= 326; version++) {
     let handle = 0;
     let reopened = 0;
     try {
+      handle = openJson(module, historicalModel(version));
+      const encoded = encode(module, handle);
+      reopened = openBuffer(module, encoded);
+      assert.equal(getField(module, reopened, "/version"), version, `release ${version}`);
+      assert.equal(typeof getField(module, reopened, "/name"), "string", `release ${version}`);
+    } finally {
+      if (reopened) assert.equal(module._terra_player_close(reopened), 0);
+      if (handle) assert.equal(module._terra_player_close(handle), 0);
+    }
+    assert.equal(module._tx_heap_used(), baseline, `release ${version} leaked tracked allocations`);
+  }
+});
+
+test("PLR historical source gates keep old layouts aligned", async () => {
+  const module = await TerraWorldWasm();
+  const baseline = module._tx_heap_used();
+  const versions = [
+    9,10,16,17,37,38,46,47,57,58,73,74,80,81,82,83,97,98,106,107,
+    113,114,116,117,118,119,123,124,125,127,128,134,135,137,138,
+    161,162,163,164,166,167,180,181,182,196,197,198,199,200,201,202,
+    205,206,213,214,217,218,219,220,228,229,230,251,252,253,254,255,
+    256,259,260,261,262,279,280,281,282,283,299,300,309,310,321,322,323,324,325,326,
+  ];
+  for (const version of versions) {
+    const model = historicalModel(version);
+    model.difficulty = 2;
+    model.playTimeTicks = 123456;
+    model.hairDye = 7;
+    model.team = 5;
+    model.hideVisibleAccessory[0] = true;
+    model.hideVisibleAccessory[8] = true;
+    model.hideMisc = 3;
+    model.skinVariant = 4;
+    model.extraAccessory = true;
+    model.unlockedBiomeTorches = true;
+    model.usingBiomeTorches = true;
+    model.ateArtisanBread = true;
+    model.usedAegisCrystal = true;
+    model.downedDd2EventAnyDifficulty = true;
+    model.taxMoney = 99;
+    model.numberOfDeathsPve = 7;
+    model.numberOfDeathsPvp = 8;
+    model.hbLocked = true;
+    model.anglerQuestsFinished = 12;
+    model.bartenderQuestLog = 13;
+    model.dead = true;
+    model.respawnTimer = 42;
+    model.lastSaveUtcTicks = 987654;
+    model.golferScoreAccumulated = 55;
+    model.unlockedSuperCart = true;
+    model.enabledSuperCart = true;
+    model.currentLoadoutIndex = 2;
+    model.voiceVariant = 3;
+    model.voicePitchOffset = 0.25;
+    model.pendingRefunds = version >= 300 ? [{ itemType: 1, stack: 2, prefix: 0, favorited: false }] : [];
+    model.oneTimeDialoguesSeen = version >= 310 ? ["gate"] : [];
+    let handle = 0, reopened = 0;
+    try {
       handle = openJson(module, model);
       reopened = openBuffer(module, encode(module, handle));
-      assert.equal(getField(module, reopened, "/version"), version);
-      assert.equal(getField(module, reopened, "/voiceVariant"), 3);
-      assert.equal(getField(module, reopened, "/voicePitchOffset"), version >= 281 ? 0.25 : 0,
-        `voice pitch gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/team"), version >= 283 ? 7 : 0,
-        `team gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/pendingRefunds").length, version >= 300 ? 1 : 0,
-        `pending refund gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/oneTimeDialoguesSeen").length, version >= 310 ? 1 : 0,
-        `dialogue gate mismatch for release ${version}`);
-      const equipmentFavorite = version >= 322;
-      assert.equal(getField(module, reopened, "/armor/0/favorited"), equipmentFavorite,
-        `main armor favorite gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/dyes/0/favorited"), equipmentFavorite,
-        `main dye favorite gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/loadouts/0/armor/0/favorited"), equipmentFavorite,
-        `loadout armor favorite gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/loadouts/0/dyes/0/favorited"), equipmentFavorite,
-        `loadout dye favorite gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/inventory/0/favorited"), true);
-      assert.equal(getField(module, reopened, "/ateArtisanBread"), true);
-      assert.equal(getField(module, reopened, "/usedAegisCrystal"), false);
-      assert.equal(getField(module, reopened, "/usedAegisFruit"), true);
-      assert.equal(getField(module, reopened, "/usedArcaneCrystal"), false);
-      assert.equal(getField(module, reopened, "/usedGalaxyPearl"), true);
-      assert.equal(getField(module, reopened, "/usedGummyWorm"), false);
-      assert.equal(getField(module, reopened, "/usedAmbrosia"), true);
+      assert.equal(getField(module, reopened, "/difficulty"), version >= 10 ? 2 : 0);
+      assert.equal(getField(module, reopened, "/playTimeTicks"), version >= 138 ? 123456 : 0);
+      assert.equal(getField(module, reopened, "/hairDye"), version >= 82 ? 7 : 0);
+      assert.equal(getField(module, reopened, "/team"), version >= 283 ? 5 : 0);
+      assert.equal(getField(module, reopened, "/hideVisibleAccessory/0"), version >= 83);
+      assert.equal(getField(module, reopened, "/hideVisibleAccessory/8"), version >= 124);
+      assert.equal(getField(module, reopened, "/hideMisc"), version >= 119 ? 3 : 0);
+      assert.equal(getField(module, reopened, "/extraAccessory"), version >= 125);
+      assert.equal(getField(module, reopened, "/taxMoney"), version >= 128 ? 99 : 0);
+      assert.equal(getField(module, reopened, "/downedDd2EventAnyDifficulty"), version >= 182);
+      assert.equal(getField(module, reopened, "/numberOfDeathsPve"), version >= 254 ? 7 : 0);
+      assert.equal(getField(module, reopened, "/hbLocked"), version >= 16);
+      assert.equal(getField(module, reopened, "/anglerQuestsFinished"), version >= 98 ? 12 : 0);
+      assert.equal(getField(module, reopened, "/bartenderQuestLog"), version >= 181 ? 13 : 0);
+      assert.equal(getField(module, reopened, "/dead"), version >= 200);
+      assert.equal(getField(module, reopened, "/lastSaveUtcTicks"), version >= 202 ? 987654 : 0);
+      assert.equal(getField(module, reopened, "/golferScoreAccumulated"), version >= 206 ? 55 : 0);
+      assert.equal(getField(module, reopened, "/unlockedSuperCart"), version >= 253);
+      assert.equal(getField(module, reopened, "/currentLoadoutIndex"), version >= 262 ? 2 : 0);
+      assert.equal(getField(module, reopened, "/voiceVariant"), version >= 280 ? 3 : 2);
+      assert.equal(getField(module, reopened, "/voicePitchOffset"), version >= 281 ? 0.25 : 0);
+      assert.equal(getField(module, reopened, "/pendingRefunds").length, version >= 300 ? 1 : 0);
+      assert.equal(getField(module, reopened, "/oneTimeDialoguesSeen").length, version >= 310 ? 1 : 0);
     } finally {
       if (reopened) module._terra_player_close(reopened);
       if (handle) module._terra_player_close(handle);
     }
-    assert.equal(module._tx_heap_used(), baseline,
-      `PLR release ${version} history test leaked tracked allocations`);
+    assert.equal(module._tx_heap_used(), baseline, `gate release ${version} leaked`);
+  }
+});
+
+test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses changed layouts", async () => {
+  const module = await TerraWorldWasm();
+  const baseline = module._tx_heap_used();
+  for (const version of [327, 400]) {
+    let handle = 0, reopened = 0;
+    try {
+      handle = openJson(module, historicalModel(version));
+      const encoded = encode(module, handle);
+      reopened = openBuffer(module, encoded);
+      assert.equal(getField(module, reopened, "/version"), version);
+    } finally {
+      if (reopened) module._terra_player_close(reopened);
+      if (handle) module._terra_player_close(handle);
+    }
   }
 
-  for (const version of [279, 327]) {
-    const invalid = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-    invalid.version = version;
-    const input = allocString(module, JSON.stringify(invalid));
+  let handle = 0;
+  try {
+    handle = openJson(module, historicalModel(327));
+    const encoded = encode(module, handle);
+    const plain = decryptPlr(encoded);
+    const changedLayout = encryptPlr(Buffer.concat([plain, Buffer.from([0x7f])]));
+    const input = allocBytes(module, changedLayout);
     const output = module._tx_malloc(4);
-    assert(output);
     try {
-      assert.equal(module._terra_player_open_json(input, output), 6,
-        `unsupported PLR release ${version} must be rejected`);
-      assert.equal(module.HEAPU32[output >>> 2] >>> 0, 0);
+      assert.notEqual(module._terra_player_open_from_buffer(input, changedLayout.length, output), 0);
+      const error = lastError(module);
+      assert.equal(error.code, "TERRAX_PLR_NEWER_LAYOUT_ERROR");
+      assert.match(error.message, /newer.*326.*layout/i);
     } finally {
       module._tx_free(output);
       module._tx_free(input);
     }
+  } finally {
+    if (handle) module._terra_player_close(handle);
   }
   assert.equal(module._tx_heap_used(), baseline);
 });
