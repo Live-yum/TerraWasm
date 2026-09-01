@@ -159,3 +159,29 @@ test("a fixed-width WLD header cannot be zero-filled after truncation", async ()
     M._tx_free(inputPtr);
   }
 });
+
+
+test("WLD current-version guard matches Terraria release 326", async () => {
+  const M = await TerraWorldWasm();
+
+  for (const [version, expectedCode] of [
+    [326, "TERRAX_TRUNCATED_FORMAT"],
+    [327, "TERRAX_UNSUPPORTED_VERSION"],
+  ]) {
+    const candidate = Buffer.alloc(4);
+    candidate.writeUInt32LE(version, 0);
+    const inputPtr = alloc(M, candidate);
+    const handlePtr = M._tx_malloc(4);
+    assert.notEqual(handlePtr, 0);
+    try {
+      const status = M._terra_world_open_from_buffer(inputPtr, candidate.length, handlePtr);
+      assert.notEqual(status, 0);
+      assert.equal(M.HEAPU32[handlePtr >>> 2] >>> 0, 0);
+      assert.equal(readLastError(M).code, expectedCode,
+        `unexpected WLD version guard for release ${version}`);
+    } finally {
+      M._tx_free(handlePtr);
+      M._tx_free(inputPtr);
+    }
+  }
+});

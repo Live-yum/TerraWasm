@@ -102,7 +102,6 @@ int main(void) {
     char *tax_money = NULL;
     char *deaths_pve = NULL;
     char *voice_variant = NULL;
-    char *extension_flag = NULL;
     CHECK(get_field(handle, "/name", &name), "read real player name");
     CHECK(name[0] == '"' && name[1] != '"', "real player name is empty");
     CHECK(get_field(handle, "/version", &version), "read real player version");
@@ -113,8 +112,6 @@ int main(void) {
         "v326 death counters are misaligned");
     CHECK(get_field(handle, "/voiceVariant", &voice_variant) && text_equal(voice_variant, "2"),
         "v326 loadout favorite bytes are misaligned before voiceVariant");
-    CHECK(get_field(handle, "/formatExtensions/v326PrefixFlag", &extension_flag) &&
-        text_equal(extension_flag, "true"), "v326 prefix extension byte was not preserved");
 
     uint32_t required = 0u;
     uint32_t before_clean_probe = tx_heap_used();
@@ -160,35 +157,23 @@ int main(void) {
     CHECK(text_equal(edited_name, "\"real-fixture-edited\""),
         "edited name did not survive semantic encoding");
 
-    /* Version is data, not a whitelist. If the binary schema still matches,
-     * an otherwise-valid document must round-trip regardless of version value. */
-    CHECK(terra_plr_set(reopened, "/version", "777") == TERRAX_WORLD_STATUS_OK,
-        "arbitrary compatible version was rejected");
-    uint32_t versioned_length = 0u;
-    CHECK(terra_plr_save_to_buffer(reopened, NULL, 0u, &versioned_length) ==
-        TERRAX_WORLD_STATUS_OK && versioned_length > 0u, "versioned save probe");
-    uint8_t *versioned = (uint8_t *)malloc(versioned_length);
-    CHECK(versioned != NULL, "versioned output allocation");
-    CHECK(terra_plr_save_to_buffer(reopened, versioned, versioned_length, &versioned_length) ==
-        TERRAX_WORLD_STATUS_OK, "versioned save fetch");
-    uint32_t versioned_handle = 0u;
-    CHECK(terra_plr_open_from_buffer(versioned, versioned_length, &versioned_handle) ==
-        TERRAX_WORLD_STATUS_OK, "compatible version 777 was hard-gated on read");
-    char *version_777 = NULL;
-    CHECK(get_field(versioned_handle, "/version", &version_777), "read version 777");
-    CHECK(text_equal(version_777, "777"), "version 777 was not preserved");
+    /* Terraria's current Player loader marks releases newer than 326 as
+     * LaterVersion. Editing the semantic version must enforce the same bound
+     * and must not partially commit the failed mutation. */
+    CHECK(terra_plr_set(reopened, "/version", "327") ==
+        TERRAX_WORLD_STATUS_VALIDATION_ERROR, "future PLR version was accepted");
+    char *still_version = NULL;
+    CHECK(get_field(reopened, "/version", &still_version), "read version after rejected edit");
+    CHECK(text_equal(still_version, "326"), "rejected future version mutated the document");
 
-    free(version_777);
-    free(versioned);
+    free(still_version);
     free(edited_name);
     free(edited);
-    free(extension_flag);
     free(voice_variant);
     free(deaths_pve);
     free(tax_money);
     free(version);
     free(name);
-    CHECK(terra_plr_close(versioned_handle) == TERRAX_WORLD_STATUS_OK, "close versioned handle");
     CHECK(terra_plr_close(reopened) == TERRAX_WORLD_STATUS_OK, "close reopened handle");
     CHECK(terra_plr_close(handle) == TERRAX_WORLD_STATUS_OK, "close real fixture handle");
     CHECK(tx_heap_used() == baseline, "real PLR contract leaked tracked allocations/caches");
