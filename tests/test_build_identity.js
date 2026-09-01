@@ -18,6 +18,7 @@ test("the Node artifact reports the same source, flags, memory, and dirty identi
   assert.equal(identity.dirty, manifest.dirty);
   assert.equal(typeof identity.dirty, "boolean");
   assert.equal(identity.target, "node");
+  assert.equal(identity.featureSet, manifest.build.featureSet);
   assert.equal(identity.initialMemory, manifest.targets.node.memory.initialBytes);
   assert.equal(identity.maxMemory, manifest.targets.node.memory.maxBytes);
   assert.deepEqual(identity.commonFlagsText.split(" @@ "), manifest.build.flags.common);

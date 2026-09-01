@@ -2,6 +2,8 @@
 param(
     [ValidateSet("node", "web", "all")]
     [string]$Target = "all",
+    [ValidateSet("all", "wld", "plr")]
+    [string]$Features = "all",
     [switch]$Quick,
     [switch]$Test,
     [switch]$AllowDirty,
@@ -25,11 +27,29 @@ $NodeInitialMemory = 134217728
 $NodeMaximumMemory = 536870912
 $WebInitialMemory = 67108864
 $WebMaximumMemory = 167772160
+switch ($Features) {
+    "all" {
+        $NodeExportsFile = "exports.txt"
+        $WebExportsFile = "exports.web.txt"
+    }
+    "wld" {
+        $NodeExportsFile = "exports.wld.txt"
+        $WebExportsFile = "exports.wld.web.txt"
+    }
+    "plr" {
+        $NodeExportsFile = "exports.plr.txt"
+        $WebExportsFile = "exports.plr.txt"
+    }
+}
 $CommonFlags = @(
     $OptimizeFlag,
     "-fno-exceptions",
-    "-fno-rtti",
-    "-sUSE_ZLIB=1",
+    "-fno-rtti"
+)
+if ($Features -ne "plr") {
+    $CommonFlags += "-sUSE_ZLIB=1"
+}
+$CommonFlags += @(
     "-sALLOW_MEMORY_GROWTH=1",
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']",
     "-sMODULARIZE=1",
@@ -91,6 +111,7 @@ if ($Quick) {
     foreach ($expected in @(
         "TERRAX_BUILD_COMMIT:STRING=$SourceCommit",
         "TERRAX_BUILD_DIRTY:STRING=$DirtyFlag",
+        "TERRAWASM_FEATURE_SET:STRING=$Features",
         "TERRAX_OPTIMIZE_FLAG:STRING=$OptimizeFlag",
         "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag",
         "TERRAX_NODE_INITIAL_MEMORY:STRING=$NodeInitialMemory",
@@ -115,6 +136,7 @@ if (-not $Quick) {
         "-DTERRAX_BUILD_COMMIT=$SourceCommit" `
         "-DTERRAX_BUILD_DIRTY=$DirtyFlag" `
         "-DTERRAX_BUILD_COMPILER=emscripten" `
+        "-DTERRAWASM_FEATURE_SET=$Features" `
         "-DTERRAX_OPTIMIZE_FLAG=$OptimizeFlag" `
         "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" `
         "-DTERRAX_NODE_INITIAL_MEMORY=$NodeInitialMemory" `
@@ -181,6 +203,12 @@ $manifestArgs.Add("--output")
 $manifestArgs.Add("build/terra.manifest.json")
 $manifestArgs.Add("--compiler")
 $manifestArgs.Add("emscripten")
+$manifestArgs.Add("--feature-set")
+$manifestArgs.Add($Features)
+$manifestArgs.Add("--node-exports-file")
+$manifestArgs.Add($NodeExportsFile)
+$manifestArgs.Add("--web-exports-file")
+$manifestArgs.Add($WebExportsFile)
 $manifestArgs.Add("--source-commit")
 $manifestArgs.Add($SourceCommit)
 $manifestArgs.Add("--dirty")
@@ -271,13 +299,44 @@ if ($Test) {
     if ($Target -eq "web") {
         throw "-Test requires the node or all target"
     }
-    Write-Host "`n=== Running tests ===" -ForegroundColor Cyan
+    Write-Host "`n=== Running $Features feature tests ===" -ForegroundColor Cyan
+    $commonTests = @(
+        "tests/test_build_contract.js",
+        "tests/test_build_identity.js",
+        "tests/test_ci_contract.js",
+        "tests/test_manifest_contract.js",
+        "tests/test_artifact_size_contract.js",
+        "tests/test_feature_set.js"
+    )
+    $wldTests = @(
+        "tests/test_memory_lifecycle.js",
+        "tests/test_map_streaming_contract.js",
+        "tests/test_buffer_io.js",
+        "tests/test_batch_update_thumbnail.js",
+        "tests/test_commands.js",
+        "tests/test_marker_outputs.js",
+        "tests/test_icon_atlas_bridge.js",
+        "tests/test_open_task.js",
+        "tests/test_reader_safety.js",
+        "tests/test_pixel_art_bulk.js",
+        "tests/test_pixel_art_indexed.js",
+        "tests/test_section_mutators.js",
+        "tests/test_signs.js",
+        "tests/test_sha256.js",
+        "tests/test_fixture_contract.js"
+    )
+    $regressionTests = @($commonTests)
+    if ($Features -ne "plr") { $regressionTests += $wldTests }
+    if ($Features -ne "wld") { $regressionTests += "tests/test_plr.js" }
+
     Push-Location $ProjectDir
-    node --test tests/test_memory_lifecycle.js tests/test_map_streaming_contract.js tests/test_plr.js tests/test_buffer_io.js tests/test_batch_update_thumbnail.js tests/test_build_contract.js tests/test_build_identity.js tests/test_ci_contract.js tests/test_commands.js tests/test_manifest_contract.js tests/test_marker_outputs.js tests/test_icon_atlas_bridge.js tests/test_open_task.js tests/test_reader_safety.js tests/test_pixel_art_bulk.js tests/test_pixel_art_indexed.js tests/test_section_mutators.js tests/test_signs.js tests/test_sha256.js tests/test_fixture_contract.js tests/test_artifact_size_contract.js 2>&1
+    & node --test @regressionTests 2>&1
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
-    node tests/test_all.js 2>&1
-    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }
-    node bench/map_8400x2400.js 2>&1
-    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "8400x2400 MAP benchmark failed" }
+    if ($Features -ne "plr") {
+        & node tests/test_all.js 2>&1
+        if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }
+        & node bench/map_8400x2400.js 2>&1
+        if ($LASTEXITCODE -ne 0) { Pop-Location; throw "8400x2400 MAP benchmark failed" }
+    }
     Pop-Location
 }

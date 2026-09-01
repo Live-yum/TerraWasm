@@ -39,20 +39,34 @@
 #define TERRAX_MAXIMUM_MEMORY 0
 #endif
 
+#ifndef TERRAWASM_FEATURE_SET
+#define TERRAWASM_FEATURE_SET "all"
+#endif
+#ifndef TERRAWASM_FEATURE_WLD
+#define TERRAWASM_FEATURE_WLD 1
+#endif
+#ifndef TERRAWASM_FEATURE_PLR
+#define TERRAWASM_FEATURE_PLR 1
+#endif
+
 #define TERRAX_STRINGIFY_VALUE(value) #value
 #define TERRAX_STRINGIFY(value) TERRAX_STRINGIFY_VALUE(value)
 
+#if TERRAWASM_FEATURE_WLD && TERRAWASM_FEATURE_PLR
 static const char g_capabilities[] =
     "{\"version\":1,\"features\":["
-    "\"world-buffer-io\","
-    "\"json-sections\","
-    "\"preview-rgba\","
-    "\"thumbnail-png\","
-    "\"map-output\","
-    "\"pixel-art\","
-    "\"sha256\","
-    "\"plr-read-write\""
-    "]}";
+    "\"world-buffer-io\",\"json-sections\",\"preview-rgba\","
+    "\"thumbnail-png\",\"map-output\",\"pixel-art\",\"sha256\","
+    "\"plr-read-write\"]}";
+#elif TERRAWASM_FEATURE_WLD
+static const char g_capabilities[] =
+    "{\"version\":1,\"features\":["
+    "\"world-buffer-io\",\"json-sections\",\"preview-rgba\","
+    "\"thumbnail-png\",\"map-output\",\"pixel-art\",\"sha256\"]}";
+#else
+static const char g_capabilities[] =
+    "{\"version\":1,\"features\":[\"plr-read-write\"]}";
+#endif
 
 static const char g_build_info_json[] =
     "{\"abiVersion\":" TERRAX_STRINGIFY(TERRAX_ABI_VERSION)
@@ -60,6 +74,7 @@ static const char g_build_info_json[] =
     ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)
     ",\"compiler\":\"" TERRAX_BUILD_COMPILER "\""
     ",\"target\":\"" TERRAX_BUILD_TARGET "\""
+    ",\"featureSet\":\"" TERRAWASM_FEATURE_SET "\""
     ",\"initialMemory\":" TERRAX_STRINGIFY(TERRAX_INITIAL_MEMORY)
     ",\"maxMemory\":" TERRAX_STRINGIFY(TERRAX_MAXIMUM_MEMORY)
     ",\"commonFlagsText\":\"" TERRAX_BUILD_COMMON_FLAGS_TEXT "\""

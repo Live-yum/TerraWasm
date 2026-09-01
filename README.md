@@ -76,7 +76,13 @@ python scripts/build_txci.py
 .\build.ps1 -Target web              # 仅编译 Web 目标
 .\build.ps1 -Quick                   # 跳过 CMake configure（增量编译）
 .\build.ps1 -Test                    # 编译后运行测试
+.\build.ps1 -Features wld             # 仅编译 WLD 能力（不含 PLR）
+.\build.ps1 -Features plr             # 仅编译 PLR 能力（不含 WLD/zlib）
+.\build.ps1 -Features all             # 默认：编译 WLD + PLR
 ```
+
+`-Target` 选择 Node/Web 宿主产物，`-Features` 独立选择业务能力集合。直接使用 CMake 时传入
+`-DTERRAWASM_FEATURE_SET=all|wld|plr`；默认 `all` 保持原有完整 ABI。
 
 产出：
 - `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128 MiB 初始内存，512 MiB 最大内存）

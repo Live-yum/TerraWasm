@@ -1,0 +1,2485 @@
+{
+  "version": 319,
+  "metadata": null,
+  "name": "fixture-player",
+  "difficulty": 0,
+  "playTimeTicks": 0,
+  "hair": 0,
+  "hairDye": 0,
+  "team": 0,
+  "hideVisibleAccessory": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "hideMisc": 0,
+  "skinVariant": 0,
+  "statLife": 100,
+  "statLifeMax": 100,
+  "statMana": 20,
+  "statManaMax": 20,
+  "extraAccessory": false,
+  "unlockedBiomeTorches": false,
+  "usingBiomeTorches": false,
+  "ateArtisanBread": false,
+  "usedAegisCrystal": false,
+  "usedAegisFruit": false,
+  "usedArcaneCrystal": false,
+  "usedGalaxyPearl": false,
+  "usedGummyWorm": false,
+  "usedAmbrosia": false,
+  "downedDd2EventAnyDifficulty": false,
+  "taxMoney": 0,
+  "numberOfDeathsPve": 0,
+  "numberOfDeathsPvp": 0,
+  "hairColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "skinColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "eyeColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "shirtColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "underShirtColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "pantsColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "shoeColor": {
+    "r": 128,
+    "g": 128,
+    "b": 128
+  },
+  "armor": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "dyes": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "inventory": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "miscEquips": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "miscDyes": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "piggyBank": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "safe": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "defendersForge": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "voidVault": [
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    },
+    {
+      "itemType": 0,
+      "stack": 0,
+      "prefix": 0,
+      "favorited": false
+    }
+  ],
+  "voidVaultInfo": 0,
+  "buffs": [
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    },
+    {
+      "buffType": 0,
+      "buffTime": 0
+    }
+  ],
+  "spawnPoints": [],
+  "hbLocked": false,
+  "hideInfo": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "anglerQuestsFinished": 0,
+  "dpadRadialBindings": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "tailLayout": {
+    "builderAccStatusCount": 12,
+    "includesDeathMetadata": true
+  },
+  "builderAccStatus": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "bartenderQuestLog": 0,
+  "dead": false,
+  "respawnTimer": null,
+  "lastSaveUtcTicks": 0,
+  "golferScoreAccumulated": 0,
+  "creativeTrackerHasNewUnlocks": false,
+  "creativeItemSacrifices": [],
+  "temporarySlots": [
+    null,
+    null,
+    null,
+    null
+  ],
+  "creativePowers": {
+    "godmodeEnabled": false,
+    "farPlacementEnabled": false,
+    "spawnRateSlider": 1
+  },
+  "unlockedSuperCart": false,
+  "enabledSuperCart": false,
+  "currentLoadoutIndex": 0,
+  "loadouts": [
+    {
+      "armor": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "dyes": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "hide": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "armor": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "dyes": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "hide": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "armor": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "dyes": [
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        },
+        {
+          "itemType": 0,
+          "stack": 0,
+          "prefix": 0,
+          "favorited": false
+        }
+      ],
+      "hide": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "voiceVariant": 0,
+  "voicePitchOffset": 0,
+  "pendingRefunds": [],
+  "oneTimeDialoguesSeen": []
+}
