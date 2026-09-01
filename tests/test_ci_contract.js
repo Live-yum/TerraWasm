@@ -23,7 +23,10 @@ test("CI runs the independent native, sanitizer/fuzz, and pinned Wasm release ga
   assert.equal((workflow.match(/\blfs:\s*true/g) || []).length, 4,
     "every checkout that consumes LFS fixtures must hydrate them");
   assert.equal((workflow.match(/actions\/setup-node@v7/g) || []).length, 2);
-  assert.equal((workflow.match(/actions\/upload-artifact@v7/g) || []).length, 1);
+  assert.equal((workflow.match(/actions\/upload-artifact@v7/g) || []).length, 2);
+  assert.match(workflow, /name:\s*terrawasm-wld-\$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /if:\s*matrix\.features == ['"]wld['"]/);
+  assert.match(workflow, /build\/terra\.manifest\.json[\s\S]*build\/terrax_world_wasm_web\.js[\s\S]*build\/terrax_world_wasm_web\.wasm/);
   assert.match(workflow, /actions\/checkout@v7[\s\S]*fetch-depth: 0/);
   assert.doesNotMatch(workflow, /TerraX|viewer-app/);
 });
