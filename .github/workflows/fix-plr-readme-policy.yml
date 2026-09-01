@@ -1,0 +1,44 @@
+name: Fix PLR README policy
+
+on:
+  push:
+    branches:
+      - fix/plr-full-history-forward-compatible
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[plr-readme-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Correct PLR version policy documentation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          s = p.read_text(encoding='utf-8')
+          old = 'PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 的现代 PLR profile 明确支持版本 1-326：281 起保存 voice pitch，283 起保存 team，300 起保存 pending refunds，310 起保存 one-time dialogues，322 起在主装备/染料及 loadout 装备/染料中保存 favorite，324 起在 `ateArtisanBread` 后消费/写入一个保留 bool；327 及以上在 Terraria 定义新布局前直接拒绝。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。'
+          new = 'PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 按 `Player.cs` 的历史 release gate 解析并写回版本 1-326，包括 135 前无 `FileMetadata` 和 1-37 使用 legacy item name 的旧布局；326 仅作为当前最新已知布局标记，不是最大允许版本。327 及以上会先按最新已知布局尝试完整解析，字段布局未变化即可接受，只有出现无法完整消费或结构错位时才返回 newer-layout 解析错误。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/fix-plr-readme-policy.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: align PLR README with historical and forward-compatible policy [plr-readme-fixed]"
+          git push
