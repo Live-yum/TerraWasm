@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           lfs: true
-      - name: Trace old semantic layout against real v326 player
+      - name: Trace legacy layout plus v326 prefix extension
         shell: bash
         run: |
           set -euo pipefail
@@ -25,54 +25,98 @@ jobs:
           import struct
           from pathlib import Path
 
-          data = Path('/tmp/player.bin').read_bytes()
-          p = 0
-          def need(n, label):
+          d=Path('/tmp/player.bin').read_bytes(); p=0
+          def need(n,label):
+              if p+n>len(d): raise RuntimeError(f'{label}: EOF at {p}/{len(d)}, need {n}')
+          def u8(label='u8'):
+              global p; need(1,label); v=d[p]; p+=1; return v
+          def i32(label='i32'):
+              global p; need(4,label); v=struct.unpack_from('<i',d,p)[0]; p+=4; return v
+          def u32(label='u32'):
+              global p; need(4,label); v=struct.unpack_from('<I',d,p)[0]; p+=4; return v
+          def i64(label='i64'):
+              global p; need(8,label); v=struct.unpack_from('<q',d,p)[0]; p+=8; return v
+          def u64(label='u64'):
+              global p; need(8,label); v=struct.unpack_from('<Q',d,p)[0]; p+=8; return v
+          def u16(label='u16'):
+              global p; need(2,label); v=struct.unpack_from('<H',d,p)[0]; p+=2; return v
+          def f32(label='f32'):
+              global p; need(4,label); v=struct.unpack_from('<f',d,p)[0]; p+=4; return v
+          def string(label='string'):
               global p
-              if p+n > len(data): raise RuntimeError(f'{label}: EOF at {p}, need {n}')
-          def u8(label):
-              global p; need(1,label); v=data[p]; p+=1; print(f'{p-1:04x}..{p:04x} {label} u8={v}'); return v
-          def i32(label):
-              global p; need(4,label); s=p; v=struct.unpack_from('<i',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} i32={v}'); return v
-          def u32(label):
-              global p; need(4,label); s=p; v=struct.unpack_from('<I',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} u32={v}'); return v
-          def i64(label):
-              global p; need(8,label); s=p; v=struct.unpack_from('<q',data,p)[0]; p+=8; print(f'{s:04x}..{p:04x} {label} i64={v}'); return v
-          def u64(label):
-              global p; need(8,label); s=p; v=struct.unpack_from('<Q',data,p)[0]; p+=8; print(f'{s:04x}..{p:04x} {label} u64={v}'); return v
-          def f32(label):
-              global p; need(4,label); s=p; v=struct.unpack_from('<f',data,p)[0]; p+=4; print(f'{s:04x}..{p:04x} {label} f32={v}'); return v
-          def string(label):
-              global p
-              s=p; shift=0; n=0
+              n=0; shift=0
               for _ in range(5):
-                  b=u8(label+'.lenbyte')
-                  n |= (b&0x7f)<<shift
+                  b=u8(label+'.len'); n|=(b&0x7f)<<shift
                   if not b&0x80: break
-                  shift += 7
-              need(n,label); raw=data[p:p+n]; p+=n
-              try: text=raw.decode('utf-8')
-              except Exception as e: text=f'<invalid utf8 {e}: {raw.hex()}>'
-              print(f'{s:04x}..{p:04x} {label} str[{n}]={text!r}')
-              return text
-          def item(label, fav=False, typeprefix=False):
+                  shift+=7
+              else: raise RuntimeError(label+': invalid 7bit length')
+              if n>16*1024*1024: raise RuntimeError(f'{label}: absurd len {n} at {p}')
+              need(n,label); raw=d[p:p+n]; p+=n
+              return raw.decode('utf-8')
+          def item(fav=False,typeprefix=False,label='item'):
               t=i32(label+'.type')
               if typeprefix:
-                  pref=u8(label+'.prefix'); return
-              st=i32(label+'.stack'); pref=u8(label+'.prefix')
-              if fav: u8(label+'.fav')
-          def mark(label): print(f'---- {label}: offset={p} 0x{p:x}, next={data[p:p+48].hex()}')
+                  pref=u8(label+'.prefix'); return (t,0,pref,False)
+              st=i32(label+'.stack'); pref=u8(label+'.prefix'); f=bool(u8(label+'.fav')) if fav else False
+              return (t,st,pref,f)
+          def mark(label): print(f'{label}: off={p} 0x{p:x} rem={len(d)-p} next={d[p:p+32].hex()}')
+          def item_array(n,**kw): return [item(label=f'item[{i}]',**kw) for i in range(n)]
 
-          i32('version'); u64('magic'); u32('revision'); u64('favoriteFlags'); string('name')
-          u8('difficulty'); i64('playTimeTicks'); i32('hair'); u8('hairDye'); u8('team')
-          u8('hideAccessoryLow'); u8('hideAccessoryHigh'); u8('hideMisc'); u8('skinVariant')
-          for x in ['statLife','statLifeMax','statMana','statManaMax']: i32(x)
-          for x in ['extraAccessory','unlockedBiomeTorches','usingBiomeTorches','ateArtisanBread','usedAegisCrystal','usedAegisFruit','usedArcaneCrystal','usedGalaxyPearl','usedGummyWorm','usedAmbrosia','downedDD2']: u8(x)
-          for x in ['taxMoney','deathsPVE','deathsPVP']: i32(x)
-          for c in ['hair','skin','eye','shirt','undershirt','pants','shoe']:
-              u8(c+'.r');u8(c+'.g');u8(c+'.b')
-          mark('after prefix/colors using old layout')
-          # sample first two armor/dye/inventory slots to see whether alignment is plausible
-          for i in range(2): item(f'armor[{i}]', typeprefix=True)
-          mark('after first 2 armor')
+          version=i32('version'); magic=u64('magic'); revision=u32('revision'); favorite=u64('favorite'); name=string('name')
+          difficulty=u8(); play=i64(); hair=i32(); hair_dye=u8(); team=u8(); hide_lo=u8(); hide_hi=u8(); hide_misc=u8(); skin=u8()
+          stats=[i32() for _ in range(4)]
+          flags=[u8() for _ in range(11)]
+          extra_v326_flag=u8('v326.extraFlag')
+          tax=i32('tax'); pve=i32('pve'); pvp=i32('pvp')
+          colors=[tuple(u8() for _ in range(3)) for _ in range(7)]
+          print('prefix',dict(version=version,name=name,difficulty=difficulty,stats=stats,legacy_flags=flags,extra_v326_flag=extra_v326_flag,tax=tax,pve=pve,pvp=pvp,colors=colors))
+          mark('after-prefix')
+
+          armor=item_array(20,typeprefix=True); dyes=item_array(10,typeprefix=True); inv=item_array(58,fav=True)
+          misc=[]
+          for i in range(5): misc.append((item(typeprefix=True),item(typeprefix=True)))
+          pig=item_array(40); safe=item_array(40); forge=item_array(40); vault=item_array(40,fav=True); vault_info=u8()
+          buffs=[(i32(),i32()) for _ in range(44)]
+          print('items',dict(armor0=armor[:3],dyes0=dyes[:2],inventory0=inv[:3],pig0=pig[:2],void0=vault[:2],voidInfo=vault_info,buffs0=buffs[:3]))
+          mark('after-buffs')
+
+          spawns=[]
+          for i in range(201):
+              x=i32('spawn.x')
+              if x==-1: break
+              y=i32('spawn.y'); icon=i32('spawn.icon'); nm=string('spawn.name'); spawns.append((x,y,icon,nm))
+          else: raise RuntimeError('spawn sentinel missing')
+          hb=u8(); hide_info=[u8() for _ in range(13)]; angler=i32(); dpad=[i32() for _ in range(4)]; builder=[i32() for _ in range(12)]; bartender=i32(); dead=u8(); respawn=i32() if dead else None; last=i64(); golfer=i32()
+          print('tail-a',dict(spawns=spawns[:3],spawnCount=len(spawns),hb=hb,hideInfo=hide_info,angler=angler,dpad=dpad,builder=builder,bartender=bartender,dead=dead,respawn=respawn,last=last,golfer=golfer))
+          mark('after-tail-a')
+
+          unlock=u8(); sac_count=i32('sac.count')
+          if not 0<=sac_count<=4096: raise RuntimeError(f'bad sacrifice count {sac_count} at {p-4}')
+          sacrifices=[(string('sac.id'),i32('sac.amount')) for _ in range(sac_count)]
+          temp_flags=u8(); temps=[item(label=f'temp[{i}]') if temp_flags&(1<<i) else None for i in range(4)]
+          powers=[]
+          while True:
+              present=u8('power.present')
+              if not present: break
+              pid=u16('power.id')
+              if pid in (5,11): value=u8('power.bool')
+              elif pid==14: value=f32('power.float')
+              else: raise RuntimeError(f'unknown power id={pid} at off={p}')
+              powers.append((pid,value))
+          super_flags=u8(); current_loadout=i32()
+          print('tail-b',dict(unlock=unlock,sacCount=sac_count,sacrifices=sacrifices[:3],tempFlags=temp_flags,temps=temps,powers=powers,superFlags=super_flags,currentLoadout=current_loadout))
+          mark('before-loadouts')
+
+          loadouts=[]
+          for li in range(3):
+              la=item_array(20); ld=item_array(10); lh=[u8() for _ in range(10)]; loadouts.append((la,ld,lh))
+          voice_variant=u8(); voice_pitch=f32(); pending_count=i32('pending.count')
+          if not 0<=pending_count<=4096: raise RuntimeError(f'bad pending count {pending_count} at {p-4}')
+          pending=item_array(pending_count)
+          dialog_count=i32('dialog.count')
+          if not 0<=dialog_count<=4096: raise RuntimeError(f'bad dialogue count {dialog_count} at {p-4}')
+          dialogues=[string('dialog') for _ in range(dialog_count)]
+          print('tail-c',dict(loadout0armor=loadouts[0][0][:2],voiceVariant=voice_variant,voicePitch=voice_pitch,pendingCount=pending_count,pending0=pending[:2],dialogCount=dialog_count,dialog0=dialogues[:3]))
+          mark('EOF-check')
+          print('exact_eof=',p==len(d),'offset=',p,'length=',len(d))
           PY
