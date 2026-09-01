@@ -263,7 +263,7 @@ terrax_world_status terra_world_save(
 
 ## 加密玩家文件 API
 
-`terra_plr_*` 提供 Terraria 318/319 加密 `.plr` 的读写和语义编辑；`terra_player_*` 是同签名的兼容别名。文件使用 AES-128-CBC/PKCS#7，密钥和 IV 均为 UTF-16LE `h3y_gUyZ`。二进制输入经过严格的 metadata magic/type、版本、长度和尾部校验。
+`terra_plr_*` 提供 Terraria 加密 `.plr` 的读写和语义编辑；`terra_player_*` 是同签名的兼容别名。文件使用 AES-128-CBC/PKCS#7，密钥和 IV 均为 UTF-16LE `h3y_gUyZ`。版本号不使用固定白名单：解析器保留 `version`，并依靠 metadata magic/type、字段边界、长度、计数和尾部完整性判断当前二进制布局是否兼容；布局不匹配时返回解析错误。
 
 ### 打开、保存和关闭
 

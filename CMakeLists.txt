@@ -356,6 +356,21 @@ else()
             target_compile_definitions(terra_plr_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
             )
+
+            set(TERRAWASM_PLR_REAL_FIXTURE_PATH
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/烟花.plr"
+                CACHE FILEPATH "Real Terraria PLR fixture used by native compatibility tests")
+            if(NOT EXISTS "${TERRAWASM_PLR_REAL_FIXTURE_PATH}")
+                message(FATAL_ERROR
+                    "Real PLR compatibility fixture is missing: ${TERRAWASM_PLR_REAL_FIXTURE_PATH}")
+            endif()
+            file(TO_CMAKE_PATH
+                "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
+                TERRAWASM_PLR_REAL_FIXTURE_DEFINE)
+            add_terra_contract(terra_plr_real_fixture_contract tests/plr_real_fixture_contract.c)
+            target_compile_definitions(terra_plr_real_fixture_contract PRIVATE
+                TERRAWASM_PLR_REAL_FIXTURE_PATH="${TERRAWASM_PLR_REAL_FIXTURE_DEFINE}"
+            )
         endif()
     endif()
 endif()
