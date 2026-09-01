@@ -152,8 +152,6 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
       assert.equal(original.taxMoney, 113750, "v326 body-prefix alignment regression");
       assert.equal(original.numberOfDeathsPve, 11, "v326 death alignment regression");
       assert.equal(original.voiceVariant, 2, "v326 loadout alignment regression");
-      assert.equal(original.formatExtensions?.v326PrefixFlag, true,
-        "v326 extension byte regression");
     }
     assert.equal(getField(module, handle, "/name"), original.name);
     assert.deepEqual(encode(module, handle), source, "clean save must preserve bytes");
@@ -302,7 +300,6 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
       assert.equal(original.version, 326);
       assert.equal(original.taxMoney, 113750);
       assert.equal(original.voiceVariant, 2);
-      assert.equal(original.formatExtensions?.v326PrefixFlag, true);
     }
     const originalName = getField(module, handle, "/name");
     assert.equal(typeof originalName, "string");
@@ -334,4 +331,78 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
     if (handle) module._terra_player_close(handle);
   }
   assert.equal(module._tx_heap_used(), originalHeap, "Web PLR handles leaked allocations");
+});
+
+
+test("PLR releases 318-326 follow Terraria's 322 favorite and 324 reserved-byte transitions", async () => {
+  const module = await TerraWorldWasm();
+  const baseline = module._tx_heap_used();
+  const versions = [318, 319, 320, 321, 322, 323, 324, 325, 326];
+
+  for (const version of versions) {
+    const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+    model.version = version;
+    model.armor[0].favorited = true;
+    model.dyes[0].favorited = true;
+    model.inventory[0].favorited = true;
+    model.loadouts[0].armor[0].favorited = true;
+    model.loadouts[0].dyes[0].favorited = true;
+    model.ateArtisanBread = true;
+    model.usedAegisCrystal = false;
+    model.usedAegisFruit = true;
+    model.usedArcaneCrystal = false;
+    model.usedGalaxyPearl = true;
+    model.usedGummyWorm = false;
+    model.usedAmbrosia = true;
+
+    let handle = 0;
+    let reopened = 0;
+    try {
+      handle = openJson(module, model);
+      reopened = openBuffer(module, encode(module, handle));
+      assert.equal(getField(module, reopened, "/version"), version);
+      const equipmentFavorite = version >= 322;
+      assert.equal(getField(module, reopened, "/armor/0/favorited"), equipmentFavorite,
+        `main armor favorite gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/dyes/0/favorited"), equipmentFavorite,
+        `main dye favorite gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/loadouts/0/armor/0/favorited"), equipmentFavorite,
+        `loadout armor favorite gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/loadouts/0/dyes/0/favorited"), equipmentFavorite,
+        `loadout dye favorite gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/inventory/0/favorited"), true,
+        `inventory favorite unexpectedly changed for release ${version}`);
+      assert.equal(getField(module, reopened, "/ateArtisanBread"), true);
+      assert.equal(getField(module, reopened, "/usedAegisCrystal"), false);
+      assert.equal(getField(module, reopened, "/usedAegisFruit"), true);
+      assert.equal(getField(module, reopened, "/usedArcaneCrystal"), false);
+      assert.equal(getField(module, reopened, "/usedGalaxyPearl"), true);
+      assert.equal(getField(module, reopened, "/usedGummyWorm"), false);
+      assert.equal(getField(module, reopened, "/usedAmbrosia"), true);
+    } finally {
+      if (reopened) module._terra_player_close(reopened);
+      if (handle) module._terra_player_close(handle);
+    }
+    assert.equal(module._tx_heap_used(), baseline,
+      `PLR release ${version} transition test leaked tracked allocations`);
+  }
+
+  const tooOld = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+  tooOld.version = 317;
+  const tooNew = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+  tooNew.version = 327;
+  for (const invalid of [tooOld, tooNew]) {
+    const input = allocString(module, JSON.stringify(invalid));
+    const output = module._tx_malloc(4);
+    assert(output);
+    try {
+      assert.equal(module._terra_player_open_json(input, output), 6,
+        `unsupported PLR release ${invalid.version} must be rejected`);
+      assert.equal(module.HEAPU32[output >>> 2] >>> 0, 0);
+    } finally {
+      module._tx_free(output);
+      module._tx_free(input);
+    }
+  }
+  assert.equal(module._tx_heap_used(), baseline);
 });

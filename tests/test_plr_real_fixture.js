@@ -193,8 +193,8 @@ test("Node opens a real Terraria PLR and reuses two-call caches", async () => {
     assert.equal(original.numberOfDeathsPve, 11, "v326 death-counter alignment regression");
     assert.equal(original.voiceVariant, 2, "v326 loadout alignment regression");
     assert.equal(original.voicePitchOffset, 0, "v326 voice pitch alignment regression");
-    assert.equal(original.formatExtensions?.v326PrefixFlag, true,
-      "v326 body-prefix extension byte was not preserved");
+    assert.equal(original.formatExtensions, undefined,
+      "reserved release-324 byte must not leak into semantic player JSON");
     assert.equal(original.armor[0].itemType, 3381, "v326 main armor layout regression");
 
     const clean = encode(module, handle);
@@ -229,7 +229,6 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
     assert.equal(getField(module, handle, "/version"), 326);
     assert.equal(getField(module, handle, "/taxMoney"), 113750);
     assert.equal(getField(module, handle, "/voiceVariant"), 2);
-    assert.equal(getField(module, handle, "/formatExtensions/v326PrefixFlag"), true);
     const originalName = getField(module, handle, "/name");
     assert.equal(typeof originalName, "string");
     const clean = encode(module, handle);
@@ -244,20 +243,20 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
   assert.equal(module._tx_heap_used(), baseline);
 });
 
-test("PLR version is not hard-gated when the binary layout is compatible", async () => {
+test("PLR rejects versions newer than Terraria's current release", async () => {
   const module = await TerraWorldWasm();
   const baseline = module._tx_heap_used();
   const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-  model.version = 777;
+  model.version = 326;
   let handle = 0;
-  let reopened = 0;
   try {
     handle = openJson(module, model);
-    assert.equal(getField(module, handle, "/version"), 777);
-    reopened = openBuffer(module, encode(module, handle, { expectCached: true }));
-    assert.equal(getField(module, reopened, "/version"), 777);
+    assert.equal(getField(module, handle, "/version"), 326);
+    assert.equal(setField(module, handle, "/version", 327), 6,
+      "release 327 must be rejected until Terraria defines that layout");
+    assert.equal(getField(module, handle, "/version"), 326,
+      "failed future-version edit must remain atomic");
   } finally {
-    if (reopened) module._terra_player_close(reopened);
     if (handle) module._terra_player_close(handle);
   }
   assert.equal(module._tx_heap_used(), baseline);

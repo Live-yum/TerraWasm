@@ -1599,11 +1599,23 @@ static uint8_t *plr_encrypt(
     return encrypted;
 }
 
-static int plr_version_uses_v326_layout(int32_t version) {
-    /* v326 extends persisted equipment slots with a favorite byte and adds
-     * one body-prefix boolean. Higher versions are attempted using the most
-     * recent known layout; the strict EOF check rejects incompatible layouts. */
-    return version >= 326;
+#define PLR_MIN_SUPPORTED_VERSION 318
+#define PLR_CURRENT_VERSION 326
+
+static int plr_version_supported(int32_t version) {
+    return version >= PLR_MIN_SUPPORTED_VERSION && version <= PLR_CURRENT_VERSION;
+}
+
+static int plr_version_has_equipment_favorites(int32_t version) {
+    /* Player.LoadPlayer_Version2 and EquipmentLoadout.Deserialize start
+     * persisting armor/dye favorites at release 322. */
+    return version >= 322;
+}
+
+static int plr_version_has_reserved_324(int32_t version) {
+    /* Player.SavePlayer writes a reserved false boolean immediately after
+     * ateArtisanBread; Player.LoadPlayer_Version2 consumes it from release 324. */
+    return version >= 324;
 }
 
 /* -------------------------------------------------------------------------
@@ -1947,7 +1959,9 @@ static PlrJsonValue *plr_parse_plain(
     PlrReader reader = {plain, plain_length, 0u, 1};
     int32_t version = plr_read_i32(&reader);
     if (!reader.ok) return NULL;
-    const int v326_layout = plr_version_uses_v326_layout(version);
+    if (!plr_version_supported(version)) return NULL;
+    const int equipment_favorites = plr_version_has_equipment_favorites(version);
+    const int reserved_324 = plr_version_has_reserved_324(version);
 
     uint64_t magic_and_type = plr_read_u64(&reader);
     uint32_t revision = plr_read_u32(&reader);
@@ -2034,8 +2048,21 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_bool(root, "extraAccessory", &reader) ||
         !plr_put_reader_bool(root, "unlockedBiomeTorches", &reader) ||
         !plr_put_reader_bool(root, "usingBiomeTorches", &reader) ||
-        !plr_put_reader_bool(root, "ateArtisanBread", &reader) ||
-        !plr_put_reader_bool(root, "usedAegisCrystal", &reader) ||
+        !plr_put_reader_bool(root, "ateArtisanBread", &reader) || !reader.ok) {
+        plr_json_free(root);
+        return NULL;
+    }
+    if (reserved_324) {
+        /* Terraria intentionally discards this reserved boolean. Do not expose
+         * it as semantic player state. BinaryReader.ReadBoolean accepts any
+         * nonzero byte, so consuming one bounded byte is the compatible form. */
+        (void)plr_read_u8(&reader);
+        if (!reader.ok) {
+            plr_json_free(root);
+            return NULL;
+        }
+    }
+    if (!plr_put_reader_bool(root, "usedAegisCrystal", &reader) ||
         !plr_put_reader_bool(root, "usedAegisFruit", &reader) ||
         !plr_put_reader_bool(root, "usedArcaneCrystal", &reader) ||
         !plr_put_reader_bool(root, "usedGalaxyPearl", &reader) ||
@@ -2044,22 +2071,6 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_bool(root, "downedDd2EventAnyDifficulty", &reader) || !reader.ok) {
         plr_json_free(root);
         return NULL;
-    }
-    if (v326_layout) {
-        int extension_flag = plr_read_u8(&reader) != 0u;
-        PlrJsonValue *extensions = plr_json_object();
-        if (!reader.ok || !extensions ||
-            !plr_json_object_put_bool(extensions, "v326PrefixFlag", extension_flag)) {
-            plr_json_free(extensions);
-            plr_json_free(root);
-            return NULL;
-        }
-        /* plr_root_put owns extensions on both success and insertion failure. */
-        if (!plr_root_put(root, "formatExtensions", extensions)) {
-            plr_json_free(root);
-            return NULL;
-        }
-        extensions = NULL;
     }
     if (!plr_put_reader_i32(root, "taxMoney", &reader) ||
         !plr_put_reader_i32(root, "numberOfDeathsPve", &reader) ||
@@ -2086,9 +2097,9 @@ static PlrJsonValue *plr_parse_plain(
     }
 
     PlrJsonValue *armor = plr_read_item_array(
-        &reader, PLR_ARMOR_SLOTS, v326_layout, 1);
+        &reader, PLR_ARMOR_SLOTS, equipment_favorites, 1);
     PlrJsonValue *dyes = plr_read_item_array(
-        &reader, PLR_DYE_SLOTS, v326_layout, 1);
+        &reader, PLR_DYE_SLOTS, equipment_favorites, 1);
     PlrJsonValue *inventory = plr_read_item_array(&reader, PLR_INVENTORY_SLOTS, 1, 0);
     PlrJsonValue *misc_equips = plr_json_array();
     PlrJsonValue *misc_dyes = plr_json_array();
@@ -2280,7 +2291,7 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_i32(root, "currentLoadoutIndex", &reader) || !reader.ok) {
         plr_json_free(root); return NULL;
     }
-    PlrJsonValue *loadouts = plr_read_loadouts(&reader, v326_layout);
+    PlrJsonValue *loadouts = plr_read_loadouts(&reader, equipment_favorites);
     if (!loadouts) {
         plr_json_free(root); return NULL;
     }
@@ -2562,14 +2573,8 @@ static int plr_validate_model(const PlrJsonValue *root) {
     int32_t model_version = 0;
     if (!plr_value_i32(plr_json_object_get(root, "version"), &model_version))
         return plr_model_error("PLR version is missing or invalid");
-    const PlrJsonValue *format_extensions =
-        plr_json_object_get(root, "formatExtensions");
-    if (format_extensions) {
-        if (!plr_version_uses_v326_layout(model_version) ||
-            format_extensions->type != PLR_JSON_OBJECT ||
-            !plr_required_bool(format_extensions, "v326PrefixFlag"))
-            return plr_model_error("PLR formatExtensions is invalid for this version");
-    }
+    if (!plr_version_supported(model_version))
+        return plr_model_error("PLR version must be within the supported Terraria 318-326 range");
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -2960,7 +2965,9 @@ static uint8_t *plr_encode_plain(
     PlrWriter writer = {NULL, 0u, 0u, 1};
     int32_t version = 0;
     if (!plr_field_i32(root, "version", &version)) writer.ok = 0;
-    const int v326_layout = plr_version_uses_v326_layout(version);
+    if (!plr_version_supported(version)) return NULL;
+    const int equipment_favorites = plr_version_has_equipment_favorites(version);
+    const int reserved_324 = plr_version_has_reserved_324(version);
     plr_writer_i32(&writer, version);
 
     const PlrJsonValue *metadata = plr_field(root, "metadata");
@@ -3015,25 +3022,26 @@ static uint8_t *plr_encode_plain(
         if (!plr_field_i32(root, body_i32_fields[index], &i32)) writer.ok = 0;
         plr_writer_i32(&writer, i32);
     }
-    const char *body_bool_fields[] = {
-        "extraAccessory", "unlockedBiomeTorches", "usingBiomeTorches",
-        "ateArtisanBread", "usedAegisCrystal", "usedAegisFruit",
-        "usedArcaneCrystal", "usedGalaxyPearl", "usedGummyWorm",
-        "usedAmbrosia", "downedDd2EventAnyDifficulty"
+    const char *body_bool_prefix_fields[] = {
+        "extraAccessory", "unlockedBiomeTorches", "usingBiomeTorches", "ateArtisanBread"
     };
-    for (uint32_t index = 0u; index < 11u; index++) {
-        if (!plr_field_bool(root, body_bool_fields[index], &boolean)) writer.ok = 0;
+    for (uint32_t index = 0u; index < 4u; index++) {
+        if (!plr_field_bool(root, body_bool_prefix_fields[index], &boolean)) writer.ok = 0;
         plr_writer_u8(&writer, boolean ? 1u : 0u);
     }
-    if (v326_layout) {
-        int extension_flag = 0;
-        const PlrJsonValue *extensions = plr_field(root, "formatExtensions");
-        if (extensions) {
-            if (extensions->type != PLR_JSON_OBJECT ||
-                !plr_field_bool(extensions, "v326PrefixFlag", &extension_flag))
-                writer.ok = 0;
-        }
-        plr_writer_u8(&writer, extension_flag ? 1u : 0u);
+    if (reserved_324) {
+        /* Match Player.SavePlayer exactly: the reserved release-324 byte is
+         * always written as false and is not editable semantic state. */
+        plr_writer_u8(&writer, 0u);
+    }
+    const char *body_bool_suffix_fields[] = {
+        "usedAegisCrystal", "usedAegisFruit", "usedArcaneCrystal",
+        "usedGalaxyPearl", "usedGummyWorm", "usedAmbrosia",
+        "downedDd2EventAnyDifficulty"
+    };
+    for (uint32_t index = 0u; index < 7u; index++) {
+        if (!plr_field_bool(root, body_bool_suffix_fields[index], &boolean)) writer.ok = 0;
+        plr_writer_u8(&writer, boolean ? 1u : 0u);
     }
     const char *death_fields[] = {"taxMoney", "numberOfDeathsPve", "numberOfDeathsPvp"};
     for (uint32_t index = 0u; index < 3u; index++) {
@@ -3048,9 +3056,9 @@ static uint8_t *plr_encode_plain(
         plr_writer_color(&writer, root, color_fields[index]);
 
     plr_writer_item_array(
-        &writer, root, "armor", PLR_ARMOR_SLOTS, v326_layout, 1);
+        &writer, root, "armor", PLR_ARMOR_SLOTS, equipment_favorites, 1);
     plr_writer_item_array(
-        &writer, root, "dyes", PLR_DYE_SLOTS, v326_layout, 1);
+        &writer, root, "dyes", PLR_DYE_SLOTS, equipment_favorites, 1);
     plr_writer_item_array(&writer, root, "inventory", PLR_INVENTORY_SLOTS, 1, 0);
     const PlrJsonValue *misc_equips = plr_field_array(root, "miscEquips");
     const PlrJsonValue *misc_dyes = plr_field_array(root, "miscDyes");
@@ -3110,7 +3118,7 @@ static uint8_t *plr_encode_plain(
     plr_writer_u8(&writer, (uint8_t)((unlocked ? 1u : 0u) | (enabled ? 2u : 0u)));
     if (!plr_field_i32(root, "currentLoadoutIndex", &i32)) writer.ok = 0;
     plr_writer_i32(&writer, i32);
-    plr_writer_loadouts(&writer, root, v326_layout);
+    plr_writer_loadouts(&writer, root, equipment_favorites);
     if (!plr_field_u8(root, "voiceVariant", &u8)) writer.ok = 0;
     plr_writer_u8(&writer, u8);
     float voice_pitch = 0.0f;

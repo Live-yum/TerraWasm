@@ -185,7 +185,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     w->version=rd_u32le(p,len,&off);
-    if (w->version<88u||w->version>400u){
+    if (w->version<88u||w->version>326u){
         tx_set_error("TERRAX_UNSUPPORTED_VERSION","unsupported .wld version");
         return 0;
         }

@@ -23,3 +23,7 @@ legacy type+prefix layout. Versions below 326 keep the legacy layout with no ext
 Versions are not rejected by a numeric maximum. TerraWasm attempts the newest known layout for
 higher version numbers and relies on bounded field parsing plus the strict plaintext EOF check to
 reject files whose actual binary layout is incompatible.
+
+## Decompiled-source compatibility ledger
+
+The current Terraria decompiled sources define release **326** as the latest supported Player/WLD version. TerraWasm intentionally supports semantic PLR versions **318 through 326**. Within that range, release 322 adds favorite bytes to main/loadout armor and dye slots, and release 324 adds one reserved boolean after `ateArtisanBread` which Terraria reads and discards. The reserved byte is not semantic JSON state. WLD V2 input is rejected above release 326 rather than guessed using a future layout.
