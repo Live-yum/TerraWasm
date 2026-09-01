@@ -1,0 +1,61 @@
+name: Final PLR ownership cleanup
+
+on:
+  push:
+    branches:
+      - fix/plr-full-history-forward-compatible
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[plr-oom-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Fix temporary-slot OOM ownership
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/terra_plr.c')
+          s = p.read_text(encoding='utf-8')
+          old = '''    if (!plr_version_has_temporary_slots(version)) {
+              for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++)
+                  if (!plr_json_array_push(temporary, plr_json_null())) {
+                      plr_json_free(temporary); plr_json_free(root); return NULL;
+                  }
+          }
+          '''
+          new = '''    if (!plr_version_has_temporary_slots(version)) {
+              for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++) {
+                  PlrJsonValue *empty_slot = plr_json_null();
+                  if (!empty_slot || !plr_json_array_push(temporary, empty_slot)) {
+                      plr_json_free(empty_slot);
+                      plr_json_free(temporary);
+                      plr_json_free(root);
+                      return NULL;
+                  }
+              }
+          }
+          '''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/fix-plr-oom-review.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: close PLR temporary-slot OOM ownership gap [plr-oom-fixed]"
+          git push
