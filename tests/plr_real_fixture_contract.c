@@ -157,16 +157,33 @@ int main(void) {
     CHECK(text_equal(edited_name, "\"real-fixture-edited\""),
         "edited name did not survive semantic encoding");
 
-    /* Terraria's current Player loader marks releases newer than 326 as
-     * LaterVersion. Editing the semantic version must enforce the same bound
-     * and must not partially commit the failed mutation. */
+    /* 326 is the latest known layout, not a numeric maximum. A newer release
+     * that still uses the same persisted layout must remain readable/writable. */
     CHECK(terra_plr_set(reopened, "/version", "327") ==
-        TERRAX_WORLD_STATUS_VALIDATION_ERROR, "future PLR version was accepted");
-    char *still_version = NULL;
-    CHECK(get_field(reopened, "/version", &still_version), "read version after rejected edit");
-    CHECK(text_equal(still_version, "326"), "rejected future version mutated the document");
+        TERRAX_WORLD_STATUS_OK, "unchanged-layout future PLR version was rejected");
+    char *future_version = NULL;
+    CHECK(get_field(reopened, "/version", &future_version), "read future version after edit");
+    CHECK(text_equal(future_version, "327"), "future version edit was not committed");
 
-    free(still_version);
+    uint32_t future_required = 0u;
+    CHECK(terra_plr_save_to_buffer(reopened, NULL, 0u, &future_required) ==
+        TERRAX_WORLD_STATUS_OK && future_required > 0u, "future-layout-compatible save probe");
+    uint8_t *future_bytes = (uint8_t *)malloc(future_required);
+    CHECK(future_bytes != NULL, "future output allocation");
+    CHECK(terra_plr_save_to_buffer(reopened, future_bytes, future_required, &future_required) ==
+        TERRAX_WORLD_STATUS_OK, "future-layout-compatible save fetch");
+    uint32_t future_handle = 0u;
+    CHECK(terra_plr_open_from_buffer(future_bytes, future_required, &future_handle) ==
+        TERRAX_WORLD_STATUS_OK, "unchanged-layout future PLR did not reopen");
+    char *reopened_future_version = NULL;
+    CHECK(get_field(future_handle, "/version", &reopened_future_version),
+        "read reopened future version");
+    CHECK(text_equal(reopened_future_version, "327"),
+        "reopened future PLR version changed unexpectedly");
+
+    free(reopened_future_version);
+    free(future_bytes);
+    free(future_version);
     free(edited_name);
     free(edited);
     free(voice_variant);
@@ -174,6 +191,7 @@ int main(void) {
     free(tax_money);
     free(version);
     free(name);
+    CHECK(terra_plr_close(future_handle) == TERRAX_WORLD_STATUS_OK, "close future handle");
     CHECK(terra_plr_close(reopened) == TERRAX_WORLD_STATUS_OK, "close reopened handle");
     CHECK(terra_plr_close(handle) == TERRAX_WORLD_STATUS_OK, "close real fixture handle");
     CHECK(tx_heap_used() == baseline, "real PLR contract leaked tracked allocations/caches");
