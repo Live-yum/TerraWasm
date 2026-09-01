@@ -1,0 +1,49 @@
+name: Finalize source-aligned compatibility docs
+
+on:
+  push:
+    branches:
+      - fix/plr-modern-history-280-326
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/plr-modern-history-280-326
+          fetch-depth: 0
+      - name: Align README compatibility ranges
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+              ('- **世界解析**：版本 88-400，所有 11 个 section 的只读 JSON 序列化',
+               '- **世界解析**：版本 88-326（Terraria 当前源码上限），所有 11 个 section 的只读 JSON 序列化'),
+              ('- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持 JSON Pointer 和结构化补丁；不按版本号硬编码白名单，而以实际二进制布局是否兼容为准',
+               '- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持现代布局版本 280-326、JSON Pointer 和结构化补丁，并按 Terraria `Player.cs` 的 release gate 对称读写'),
+              ('PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。解析器不再把 318/319 作为硬性版本白名单：它会保留文件中的 `version` 并按当前语义布局尝试解析；布局不兼容或数据损坏时返回解析错误。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。',
+               'PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 的现代 PLR profile 明确支持版本 280-326：281 起保存 voice pitch，283 起保存 team，300 起保存 pending refunds，310 起保存 one-time dialogues，322 起在主装备/染料及 loadout 装备/染料中保存 favorite，324 起在 `ateArtisanBread` 后消费/写入一个保留 bool；327 及以上在 Terraria 定义新布局前直接拒绝。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。')
+          ]
+          for old, new in replacements:
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'expected exactly one README match, got {n}: {old[:80]}')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          rm .github/workflows/finalize-source-ledger.yml
+          git diff --check
+      - name: Commit README cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md .github/workflows/finalize-source-ledger.yml
+          git diff --cached --check
+          git commit -m "docs: align WLD and PLR ranges with Terraria source"
+          git push origin HEAD:fix/plr-modern-history-280-326
