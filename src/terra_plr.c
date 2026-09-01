@@ -2049,9 +2049,13 @@ static PlrJsonValue *plr_parse_plain(
         int extension_flag = plr_read_u8(&reader) != 0u;
         PlrJsonValue *extensions = plr_json_object();
         if (!reader.ok || !extensions ||
-            !plr_json_object_put_bool(extensions, "v326PrefixFlag", extension_flag) ||
-            !plr_root_put(root, "formatExtensions", extensions)) {
+            !plr_json_object_put_bool(extensions, "v326PrefixFlag", extension_flag)) {
             plr_json_free(extensions);
+            plr_json_free(root);
+            return NULL;
+        }
+        /* plr_root_put owns extensions on both success and insertion failure. */
+        if (!plr_root_put(root, "formatExtensions", extensions)) {
             plr_json_free(root);
             return NULL;
         }
