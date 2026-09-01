@@ -262,26 +262,31 @@ else()
         endif()
         add_test(NAME terra_native_contract COMMAND terra_native_contract)
 
-        # The PLR contract uses the repository-level TerraR fixture when this
-        # superproject is present, but keeps standalone TerraWasm checkouts
-        # buildable by allowing the fixture path to be overridden or omitted.
-        set(TERRAWASM_PLR_FIXTURE_PATH
-            "${CMAKE_CURRENT_SOURCE_DIR}/../TerraR/players/yanhua.plr"
-            CACHE FILEPATH "Terraria .plr fixture used by the native PLR contract")
-        if(EXISTS "${TERRAWASM_PLR_FIXTURE_PATH}")
-            file(TO_CMAKE_PATH "${TERRAWASM_PLR_FIXTURE_PATH}" TERRAWASM_PLR_FIXTURE_DEFINE)
-            add_executable(terra_plr_contract tests/plr_contract.c)
-            target_link_libraries(terra_plr_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-            target_compile_definitions(terra_plr_contract PRIVATE
-                TERRAX_STATIC
-                TERRAWASM_PLR_FIXTURE_PATH="${TERRAWASM_PLR_FIXTURE_DEFINE}"
-            )
-            if(TERRAWASM_SANITIZERS)
-                target_compile_options(terra_plr_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-                target_link_options(terra_plr_contract PRIVATE -fsanitize=address,undefined)
-            endif()
-            add_test(NAME terra_plr_contract COMMAND terra_plr_contract)
+        # Keep the PLR contract self-contained so standalone checkouts and CI
+        # always exercise encryption, parsing, edits, and allocator isolation.
+        set(TERRAWASM_PLR_JSON_FIXTURE_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-player.json"
+            CACHE FILEPATH "Semantic JSON fixture used by the native PLR contract")
+        if(NOT EXISTS "${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
+            message(FATAL_ERROR
+                "Native PLR contract fixture is missing: ${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
         endif()
+        file(TO_CMAKE_PATH
+            "${TERRAWASM_PLR_JSON_FIXTURE_PATH}"
+            TERRAWASM_PLR_JSON_FIXTURE_DEFINE)
+        add_executable(terra_plr_contract tests/plr_contract.c)
+        target_link_libraries(terra_plr_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+        target_compile_definitions(terra_plr_contract PRIVATE
+            TERRAX_STATIC
+            TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
+        )
+        if(TERRAWASM_SANITIZERS)
+            target_compile_options(terra_plr_contract PRIVATE
+                -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(terra_plr_contract PRIVATE
+                -fsanitize=address,undefined)
+        endif()
+        add_test(NAME terra_plr_contract COMMAND terra_plr_contract)
 
         add_executable(terra_error_json_contract tests/error_json_contract.c)
         target_link_libraries(terra_error_json_contract PRIVATE terrax_world_static ZLIB::ZLIB)
