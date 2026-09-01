@@ -24,4 +24,14 @@ For releases 1-37, the file stores item names rather than numeric item ids. The 
 
 Important `Player.cs` persistence transitions covered by the implementation include metadata at 135, numeric items at 38, inventory/bank expansion at 58, armor/dye slot expansions, misc equipment at 117/136, creative tracker/powers at 218/220, temporary slots at 214, super cart at 253, loadouts at 262, voice data at 280/281, team at 283, pending refunds at 300, dialogues at 310, equipment favorites at 322, and the reserved byte at 324.
 
+## CI compatibility gates
+
+The PLR regression suite deliberately combines independent checks rather than relying on encoder/decoder self-round-trips alone:
+
+- every historical release **1-326** is encoded and reopened to exercise all supported version paths;
+- a source-gate boundary matrix verifies both sides of historical layout changes;
+- releases **327** and **400** verify that a newer version with an unchanged 326 layout is accepted;
+- a deliberately extended newer-version payload verifies the dedicated newer-layout parse error;
+- the external `烟花.plr` release-326 fixture verifies real Terraria input, clean byte preservation, semantic editing, re-encoding, and reopen behavior.
+
 For WLD V2, TerraWasm keeps its existing WLD compatibility rules independently; this PLR policy does not change WLD version handling.
