@@ -149,7 +149,7 @@ node tests/test_mark_tiles_map.js    # 地图标记（13 项）
 
 ### 加密玩家文件 `.plr`
 
-PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 的现代 PLR profile 明确支持版本 1-326：281 起保存 voice pitch，283 起保存 team，300 起保存 pending refunds，310 起保存 one-time dialogues，322 起在主装备/染料及 loadout 装备/染料中保存 favorite，324 起在 `ateArtisanBread` 后消费/写入一个保留 bool；327 及以上在 Terraria 定义新布局前直接拒绝。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。
+PLR 使用 Terraria 的 AES-128-CBC + PKCS#7 加密封装，密钥/IV 为 UTF-16LE `h3y_gUyZ`。TerraWasm 按 `Player.cs` 的历史 release gate 解析并写回版本 1-326，包括 135 前无 `FileMetadata` 和 1-37 使用 legacy item name 的旧布局；326 仅作为当前最新已知布局标记，不是最大允许版本。327 及以上会先按最新已知布局尝试完整解析，字段布局未变化即可接受，只有出现无法完整消费或结构错位时才返回 newer-layout 解析错误。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。
 
 ```c
 uint32_t handle = 0;
