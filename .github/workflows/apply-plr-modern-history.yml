@@ -1,0 +1,33 @@
+name: Apply PLR modern history alignment
+
+on:
+  push:
+    branches:
+      - fix/plr-modern-history-280-326
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/plr-modern-history-280-326
+          lfs: true
+          fetch-depth: 0
+      - name: Apply source-defined PLR history gates
+        run: |
+          python3 scripts/apply_plr_modern_history.py
+          rm scripts/apply_plr_modern_history.py
+          rm .github/workflows/apply-plr-modern-history.yml
+          git diff --check
+      - name: Commit implementation and cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/terra_plr.c tests/test_plr.js tests/files/README.md scripts/apply_plr_modern_history.py .github/workflows/apply-plr-modern-history.yml
+          git diff --cached --check
+          git commit -m "fix: align PLR 280-326 history with Terraria source"
+          git push origin HEAD:fix/plr-modern-history-280-326
