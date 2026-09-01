@@ -168,7 +168,11 @@ test("WLD current-version guard matches Terraria release 326", async () => {
     [326, "TERRAX_TRUNCATED_FORMAT"],
     [327, "TERRAX_UNSUPPORTED_VERSION"],
   ]) {
-    const candidate = Buffer.alloc(4);
+    // The public open ABI rejects buffers shorter than 16 bytes before the
+    // WLD parser runs. Keep this candidate at that minimum so release 326
+    // reaches parse_format() and fails on missing metadata, while release 327
+    // is rejected by the version guard before metadata is consumed.
+    const candidate = Buffer.alloc(16);
     candidate.writeUInt32LE(version, 0);
     const inputPtr = alloc(M, candidate);
     const handlePtr = M._tx_malloc(4);
