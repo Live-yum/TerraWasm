@@ -11,19 +11,15 @@ Do **not** replace the real `.plr` compatibility fixture with output generated b
 
 When adding future PLR fixtures, prefer files created by Terraria itself and keep them stable so CI can detect format regressions.
 
-## Decompiled-source compatibility ledger
+## Decompiled-source compatibility policy
 
-The current Terraria decompiled sources define release **326** as the latest supported Player/WLD version. TerraWasm intentionally supports modern-profile PLR versions **280 through 326** and rejects 279 or 327+ instead of guessing a different binary layout.
+PLR compatibility follows `Terraria/Player.cs` historical `Deserialize` gates instead of treating a short list of boundary releases as the complete supported set.
 
-Within the supported PLR range, the source-defined persistence transitions are:
+- Positive historical releases below 326 are parsed according to their actual persisted layout, including pre-135 files without `FileMetadata` and releases 1-37 that store legacy item names instead of numeric item ids.
+- Tests exercise every release from **1 through 326**, while an additional boundary matrix checks both sides of the historical format transitions.
+- **326 is the latest known layout marker, not a maximum accepted version.** A file declaring 327 or later is attempted using the latest known layout. If the bytes still match, it is accepted; if a new field/layout makes the parse incomplete or misaligned, TerraWasm returns a newer-layout parse error instead of rejecting the version number up front.
+- The real `烟花.plr` fixture remains the external compatibility anchor for release 326. Historical synthetic round trips supplement this fixture but do not replace it.
 
-- **280**: modern profile baseline used by TerraWasm; `voiceVariant` is persisted.
-- **281**: `voicePitchOffset` starts being persisted.
-- **283**: `team` starts being persisted.
-- **300**: pending crafting refunds start being persisted.
-- **310**: one-time dialogue identifiers start being persisted.
-- **322**: main/loadout armor and dye items start persisting the `favorited` byte. Inventory favorite handling remains on its existing layout.
-- **324**: one reserved boolean is stored immediately after `ateArtisanBread`; Terraria reads and discards it. TerraWasm therefore consumes it on read and always writes `false`, without exposing it as semantic JSON state.
-- **326**: current Player/WLD release in the referenced decompiled source.
+Important `Player.cs` persistence transitions covered by the implementation include metadata at 135, numeric items at 38, inventory/bank expansion at 58, armor/dye slot expansions, misc equipment at 117/136, creative tracker/powers at 218/220, temporary slots at 214, super cart at 253, loadouts at 262, voice data at 280/281, team at 283, pending refunds at 300, dialogues at 310, equipment favorites at 322, and the reserved byte at 324.
 
-For WLD V2, TerraWasm keeps its existing lower compatibility boundary at version 88 and rejects versions above 326. The 11-section ordering remains aligned with `WorldFile.SaveWorld_Version2` / `LoadWorld_Version2` rather than assuming a future layout.
+For WLD V2, TerraWasm keeps its existing WLD compatibility rules independently; this PLR policy does not change WLD version handling.
