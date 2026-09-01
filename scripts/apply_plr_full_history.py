@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+# One-shot transformation: removed by the apply workflow after generation.
 ROOT = Path(__file__).resolve().parents[1]
 PLR = ROOT / "src" / "terra_plr.c"
 TEST = ROOT / "tests" / "test_plr.js"
