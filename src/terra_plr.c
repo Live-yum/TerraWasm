@@ -1599,7 +1599,7 @@ static uint8_t *plr_encrypt(
     return encrypted;
 }
 
-#define PLR_MIN_SUPPORTED_VERSION 318
+#define PLR_MIN_SUPPORTED_VERSION 280
 #define PLR_CURRENT_VERSION 326
 
 static int plr_version_supported(int32_t version) {
@@ -1610,6 +1610,22 @@ static int plr_version_has_equipment_favorites(int32_t version) {
     /* Player.LoadPlayer_Version2 and EquipmentLoadout.Deserialize start
      * persisting armor/dye favorites at release 322. */
     return version >= 322;
+}
+
+static int plr_version_has_voice_pitch(int32_t version) {
+    return version >= 281;
+}
+
+static int plr_version_has_team(int32_t version) {
+    return version >= 283;
+}
+
+static int plr_version_has_pending_refunds(int32_t version) {
+    return version >= 300;
+}
+
+static int plr_version_has_dialogues(int32_t version) {
+    return version >= 310;
 }
 
 static int plr_version_has_reserved_324(int32_t version) {
@@ -1960,6 +1976,10 @@ static PlrJsonValue *plr_parse_plain(
     int32_t version = plr_read_i32(&reader);
     if (!reader.ok) return NULL;
     if (!plr_version_supported(version)) return NULL;
+    const int voice_pitch = plr_version_has_voice_pitch(version);
+    const int team = plr_version_has_team(version);
+    const int pending_refunds = plr_version_has_pending_refunds(version);
+    const int dialogues_seen = plr_version_has_dialogues(version);
     const int equipment_favorites = plr_version_has_equipment_favorites(version);
     const int reserved_324 = plr_version_has_reserved_324(version);
 
@@ -2009,8 +2029,12 @@ static PlrJsonValue *plr_parse_plain(
         !plr_json_object_put_u64(root, "difficulty", plr_read_u8(&reader)) ||
         !plr_put_reader_i64(root, "playTimeTicks", &reader) ||
         !plr_put_reader_i32(root, "hair", &reader) ||
-        !plr_put_reader_u8(root, "hairDye", &reader) ||
-        !plr_put_reader_u8(root, "team", &reader) || !reader.ok) {
+        !plr_put_reader_u8(root, "hairDye", &reader) || !reader.ok) {
+        plr_json_free(root);
+        return NULL;
+    }
+    uint8_t team_value = team ? plr_read_u8(&reader) : 0u;
+    if (!reader.ok || !plr_json_object_put_u64(root, "team", team_value)) {
         plr_json_free(root);
         return NULL;
     }
@@ -2299,16 +2323,17 @@ static PlrJsonValue *plr_parse_plain(
         !plr_put_reader_u8(root, "voiceVariant", &reader) || !reader.ok) {
         plr_json_free(root); return NULL;
     }
-    float voice_pitch = plr_read_f32(&reader);
-    if (!reader.ok || !plr_json_object_put_float(root, "voicePitchOffset", voice_pitch)) {
+    float voice_pitch_value = voice_pitch ? plr_read_f32(&reader) : 0.0f;
+    if (!reader.ok || !plr_json_object_put_float(root, "voicePitchOffset", voice_pitch_value)) {
         plr_json_free(root); return NULL;
     }
     uint32_t pending_count = 0u;
-    if (!plr_read_count(&reader, PLR_MAX_PENDING_REFUNDS, 9u, &pending_count)) {
+    if (pending_refunds &&
+        !plr_read_count(&reader, PLR_MAX_PENDING_REFUNDS, 9u, &pending_count)) {
         plr_json_free(root); return NULL;
     }
     PlrJsonValue *pending = plr_read_item_array(&reader, pending_count, 0, 0);
-    PlrJsonValue *dialogues = plr_read_dialogues(&reader);
+    PlrJsonValue *dialogues = dialogues_seen ? plr_read_dialogues(&reader) : plr_json_array();
     if (!pending || !dialogues) {
         plr_json_free(pending); plr_json_free(dialogues); plr_json_free(root); return NULL;
     }
@@ -2574,7 +2599,7 @@ static int plr_validate_model(const PlrJsonValue *root) {
     if (!plr_value_i32(plr_json_object_get(root, "version"), &model_version))
         return plr_model_error("PLR version is missing or invalid");
     if (!plr_version_supported(model_version))
-        return plr_model_error("PLR version must be within the supported Terraria 318-326 range");
+        return plr_model_error("PLR version must be within TerraWasm's modern Terraria 280-326 range");
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -2966,6 +2991,10 @@ static uint8_t *plr_encode_plain(
     int32_t version = 0;
     if (!plr_field_i32(root, "version", &version)) writer.ok = 0;
     if (!plr_version_supported(version)) return NULL;
+    const int voice_pitch = plr_version_has_voice_pitch(version);
+    const int team = plr_version_has_team(version);
+    const int pending_refunds = plr_version_has_pending_refunds(version);
+    const int dialogues_seen = plr_version_has_dialogues(version);
     const int equipment_favorites = plr_version_has_equipment_favorites(version);
     const int reserved_324 = plr_version_has_reserved_324(version);
     plr_writer_i32(&writer, version);
@@ -3000,7 +3029,7 @@ static uint8_t *plr_encode_plain(
     if (!plr_field_u8(root, "hairDye", &u8)) writer.ok = 0;
     plr_writer_u8(&writer, u8);
     if (!plr_field_u8(root, "team", &u8)) writer.ok = 0;
-    plr_writer_u8(&writer, u8);
+    if (team) plr_writer_u8(&writer, u8);
 
     const PlrJsonValue *hide = plr_field_array(root, "hideVisibleAccessory");
     uint8_t hide_lower = 0u, hide_upper = 0u;
@@ -3121,13 +3150,13 @@ static uint8_t *plr_encode_plain(
     plr_writer_loadouts(&writer, root, equipment_favorites);
     if (!plr_field_u8(root, "voiceVariant", &u8)) writer.ok = 0;
     plr_writer_u8(&writer, u8);
-    float voice_pitch = 0.0f;
-    if (!plr_field_float(root, "voicePitchOffset", &voice_pitch)) writer.ok = 0;
-    plr_writer_f32(&writer, voice_pitch);
+    float voice_pitch_value = 0.0f;
+    if (!plr_field_float(root, "voicePitchOffset", &voice_pitch_value)) writer.ok = 0;
+    if (voice_pitch) plr_writer_f32(&writer, voice_pitch_value);
     const PlrJsonValue *pending = plr_field_array(root, "pendingRefunds");
     if (!pending || pending->as.array.count > PLR_MAX_PENDING_REFUNDS ||
         pending->as.array.count > INT32_MAX) writer.ok = 0;
-    else {
+    else if (pending_refunds) {
         plr_writer_i32(&writer, (int32_t)pending->as.array.count);
         for (uint32_t index = 0u; index < pending->as.array.count; index++)
             plr_writer_item(&writer, pending->as.array.items[index], 0);
@@ -3135,7 +3164,7 @@ static uint8_t *plr_encode_plain(
     const PlrJsonValue *dialogues = plr_field_array(root, "oneTimeDialoguesSeen");
     if (!dialogues || dialogues->as.array.count > PLR_MAX_DIALOGUES ||
         dialogues->as.array.count > INT32_MAX) writer.ok = 0;
-    else {
+    else if (dialogues_seen) {
         plr_writer_i32(&writer, (int32_t)dialogues->as.array.count);
         for (uint32_t index = 0u; index < dialogues->as.array.count; index++) {
             const char *dialogue = NULL;

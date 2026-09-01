@@ -334,14 +334,19 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
 });
 
 
-test("PLR releases 318-326 follow Terraria's 322 favorite and 324 reserved-byte transitions", async () => {
+test("PLR releases 280-326 follow Terraria's modern history gates", async () => {
   const module = await TerraWorldWasm();
   const baseline = module._tx_heap_used();
-  const versions = [318, 319, 320, 321, 322, 323, 324, 325, 326];
+  const versions = [280, 281, 282, 283, 299, 300, 309, 310, 321, 322, 323, 324, 325, 326];
 
   for (const version of versions) {
     const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
     model.version = version;
+    model.team = 7;
+    model.voiceVariant = 3;
+    model.voicePitchOffset = 0.25;
+    model.pendingRefunds = [{ itemType: 1, stack: 2, prefix: 0, favorited: false }];
+    model.oneTimeDialoguesSeen = ["source-gate"];
     model.armor[0].favorited = true;
     model.dyes[0].favorited = true;
     model.inventory[0].favorited = true;
@@ -361,6 +366,15 @@ test("PLR releases 318-326 follow Terraria's 322 favorite and 324 reserved-byte 
       handle = openJson(module, model);
       reopened = openBuffer(module, encode(module, handle));
       assert.equal(getField(module, reopened, "/version"), version);
+      assert.equal(getField(module, reopened, "/voiceVariant"), 3);
+      assert.equal(getField(module, reopened, "/voicePitchOffset"), version >= 281 ? 0.25 : 0,
+        `voice pitch gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/team"), version >= 283 ? 7 : 0,
+        `team gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/pendingRefunds").length, version >= 300 ? 1 : 0,
+        `pending refund gate mismatch for release ${version}`);
+      assert.equal(getField(module, reopened, "/oneTimeDialoguesSeen").length, version >= 310 ? 1 : 0,
+        `dialogue gate mismatch for release ${version}`);
       const equipmentFavorite = version >= 322;
       assert.equal(getField(module, reopened, "/armor/0/favorited"), equipmentFavorite,
         `main armor favorite gate mismatch for release ${version}`);
@@ -370,8 +384,7 @@ test("PLR releases 318-326 follow Terraria's 322 favorite and 324 reserved-byte 
         `loadout armor favorite gate mismatch for release ${version}`);
       assert.equal(getField(module, reopened, "/loadouts/0/dyes/0/favorited"), equipmentFavorite,
         `loadout dye favorite gate mismatch for release ${version}`);
-      assert.equal(getField(module, reopened, "/inventory/0/favorited"), true,
-        `inventory favorite unexpectedly changed for release ${version}`);
+      assert.equal(getField(module, reopened, "/inventory/0/favorited"), true);
       assert.equal(getField(module, reopened, "/ateArtisanBread"), true);
       assert.equal(getField(module, reopened, "/usedAegisCrystal"), false);
       assert.equal(getField(module, reopened, "/usedAegisFruit"), true);
@@ -384,20 +397,18 @@ test("PLR releases 318-326 follow Terraria's 322 favorite and 324 reserved-byte 
       if (handle) module._terra_player_close(handle);
     }
     assert.equal(module._tx_heap_used(), baseline,
-      `PLR release ${version} transition test leaked tracked allocations`);
+      `PLR release ${version} history test leaked tracked allocations`);
   }
 
-  const tooOld = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-  tooOld.version = 317;
-  const tooNew = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-  tooNew.version = 327;
-  for (const invalid of [tooOld, tooNew]) {
+  for (const version of [279, 327]) {
+    const invalid = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
+    invalid.version = version;
     const input = allocString(module, JSON.stringify(invalid));
     const output = module._tx_malloc(4);
     assert(output);
     try {
       assert.equal(module._terra_player_open_json(input, output), 6,
-        `unsupported PLR release ${invalid.version} must be rejected`);
+        `unsupported PLR release ${version} must be rejected`);
       assert.equal(module.HEAPU32[output >>> 2] >>> 0, 0);
     } finally {
       module._tx_free(output);
