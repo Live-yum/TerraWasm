@@ -523,3 +523,64 @@ test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses 
   }
   assert.equal(module._tx_heap_used(), baseline);
 });
+
+test("PLR legacy item edits reject fields that old releases cannot represent", async () => {
+  const module = await TerraWorldWasm();
+  const baseline = module._tx_heap_used();
+
+  function probeSave(handle) {
+    const required = module._tx_malloc(4);
+    assert(required);
+    try {
+      return module._terra_player_save_to_buffer(handle, 0, 0, required);
+    } finally {
+      module._tx_free(required);
+    }
+  }
+
+  const model = historicalModel(37);
+  model.armor[0] = {
+    itemType: 0, stack: 1, prefix: 2, favorited: false, legacyName: "Iron Pickaxe",
+  };
+  let handle = 0, reopened = 0;
+  try {
+    handle = openJson(module, model);
+    reopened = openBuffer(module, encode(module, handle));
+    assert.equal(getField(module, reopened, "/armor/0/legacyName"), "Iron Pickaxe");
+    assert.equal(getField(module, reopened, "/armor/0/itemType"), 0);
+    assert.equal(getField(module, reopened, "/armor/0/stack"), 1);
+    assert.equal(getField(module, reopened, "/armor/0/prefix"), 2);
+
+    assert.equal(setField(module, reopened, "/armor/0/itemType", 1), 0);
+    assert.notEqual(probeSave(reopened), 0,
+      "numeric itemType edit must not be silently ignored for release 1-37");
+    assert.equal(setField(module, reopened, "/armor/0/itemType", 0), 0);
+    assert.equal(setField(module, reopened, "/armor/0/stack", 0), 0);
+    assert.notEqual(probeSave(reopened), 0,
+      "equipment stack edit must not be silently ignored for release 1-37");
+  } finally {
+    if (reopened) module._terra_player_close(reopened);
+    if (handle) module._terra_player_close(handle);
+  }
+
+  const v35 = historicalModel(35);
+  v35.armor[0] = {
+    itemType: 0, stack: 1, prefix: 1, favorited: false, legacyName: "Iron Pickaxe",
+  };
+  const input = allocString(module, JSON.stringify(v35));
+  const output = module._tx_malloc(4);
+  assert(output);
+  let oldHandle = 0;
+  try {
+    assert.equal(module._terra_player_open_json(input, output), 0);
+    oldHandle = module.HEAPU32[output >>> 2] >>> 0;
+    assert(oldHandle);
+    assert.notEqual(probeSave(oldHandle), 0,
+      "release 1-35 prefix edit must not be silently ignored");
+  } finally {
+    if (oldHandle) module._terra_player_close(oldHandle);
+    module._tx_free(output);
+    module._tx_free(input);
+  }
+  assert.equal(module._tx_heap_used(), baseline);
+});

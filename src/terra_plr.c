@@ -1813,8 +1813,14 @@ static PlrJsonValue *plr_read_legacy_item(
     if (!reader->ok || !legacy_name) { free(legacy_name); return NULL; }
     if (!with_stack) stack = legacy_name[0] ? 1 : 0;
     PlrJsonValue *item = plr_make_item(0, stack, prefix, 0);
-    if (!item || !plr_json_object_put_string_owned(item, "legacyName", legacy_name)) {
-        plr_json_free(item); return NULL;
+    if (!item) {
+        free(legacy_name);
+        return NULL;
+    }
+    /* put_string_owned consumes legacy_name even when insertion fails. */
+    if (!plr_json_object_put_string_owned(item, "legacyName", legacy_name)) {
+        plr_json_free(item);
+        return NULL;
     }
     return item;
 }
@@ -2092,6 +2098,17 @@ static int plr_root_put(PlrJsonValue *root, const char *key, PlrJsonValue *value
     return plr_json_object_put(root, key, value);
 }
 
+/* plr_json_object_put consumes value on both success and failure.
+ * Null the caller slot before transfer so later cleanup only frees
+ * siblings that were never handed to the object. */
+static int plr_root_take(
+    PlrJsonValue *root, const char *key, PlrJsonValue **value) {
+    if (!value || !*value) return 0;
+    PlrJsonValue *owned = *value;
+    *value = NULL;
+    return plr_root_put(root, key, owned);
+}
+
 static PlrJsonValue *plr_parse_plain(
     const uint8_t *plain, uint32_t plain_length) {
     PlrReader reader = {plain, plain_length, 0u, 1};
@@ -2118,7 +2135,7 @@ static PlrJsonValue *plr_parse_plain(
             !plr_json_object_put_u64(metadata, "favoriteFlags", favorite_flags) ||
             !plr_json_object_put_u64(metadata, "magicAndType", magic_and_type) ||
             !plr_json_object_put_u64(metadata, "revision", revision) ||
-            !plr_root_put(root, "metadata", metadata)) {
+            !plr_root_take(root, "metadata", &metadata)) {
             plr_json_free(metadata); plr_json_free(root); return NULL;
         }
     } else if (!plr_root_put(root, "metadata", plr_json_null())) {
@@ -2126,8 +2143,16 @@ static PlrJsonValue *plr_parse_plain(
     }
 
     char *name = plr_read_string(&reader);
-    if (!name || !plr_json_object_put_string_owned(root, "name", name)) {
-        free(name); plr_json_free(root); return NULL;
+    if (!name) {
+        plr_json_free(root);
+        return NULL;
+    }
+    char *owned_name = name;
+    name = NULL;
+    /* put_string_owned consumes owned_name on both outcomes. */
+    if (!plr_json_object_put_string_owned(root, "name", owned_name)) {
+        plr_json_free(root);
+        return NULL;
     }
 
     uint8_t difficulty = 0u;
@@ -2219,7 +2244,7 @@ static PlrJsonValue *plr_parse_plain(
         "underShirtColor", "pantsColor", "shoeColor"};
     for (uint32_t i = 0u; i < 7u; i++) {
         PlrJsonValue *color = plr_read_color(&reader);
-        if (!color || !plr_root_put(root, colors[i], color)) {
+        if (!color || !plr_root_take(root, colors[i], &color)) {
             plr_json_free(color); plr_json_free(root); return NULL;
         }
     }
@@ -2294,12 +2319,12 @@ static PlrJsonValue *plr_parse_plain(
                 if (!plr_array_replace_owned(safe, i, plr_read_legacy_item(&reader, version, 1))) goto parse_items_fail;
     }
     if (!reader.ok) goto parse_items_fail;
-    if (!plr_root_put(root, "armor", armor) || !plr_root_put(root, "dyes", dyes) ||
-        !plr_root_put(root, "inventory", inventory) ||
-        !plr_root_put(root, "miscEquips", misc_equips) ||
-        !plr_root_put(root, "miscDyes", misc_dyes) ||
-        !plr_root_put(root, "piggyBank", piggy) || !plr_root_put(root, "safe", safe) ||
-        !plr_root_put(root, "defendersForge", forge) || !plr_root_put(root, "voidVault", vault)) {
+    if (!plr_root_take(root, "armor", &armor) || !plr_root_take(root, "dyes", &dyes) ||
+        !plr_root_take(root, "inventory", &inventory) ||
+        !plr_root_take(root, "miscEquips", &misc_equips) ||
+        !plr_root_take(root, "miscDyes", &misc_dyes) ||
+        !plr_root_take(root, "piggyBank", &piggy) || !plr_root_take(root, "safe", &safe) ||
+        !plr_root_take(root, "defendersForge", &forge) || !plr_root_take(root, "voidVault", &vault)) {
         plr_json_free(root); return NULL;
     }
     armor = dyes = inventory = misc_equips = misc_dyes = piggy = safe = forge = vault = NULL;
@@ -2309,11 +2334,11 @@ static PlrJsonValue *plr_parse_plain(
     }
 
     PlrJsonValue *buffs = plr_read_buffs(&reader, plr_version_buff_slots(version));
-    if (!buffs || !plr_root_put(root, "buffs", buffs)) {
+    if (!buffs || !plr_root_take(root, "buffs", &buffs)) {
         plr_json_free(buffs); plr_json_free(root); return NULL;
     }
     PlrJsonValue *spawn_points = plr_read_spawn_points(&reader);
-    if (!spawn_points || !plr_root_put(root, "spawnPoints", spawn_points)) {
+    if (!spawn_points || !plr_root_take(root, "spawnPoints", &spawn_points)) {
         plr_json_free(spawn_points); plr_json_free(root); return NULL;
     }
     int hb_locked = plr_version_has_hb_locked(version) ? (plr_read_u8(&reader) != 0u) : 0;
@@ -2333,13 +2358,13 @@ static PlrJsonValue *plr_parse_plain(
     int32_t golfer = plr_version_has_golfer_score(version) ? plr_read_i32(&reader) : 0;
     if (!hide_info || !dpad || !builder || !respawn || !reader.ok ||
         !plr_json_object_put_bool(root, "hbLocked", hb_locked) ||
-        !plr_root_put(root, "hideInfo", hide_info) ||
+        !plr_root_take(root, "hideInfo", &hide_info) ||
         !plr_json_object_put_i64(root, "anglerQuestsFinished", angler) ||
-        !plr_root_put(root, "dpadRadialBindings", dpad) ||
-        !plr_root_put(root, "builderAccStatus", builder) ||
+        !plr_root_take(root, "dpadRadialBindings", &dpad) ||
+        !plr_root_take(root, "builderAccStatus", &builder) ||
         !plr_json_object_put_i64(root, "bartenderQuestLog", bartender) ||
         !plr_json_object_put_bool(root, "dead", dead) ||
-        !plr_root_put(root, "respawnTimer", respawn) ||
+        !plr_root_take(root, "respawnTimer", &respawn) ||
         !plr_json_object_put_i64(root, "lastSaveUtcTicks", last_save) ||
         !plr_json_object_put_i64(root, "golferScoreAccumulated", golfer)) {
         plr_json_free(hide_info); plr_json_free(dpad); plr_json_free(builder);
@@ -2394,8 +2419,8 @@ static PlrJsonValue *plr_parse_plain(
             PlrJsonValue *a = plr_make_default_item_array(PLR_ARMOR_SLOTS);
             PlrJsonValue *d = plr_make_default_item_array(PLR_DYE_SLOTS);
             PlrJsonValue *h = plr_make_default_bool_array(PLR_DYE_SLOTS);
-            if (!loadout || !a || !d || !h || !plr_root_put(loadout, "armor", a) ||
-                !plr_root_put(loadout, "dyes", d) || !plr_root_put(loadout, "hide", h) ||
+            if (!loadout || !a || !d || !h || !plr_root_take(loadout, "armor", &a) ||
+                !plr_root_take(loadout, "dyes", &d) || !plr_root_take(loadout, "hide", &h) ||
                 !plr_json_array_push(loadouts, loadout)) {
                 plr_json_free(loadout); plr_json_free(a); plr_json_free(d); plr_json_free(h);
                 plr_json_free(loadouts); loadouts = NULL; break;
@@ -2406,12 +2431,12 @@ static PlrJsonValue *plr_parse_plain(
         (plr_skin_variant_is_male(skin_variant) ? 1u : 2u);
     float voice_pitch = plr_version_has_voice_pitch(version) ? plr_read_f32(&reader) : 0.0f;
     if (!temporary || !powers || !loadouts || !reader.ok ||
-        !plr_root_put(root, "temporarySlots", temporary) ||
-        !plr_root_put(root, "creativePowers", powers) ||
+        !plr_root_take(root, "temporarySlots", &temporary) ||
+        !plr_root_take(root, "creativePowers", &powers) ||
         !plr_json_object_put_bool(root, "unlockedSuperCart", (super_flags & 1u) != 0u) ||
         !plr_json_object_put_bool(root, "enabledSuperCart", (super_flags & 2u) != 0u) ||
         !plr_json_object_put_i64(root, "currentLoadoutIndex", loadout_index) ||
-        !plr_root_put(root, "loadouts", loadouts) ||
+        !plr_root_take(root, "loadouts", &loadouts) ||
         !plr_json_object_put_u64(root, "voiceVariant", voice_variant) ||
         !plr_json_object_put_float(root, "voicePitchOffset", voice_pitch)) {
         plr_json_free(temporary); plr_json_free(powers); plr_json_free(loadouts);
@@ -2428,11 +2453,11 @@ static PlrJsonValue *plr_parse_plain(
         plr_read_dialogues(&reader) : plr_json_array();
     PlrJsonValue *layout = plr_json_object();
     if (!pending || !dialogues || !layout ||
-        !plr_root_put(root, "pendingRefunds", pending) ||
-        !plr_root_put(root, "oneTimeDialoguesSeen", dialogues) ||
+        !plr_root_take(root, "pendingRefunds", &pending) ||
+        !plr_root_take(root, "oneTimeDialoguesSeen", &dialogues) ||
         !plr_json_object_put_u64(layout, "builderAccStatusCount", builder_count) ||
         !plr_json_object_put_bool(layout, "includesDeathMetadata", plr_version_has_death_metadata(version)) ||
-        !plr_root_put(root, "tailLayout", layout)) {
+        !plr_root_take(root, "tailLayout", &layout)) {
         plr_json_free(pending); plr_json_free(dialogues); plr_json_free(layout);
         plr_json_free(root); return NULL;
     }
@@ -2912,13 +2937,24 @@ static void plr_writer_legacy_item(
         writer->ok = 0; return;
     }
     if (legacy && !plr_value_string(legacy, &legacy_name)) { writer->ok = 0; return; }
-    if (!legacy_name) {
-        if (item_type != 0) {
-            tx_set_error("TERRAX_PLR_LEGACY_ITEM_NAME_REQUIRED",
-                "release 1-37 item edits require legacyName because the file stores item names, not ids");
-            writer->ok = 0; return;
-        }
-        legacy_name = "";
+    if (item_type != 0) {
+        tx_set_error("TERRAX_PLR_LEGACY_ITEM_ID_UNREPRESENTABLE",
+            "release 1-37 stores item names; edit legacyName instead of itemType");
+        writer->ok = 0;
+        return;
+    }
+    if (!legacy_name) legacy_name = "";
+    if (!with_stack && stack != (legacy_name[0] ? 1 : 0)) {
+        tx_set_error("TERRAX_PLR_LEGACY_ITEM_STACK_UNREPRESENTABLE",
+            "release 1-37 equipment does not store stack; it must match legacyName presence");
+        writer->ok = 0;
+        return;
+    }
+    if (version < 36 && prefix != 0u) {
+        tx_set_error("TERRAX_PLR_LEGACY_ITEM_PREFIX_UNREPRESENTABLE",
+            "release 1-35 does not store item prefixes");
+        writer->ok = 0;
+        return;
     }
     plr_writer_string(writer, legacy_name);
     if (with_stack) plr_writer_i32(writer, stack);
