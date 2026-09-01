@@ -25,6 +25,11 @@ jobs:
       - name: Commit generated implementation and remove construction files
         shell: bash
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_plr.js')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
           rm scripts/apply_plr_full_history.py
           rm .github/workflows/apply-plr-full-history.yml
           git config user.name "github-actions[bot]"
