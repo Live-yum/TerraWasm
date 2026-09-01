@@ -327,7 +327,7 @@ if ($Test) {
     )
     $regressionTests = @($commonTests)
     if ($Features -ne "plr") { $regressionTests += $wldTests }
-    if ($Features -ne "wld") { $regressionTests += "tests/test_plr.js" }
+    if ($Features -ne "wld") { $regressionTests += @("tests/test_plr.js", "tests/test_plr_real_fixture.js") }
 
     Push-Location $ProjectDir
     & node --test @regressionTests 2>&1

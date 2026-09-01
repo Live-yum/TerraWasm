@@ -146,6 +146,20 @@ static uint64_t tx_total_live_bytes(void) {
     return tx_bridge_live_bytes + tx_native_live_bytes + tx_persistent_live_bytes;
 }
 
+/* Bridge pointers originate in JavaScript and must be treated as untrusted, so
+ * bridge validation keeps the existing list walk. Native/persistent pointers
+ * never cross the public ABI: their payload is immediately after the aligned
+ * header, which lets internal free/realloc recover the header in O(1). */
+static TxAllocHeader* tx_root_from_owned_payload(void* payload, uint32_t domain) {
+    if (!payload || domain == TX_DOMAIN_BRIDGE) return NULL;
+    TxAllocHeader* root = (TxAllocHeader*)((uint8_t*)payload - sizeof(TxAllocHeader));
+    if (root->root.magic != TX_ALLOC_MAGIC ||
+        root->root.domain != domain ||
+        root->root.self != (uintptr_t)root ||
+        (uint8_t*)root + sizeof(TxAllocHeader) != (uint8_t*)payload) return NULL;
+    return root;
+}
+
 static TxAllocHeader* tx_find_root(void* payload, uint32_t domain) {
     TxAllocHeader* root = *tx_domain_head(domain);
     while (root) {
@@ -156,6 +170,12 @@ static TxAllocHeader* tx_find_root(void* payload, uint32_t domain) {
         root = root->root.next;
     }
     return NULL;
+}
+
+static TxAllocHeader* tx_lookup_root(void* payload, uint32_t domain) {
+    return domain == TX_DOMAIN_BRIDGE
+        ? tx_find_root(payload, domain)
+        : tx_root_from_owned_payload(payload, domain);
 }
 
 static void tx_append_root(TxAllocHeader* header, uint32_t domain) {
@@ -256,13 +276,13 @@ uint8_t* tx_alloc(uint32_t size) {
 }
 
 void tx_internal_free(void* payload) {
-    tx_release_root(tx_find_root(payload, TX_DOMAIN_NATIVE), TX_DOMAIN_NATIVE);
+    tx_release_root(tx_root_from_owned_payload(payload, TX_DOMAIN_NATIVE), TX_DOMAIN_NATIVE);
 }
 
 static void* tx_internal_realloc_domain(
     void* payload, uint32_t size, uint32_t domain) {
     if (!payload) return tx_new_root(size ? size : 1u, domain);
-    TxAllocHeader* old = tx_find_root(payload, domain);
+    TxAllocHeader* old = tx_lookup_root(payload, domain);
     if (!old) return NULL;
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
@@ -299,7 +319,7 @@ uint8_t* tx_persistent_alloc(uint32_t size) {
 }
 
 void tx_persistent_free(void* payload) {
-    tx_release_root(tx_find_root(payload, TX_DOMAIN_PERSISTENT), TX_DOMAIN_PERSISTENT);
+    tx_release_root(tx_root_from_owned_payload(payload, TX_DOMAIN_PERSISTENT), TX_DOMAIN_PERSISTENT);
 }
 
 void* tx_persistent_realloc(void* payload, uint32_t size) {

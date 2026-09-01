@@ -1,7 +1,9 @@
 /*
  * terra_plr.c -- Pure C17 Terraria .plr reader, editor, and writer.
  *
- * The on-disk payload is the current Terraria 318/319 player format:
+ * The on-disk payload uses Terraria's modern encrypted player layout. The
+ * version field is preserved as data rather than used as a numeric gate:
+ * newer/older versions are accepted when their binary layout still matches.
  * AES-128-CBC with the legacy UTF-16LE h3y_gUyZ key and PKCS#7 padding,
  * followed by a fully semantic player model.  The model is held as a small
  * JSON DOM so the C ABI can provide the same arbitrary RFC 6901 edits as
@@ -33,8 +35,6 @@ extern void tx_set_error(const char *code, const char *message);
  * Supported format and resource limits
  * ------------------------------------------------------------------------- */
 
-#define PLR_MIN_VERSION 318
-#define PLR_MAX_VERSION 319
 #define PLR_PLAYER_FILE_TYPE 3u
 #define PLR_ARMOR_SLOTS 20u
 #define PLR_DYE_SLOTS 10u
@@ -1933,7 +1933,7 @@ static PlrJsonValue *plr_parse_plain(
     const uint8_t *plain, uint32_t plain_length) {
     PlrReader reader = {plain, plain_length, 0u, 1};
     int32_t version = plr_read_i32(&reader);
-    if (!reader.ok || version < PLR_MIN_VERSION || version > PLR_MAX_VERSION) return NULL;
+    if (!reader.ok) return NULL;
 
     uint64_t magic_and_type = plr_read_u64(&reader);
     uint32_t revision = plr_read_u32(&reader);
@@ -2524,11 +2524,8 @@ static int plr_validate_loadouts(const PlrJsonValue *object) {
 
 static int plr_validate_model(const PlrJsonValue *root) {
     if (!root || root->type != PLR_JSON_OBJECT) return plr_model_error("PLR model must be an object");
-    if (!plr_required_i32(root, "version")) return plr_model_error("PLR version is missing or invalid");
-    int32_t version = 0;
-    if (!plr_value_i32(plr_json_object_get(root, "version"), &version) ||
-        version < PLR_MIN_VERSION || version > PLR_MAX_VERSION)
-        return plr_model_error("PLR version must be 318 or 319");
+    if (!plr_required_i32(root, "version"))
+        return plr_model_error("PLR version is missing or invalid");
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -3194,6 +3191,10 @@ typedef struct PlrDocumentSlot {
     PlrJsonValue *root;
     uint8_t *original_encrypted;
     uint32_t original_length;
+    uint8_t *encoded_cache;
+    uint32_t encoded_cache_length;
+    uint8_t *json_cache;
+    uint32_t json_cache_length;
     uint8_t dirty;
 } PlrDocumentSlot;
 
@@ -3220,10 +3221,21 @@ static terrax_world_status plr_invalid_handle(void) {
         "player handle is stale or invalid");
 }
 
+static void plr_invalidate_document_caches(PlrDocumentSlot *document) {
+    if (!document) return;
+    free(document->encoded_cache);
+    document->encoded_cache = NULL;
+    document->encoded_cache_length = 0u;
+    free(document->json_cache);
+    document->json_cache = NULL;
+    document->json_cache_length = 0u;
+}
+
 static void plr_destroy_document(PlrDocumentSlot *document) {
     if (!document) return;
     plr_json_free(document->root);
     free(document->original_encrypted);
+    plr_invalidate_document_caches(document);
     memset(document, 0, sizeof(*document));
 }
 
@@ -3255,6 +3267,7 @@ static terrax_world_status plr_commit_root(
     free(document->original_encrypted);
     document->original_encrypted = NULL;
     document->original_length = 0u;
+    plr_invalidate_document_caches(document);
     document->dirty = 1u;
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
@@ -3264,7 +3277,8 @@ static terrax_world_status plr_parse_error(void) {
     return plr_status_error(
         g_plr_oom ? TERRAX_WORLD_STATUS_INTERNAL_ERROR : TERRAX_WORLD_STATUS_PARSE_ERROR,
         g_plr_oom ? "TERRAX_WASM_OOM" : "TERRAX_PLR_PARSE_ERROR",
-        g_plr_oom ? "out of memory while parsing PLR" : "invalid or unsupported PLR payload");
+        g_plr_oom ? "out of memory while parsing PLR" :
+            "PLR payload is invalid or its version uses an incompatible binary layout");
 }
 
 static terrax_world_status plr_json_error(void) {
@@ -3366,8 +3380,53 @@ static terrax_world_status plr_copy_json_result(
     return TERRAX_WORLD_STATUS_OK;
 }
 
-static uint8_t *plr_encoded_document(
-    const PlrDocumentSlot *document, uint32_t *out_length,
+static terrax_world_status plr_copy_document_json_result(
+    PlrDocumentSlot *document, char *buffer, uint64_t buffer_size,
+    uint32_t *required_size) {
+    if (!document || !document->root || !required_size) {
+        return plr_status_error(
+            TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+            "TERRAX_INVALID_ARGUMENT",
+            "null PLR document or required-size pointer");
+    }
+    if (!document->json_cache) {
+        g_plr_oom = 0;
+        uint32_t length = 0u;
+        uint8_t *json = plr_json_serialize(document->root, &length);
+        if (!json) {
+            return plr_status_error(
+                TERRAX_WORLD_STATUS_INTERNAL_ERROR,
+                "TERRAX_WASM_OOM",
+                "failed to serialize PLR JSON");
+        }
+        document->json_cache = json;
+        document->json_cache_length = length;
+    }
+    uint64_t needed = (uint64_t)document->json_cache_length + 1u;
+    if (needed > UINT32_MAX) {
+        return plr_status_error(
+            TERRAX_WORLD_STATUS_INTERNAL_ERROR,
+            "TERRAX_WASM_OOM",
+            "PLR JSON output exceeds the ABI size limit");
+    }
+    *required_size = (uint32_t)needed;
+    if (!buffer || buffer_size == 0u) {
+        tx_clear_error();
+        return TERRAX_WORLD_STATUS_OK;
+    }
+    if (buffer_size < needed) {
+        return plr_status_error(
+            TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
+            "TERRAX_BUFFER_TOO_SMALL",
+            "PLR JSON output buffer is too small");
+    }
+    memcpy(buffer, document->json_cache, (unsigned long)needed);
+    tx_clear_error();
+    return TERRAX_WORLD_STATUS_OK;
+}
+
+static const uint8_t *plr_encoded_document(
+    PlrDocumentSlot *document, uint32_t *out_length,
     terrax_world_status *out_status) {
     if (out_length) *out_length = 0u;
     if (out_status) *out_status = TERRAX_WORLD_STATUS_OK;
@@ -3377,27 +3436,24 @@ static uint8_t *plr_encoded_document(
             "TERRAX_PLR_STATE_ERROR", "PLR document has no model");
         return NULL;
     }
-    g_plr_oom = 0;
     if (!document->dirty && document->original_encrypted) {
-        uint8_t *copy = (uint8_t *)plr_malloc(document->original_length);
-        if (!copy) {
-            if (out_status) *out_status = plr_status_error(
-                TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM",
-                "failed to allocate PLR output");
-            return NULL;
-        }
-        memcpy(copy, document->original_encrypted, document->original_length);
         if (out_length) *out_length = document->original_length;
-        return copy;
+        return document->original_encrypted;
+    }
+    if (document->encoded_cache) {
+        if (out_length) *out_length = document->encoded_cache_length;
+        return document->encoded_cache;
     }
     g_plr_oom = 0;
     uint32_t plain_length = 0u;
     uint8_t *plain = plr_encode_plain(document->root, &plain_length);
     if (!plain) {
         if (out_status) *out_status = g_plr_oom ?
-            plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM", "out of memory while encoding PLR") :
-            TERRAX_WORLD_STATUS_VALIDATION_ERROR;
-        free(plain);
+            plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM",
+                "out of memory while encoding PLR") :
+            plr_status_error(TERRAX_WORLD_STATUS_VALIDATION_ERROR,
+                "TERRAX_PLR_VALIDATION_ERROR",
+                "PLR model cannot be encoded using the current binary layout");
         return NULL;
     }
     uint32_t encrypted_length = 0u;
@@ -3409,8 +3465,10 @@ static uint8_t *plr_encoded_document(
             "failed to encrypt PLR output");
         return NULL;
     }
+    document->encoded_cache = encrypted;
+    document->encoded_cache_length = encrypted_length;
     if (out_length) *out_length = encrypted_length;
-    return encrypted;
+    return document->encoded_cache;
 }
 
 /* -------------------------------------------------------------------------
@@ -3545,7 +3603,7 @@ terrax_world_status terra_plr_get_json(
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     g_plr_oom = 0;
-    return plr_copy_json_result(document->root, buffer, buffer_size, required_size);
+    return plr_copy_document_json_result(document, buffer, buffer_size, required_size);
 }
 
 terrax_world_status terra_plr_get(
@@ -3735,23 +3793,20 @@ terrax_world_status terra_plr_save_to_buffer(
     *out_required = 0u;
     terrax_world_status status = TERRAX_WORLD_STATUS_OK;
     uint32_t length = 0u;
-    uint8_t *encoded = plr_encoded_document(document, &length, &status);
+    const uint8_t *encoded = plr_encoded_document(document, &length, &status);
     if (!encoded) return status;
     *out_required = length;
     if (!output || capacity == 0u) {
-        free(encoded);
         tx_clear_error();
         return TERRAX_WORLD_STATUS_OK;
     }
     if (capacity < length) {
-        free(encoded);
         return plr_status_error(
             TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
             "TERRAX_BUFFER_TOO_SMALL",
             "PLR output buffer is too small");
     }
     memcpy(output, encoded, length);
-    free(encoded);
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
@@ -3776,10 +3831,9 @@ terrax_world_status terra_plr_save(
     }
     terrax_world_status status = TERRAX_WORLD_STATUS_OK;
     uint32_t length = 0u;
-    uint8_t *encoded = plr_encoded_document(document, &length, &status);
+    const uint8_t *encoded = plr_encoded_document(document, &length, &status);
     if (!encoded) return status;
     int ok = plr_write_file(path_utf8, encoded, length);
-    free(encoded);
     if (!ok) return plr_status_error(
         TERRAX_WORLD_STATUS_IO_ERROR,
         "TERRAX_IO_ERROR",

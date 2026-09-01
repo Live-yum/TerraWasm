@@ -1,0 +1,55 @@
+name: Debug real PLR fixture
+
+on:
+  push:
+    branches:
+      - fix/plr-real-fixtures-and-performance
+    paths:
+      - .github/workflows/debug-real-plr.yml
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Decrypt and inspect real player prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY=6800330079005f006700550079005a00
+          openssl enc -d -aes-128-cbc -K "$KEY" -iv "$KEY" \
+            -in 'tests/files/烟花.plr' -out /tmp/real-player.bin
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+
+          data = Path('/tmp/real-player.bin').read_bytes()
+          print('plain_length=', len(data))
+          print('prefix_hex=', data[:256].hex())
+          version = struct.unpack_from('<i', data, 0)[0]
+          magic_and_type = struct.unpack_from('<Q', data, 4)[0]
+          revision = struct.unpack_from('<I', data, 12)[0]
+          favorite_flags = struct.unpack_from('<Q', data, 16)[0]
+          print('version=', version)
+          print('magic_and_type=', hex(magic_and_type))
+          print('revision=', revision)
+          print('favorite_flags=', favorite_flags)
+
+          pos = 24
+          shift = 0
+          length = 0
+          while True:
+              b = data[pos]
+              pos += 1
+              length |= (b & 0x7f) << shift
+              if not (b & 0x80):
+                  break
+              shift += 7
+          name = data[pos:pos+length].decode('utf-8')
+          pos += length
+          print('name=', repr(name))
+          print('body_offset_after_name=', pos)
+          print('body_next_128_hex=', data[pos:pos+128].hex())
+          PY
