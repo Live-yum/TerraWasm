@@ -26,8 +26,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-# Include headers from include/ directory
 include_directories(${INC_DIR})
 
 set(COMMON_SOURCES
@@ -54,13 +52,10 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
 )
-set(PLR_SOURCES
-    "${SRC_DIR}/terra_plr.c"
-)
+set(PLR_SOURCES "${SRC_DIR}/terra_plr.c")
 set(SOURCES ${COMMON_SOURCES})
 if(TERRAWASM_ENABLE_WLD)
     list(APPEND SOURCES ${WLD_SOURCES})
-    # Keep the established decoder internal and expose only the guarded entry point.
     set_source_files_properties(
         "${SRC_DIR}/terra_wld.c"
         PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
@@ -140,9 +135,6 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
-    # Header/format and player patching are cold administrative paths. Keep
-    # the global release profile at -O3, but size-optimize enabled schema-heavy
-    # encoders so each feature set remains inside the Mini Program budget.
     if(TERRAWASM_ENABLE_WLD)
         set_source_files_properties(
             "${SRC_DIR}/terra_mutators.c"
@@ -182,14 +174,8 @@ if(EMSCRIPTEN)
         file(WRITE "${output_file}" "[${export_json_body}]")
     endfunction()
 
-    write_exports_json(
-        "${NODE_EXPORTS_FILE}"
-        "${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
-    )
-    write_exports_json(
-        "${WEB_EXPORTS_FILE}"
-        "${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
-    )
+    write_exports_json("${NODE_EXPORTS_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json")
+    write_exports_json("${WEB_EXPORTS_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json")
 
     set(COMMON_COMPILE_OPTIONS
         "${TERRAX_OPTIMIZE_FLAG}"
@@ -202,7 +188,6 @@ if(EMSCRIPTEN)
     endif()
     list(APPEND COMMON_LINK_OPTIONS
         "-sALLOW_MEMORY_GROWTH=1"
-        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
         "-sMODULARIZE=1"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
@@ -221,6 +206,7 @@ if(EMSCRIPTEN)
 
     set(NODE_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
+        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
         "-sINITIAL_MEMORY=${TERRAX_NODE_INITIAL_MEMORY}"
         "-sMAXIMUM_MEMORY=${TERRAX_NODE_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasm'"
@@ -230,6 +216,7 @@ if(EMSCRIPTEN)
     )
     set(WEB_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
+        "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']"
         "-sINITIAL_MEMORY=${TERRAX_WEB_INITIAL_MEMORY}"
         "-sMAXIMUM_MEMORY=${TERRAX_WEB_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
@@ -246,7 +233,6 @@ if(EMSCRIPTEN)
     string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_IDENTITY_FLAGS})
     string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_IDENTITY_FLAGS})
 
-    # ---- Node target ----
     add_executable(terrax_world_wasm ${SOURCES})
     configure_terra_identity(
         terrax_world_wasm "node"
@@ -260,8 +246,6 @@ if(EMSCRIPTEN)
         ${NODE_LINK_OPTIONS}
     )
 
-    # ---- Web/MiniProgram target ----
-    # 注意：不要用 SINGLE_FILE，小程序 WXWebAssembly.instantiate 只接受 .wasm 文件路径
     add_executable(terrax_world_wasm_web ${SOURCES})
     configure_terra_identity(
         terrax_world_wasm_web "web"
@@ -277,8 +261,6 @@ if(EMSCRIPTEN)
 else()
     set(NATIVE_SOURCES ${SOURCES})
     if(TERRAWASM_ENABLE_WLD)
-        # Native LP64 zlib uses wider total counters than the legacy WASM-shaped
-        # declaration in terra_txci.c. Compile native TXCI through the bridge.
         set_source_files_properties(
             "${SRC_DIR}/terra_txci.c"
             PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
@@ -340,18 +322,13 @@ else()
         endif()
 
         if(TERRAWASM_ENABLE_PLR)
-            # Generate an encrypted PLR from semantic JSON so standalone CI
-            # always exercises parsing, editing, encryption, and allocator isolation.
             set(TERRAWASM_PLR_JSON_FIXTURE_PATH
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-player.json"
                 CACHE FILEPATH "Semantic JSON fixture used by the native PLR contract")
             if(NOT EXISTS "${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
-                message(FATAL_ERROR
-                    "Native PLR contract fixture is missing: ${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
+                message(FATAL_ERROR "Native PLR contract fixture is missing: ${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
             endif()
-            file(TO_CMAKE_PATH
-                "${TERRAWASM_PLR_JSON_FIXTURE_PATH}"
-                TERRAWASM_PLR_JSON_FIXTURE_DEFINE)
+            file(TO_CMAKE_PATH "${TERRAWASM_PLR_JSON_FIXTURE_PATH}" TERRAWASM_PLR_JSON_FIXTURE_DEFINE)
             add_terra_contract(terra_plr_contract tests/plr_contract.c)
             target_compile_definitions(terra_plr_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
@@ -361,12 +338,9 @@ else()
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/烟花.plr"
                 CACHE FILEPATH "Real Terraria PLR fixture used by native compatibility tests")
             if(NOT EXISTS "${TERRAWASM_PLR_REAL_FIXTURE_PATH}")
-                message(FATAL_ERROR
-                    "Real PLR compatibility fixture is missing: ${TERRAWASM_PLR_REAL_FIXTURE_PATH}")
+                message(FATAL_ERROR "Real PLR compatibility fixture is missing: ${TERRAWASM_PLR_REAL_FIXTURE_PATH}")
             endif()
-            file(TO_CMAKE_PATH
-                "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
-                TERRAWASM_PLR_REAL_FIXTURE_DEFINE)
+            file(TO_CMAKE_PATH "${TERRAWASM_PLR_REAL_FIXTURE_PATH}" TERRAWASM_PLR_REAL_FIXTURE_DEFINE)
             add_terra_contract(terra_plr_real_fixture_contract tests/plr_real_fixture_contract.c)
             target_compile_definitions(terra_plr_real_fixture_contract PRIVATE
                 TERRAWASM_PLR_REAL_FIXTURE_PATH="${TERRAWASM_PLR_REAL_FIXTURE_DEFINE}"
