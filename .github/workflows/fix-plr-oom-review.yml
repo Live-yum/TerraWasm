@@ -25,16 +25,18 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('src/terra_plr.c')
           s = p.read_text(encoding='utf-8')
-          old = '''    if (!plr_version_has_temporary_slots(version)) {
-              for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++)
-                  if (!plr_json_array_push(temporary, plr_json_null())) {
-                      plr_json_free(temporary); plr_json_free(root); return NULL;
-                  }
-          }
-          '''
-          new = '''    if (!plr_version_has_temporary_slots(version)) {
+          pattern = re.compile(
+              r'    if \(!plr_version_has_temporary_slots\(version\)\) \{\n'
+              r'        for \(uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i\+\+\)\n'
+              r'            if \(!plr_json_array_push\(temporary, plr_json_null\(\)\)\) \{\n'
+              r'                plr_json_free\(temporary\); plr_json_free\(root\); return NULL;\n'
+              r'            \}\n'
+              r'    \}\n'
+          )
+          replacement = '''    if (!plr_version_has_temporary_slots(version)) {
               for (uint32_t i = 0u; i < PLR_TEMPORARY_SLOTS; i++) {
                   PlrJsonValue *empty_slot = plr_json_null();
                   if (!empty_slot || !plr_json_array_push(temporary, empty_slot)) {
@@ -46,8 +48,9 @@ jobs:
               }
           }
           '''
-          assert s.count(old) == 1
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          s, count = pattern.subn(replacement, s, count=1)
+          assert count == 1, count
+          p.write_text(s, encoding='utf-8')
           PY
       - name: Commit and remove temporary workflow
         shell: bash
