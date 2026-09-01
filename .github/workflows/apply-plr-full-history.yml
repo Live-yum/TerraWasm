@@ -1,0 +1,35 @@
+name: Apply PLR full history
+
+on:
+  push:
+    branches:
+      - fix/plr-full-history-forward-compatible
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[plr-history-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Apply full PLR history support
+        run: python scripts/apply_plr_full_history.py
+      - name: Commit generated implementation and remove construction files
+        shell: bash
+        run: |
+          rm scripts/apply_plr_full_history.py
+          rm .github/workflows/apply-plr-full-history.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: support full PLR history and future-compatible layouts [plr-history-applied]"
+          git push
