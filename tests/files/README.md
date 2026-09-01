@@ -20,6 +20,8 @@ PLR compatibility follows `Terraria/Player.cs` historical `Deserialize` gates in
 - **326 is the latest known layout marker, not a maximum accepted version.** A file declaring 327 or later is attempted using the latest known layout. If the bytes still match, it is accepted; if a new field/layout makes the parse incomplete or misaligned, TerraWasm returns a newer-layout parse error instead of rejecting the version number up front.
 - The real `烟花.plr` fixture remains the external compatibility anchor for release 326. Historical synthetic round trips supplement this fixture but do not replace it.
 
+For releases 1-37, the file stores item names rather than numeric item ids. The semantic model preserves those names in `legacyName`; edits to `itemType`, equipment stack, or pre-36 prefixes that cannot be represented by the historical binary format are rejected instead of being silently ignored.
+
 Important `Player.cs` persistence transitions covered by the implementation include metadata at 135, numeric items at 38, inventory/bank expansion at 58, armor/dye slot expansions, misc equipment at 117/136, creative tracker/powers at 218/220, temporary slots at 214, super cart at 253, loadouts at 262, voice data at 280/281, team at 283, pending refunds at 300, dialogues at 310, equipment favorites at 322, and the reserved byte at 324.
 
 For WLD V2, TerraWasm keeps its existing WLD compatibility rules independently; this PLR policy does not change WLD version handling.
