@@ -1,0 +1,34 @@
+name: Apply source format alignment
+
+on:
+  push:
+    branches:
+      - fix/source-aligned-wld-plr-formats
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/source-aligned-wld-plr-formats
+          lfs: true
+          fetch-depth: 0
+      - name: Apply source-aligned format changes
+        run: python3 scripts/apply_source_format_alignment.py
+      - name: Remove one-shot transform files
+        run: |
+          rm scripts/apply_source_format_alignment.py
+          rm .github/workflows/apply-source-format-alignment.yml
+      - name: Commit source-aligned implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: align WLD and PLR versions with Terraria source"
+          git push origin HEAD:fix/source-aligned-wld-plr-formats
