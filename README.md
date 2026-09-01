@@ -19,9 +19,10 @@ TerraWasm/
 │   ├── terra_types.h       # 核心类型定义（TxTile, TxWorld 等）
 │   ├── terra_world.h       # V2 API 公开头文件
 │   ├── terra_txci.h        # TXCI v3 色彩索引 API
+│   ├── terra_plr.h         # 加密 Terraria 玩家文件 ABI
 │   └── terra_color_data.h  # 内置方块/墙壁颜色数据
 ├── src/                    # C 源文件
-│   ├── terra_mem.c         # 桥接/原生双域跟踪分配器
+│   ├── terra_mem.c         # bridge/native/persistent 三域跟踪分配器
 │   ├── terra_json.c        # 手写 JSON 解析/构建
 │   ├── terra_wld.c         # WLD 二进制解析（~2090 行）
 │   ├── terra_api.c         # V2 API 实现
@@ -31,7 +32,8 @@ TerraWasm/
 │   ├── terra_map.c         # .map 文件生成（64x64 分块）
 │   ├── terra_update.c      # 流式方块修改
 │   ├── terra_txci.c        # TXCI v3 色彩索引加载器
-│   └── terra_pixel_art.c   # 像素画映射实现
+│   ├── terra_pixel_art.c   # 像素画映射实现
+│   └── terra_plr.c         # .plr AES-CBC、JSON DOM 与编辑实现
 ├── scripts/                # 构建/数据脚本
 │   ├── terrax_color_index_v3_builder.py  # TXCI 生成器
 │   ├── build_txci.py       # TXCI 构建流水线
@@ -81,6 +83,8 @@ python scripts/build_txci.py
 - `build/terrax_world_wasm_web.js` + `.wasm`（Web/MiniProgram 目标，64 MiB 初始内存，160 MiB 最大内存）
 
 内存参数以 `CMakeLists.txt` 中的 `TERRAX_*_INITIAL_MEMORY` / `TERRAX_*_MAXIMUM_MEMORY` 为配置真值；实际发布产物再由 `build/terra.manifest.json` 记录并由 CI 校验。README 仅用于说明，不应作为独立的内存配置来源。
+
+`.plr` 文档使用独立的 persistent 分配域；调用 `tx_reset_heap` 或回收 WLD transient/native 根不会使打开的玩家句柄失效。调用方仍须在完成后关闭每个 `terra_plr_*`/`terra_player_*` 句柄。
 
 编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、Node/Web 导出集合与导出哈希、公共与目标专属构建 flags、内存预算，以及每个交付产物的 byte size 和 SHA-256。构建不会自动修改其他仓库。
 
@@ -136,6 +140,26 @@ node tests/test_mark_tiles_map.js    # 地图标记（13 项）
 ```
 
 ## API 使用
+
+### 加密玩家文件 `.plr`
+
+PLR 使用 Terraria 318/319 的 AES-128-CBC + PKCS#7 格式，密钥/IV 为 UTF-16LE `h3y_gUyZ`。`terra_plr_*` 是主命名空间，`terra_player_*` 是兼容 TerraR 的别名。JSON 结果使用 UTF-8；JSON 查询遵循 RFC 6901，例如 `/inventory/0/stack`。
+
+```c
+uint32_t handle = 0;
+uint32_t required = 0;
+terra_plr_open("TerraR/players/yanhua.plr", &handle);
+terra_plr_get_json(handle, NULL, 0, &required);  /* size probe */
+uint32_t json_ptr = tx_malloc(required);         /* bridge allocation */
+char *json = (char *)(uintptr_t)json_ptr;
+terra_plr_get_json(handle, json, required, &required);
+terra_plr_set(handle, "/name", "\"edited\"");
+terra_plr_save(handle, "edited.plr");
+tx_free(json_ptr);
+terra_plr_close(handle);
+```
+
+`terra_plr_get_json`/`terra_plr_get` 的 `required_size` 是 `uint32_t*`，并包含 JSON 结尾的 NUL；`terra_plr_save_to_buffer`/`terra_plr_encode` 同样支持 NULL/0 size probe。结构化补丁通过 `terra_plr_apply_patch_json` 提供 `fields`、`items`、`buffs` 和 `loadoutSlots`，批量 JSON Pointer 编辑通过 `terra_plr_set_many` 原子提交。
 
 ### 像素画映射
 

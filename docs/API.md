@@ -19,6 +19,7 @@ TerraWasm 是一个将 Terraria 世界文件（`.wld`）解析、编辑、渲染
 11. [Two-Call 模式](#two-call-模式)
 12. [错误处理](#错误处理)
 13. [使用示例（Node.js）](#使用示例nodejs)
+14. [加密玩家文件 API](#加密玩家文件-api)
 
 ---
 
@@ -29,9 +30,9 @@ TerraWasm 是一个将 Terraria 世界文件（`.wld`）解析、编辑、渲染
 │  JS / Web / 小程序 宿主                              │
 │    ↓ ccall / cwrap / 直接函数调用                    │
 ├─────────────────────────────────────────────────────┤
-│  V2 API  (terra_world.h)                            │
+│  V2 API  (terra_world.h / terra_plr.h)              │
 │    terra_world_open / create / close / save          │
-│    terra_info_*                                      │
+│    terra_info_* / terra_plr_*                        │
 │    terra_section_get_json / set_json                 │
 │    terra_op_execute_json                             │
 │    terra_op_get_preview_rgba / get_thumbnail_png     │
@@ -48,7 +49,7 @@ TerraWasm 是一个将 Terraria 世界文件（`.wld`）解析、编辑、渲染
 ```
 
 **设计特点：**
-- **双域跟踪分配**：bridge allocation 由调用者逐个 `tx_free`；native root 可逐个释放或按 sequence mark 回收
+- **三域跟踪分配**：bridge allocation 由调用者逐个 `tx_free`；native root 可逐个释放或按 sequence mark 回收；PLR DOM 使用独立 persistent 根
 - **手写 libc**：`memset`/`memcpy`/`strlen`/`strcmp` 全部手写，无 libc 依赖
 - **手写 JSON**：builder + parser 约 337 行 C，无外部 JSON 库
 - **手写 PNG/zlib**：Fixed-Huffman deflate + LZ77 + CRC32，约 350 行
@@ -257,6 +258,60 @@ terrax_world_status terra_world_save(
 3. 写入目标路径
 
 **返回：** `OK` 成功，`IO_ERROR` 写入失败
+
+---
+
+## 加密玩家文件 API
+
+`terra_plr_*` 提供 Terraria 318/319 加密 `.plr` 的读写和语义编辑；`terra_player_*` 是同签名的兼容别名。文件使用 AES-128-CBC/PKCS#7，密钥和 IV 均为 UTF-16LE `h3y_gUyZ`。二进制输入经过严格的 metadata magic/type、版本、长度和尾部校验。
+
+### 打开、保存和关闭
+
+```c
+terrax_world_status terra_plr_open_from_buffer(
+    const uint8_t* buffer, uint32_t buffer_len, uint32_t* out_handle);
+terrax_world_status terra_plr_open(
+    const char* path_utf8, uint32_t* out_handle);
+terrax_world_status terra_plr_open_json(
+    const char* json_utf8, uint32_t* out_handle);
+terrax_world_status terra_plr_close(uint32_t handle);
+terrax_world_status terra_plr_save(
+    uint32_t handle, const char* path_utf8);
+terrax_world_status terra_plr_save_to_buffer(
+    uint32_t handle, uint8_t* output, uint32_t capacity,
+    uint32_t* out_required);
+```
+
+`terra_plr_save_to_buffer`/`terra_plr_encode` 支持 `output=NULL, capacity=0` 的 size probe。PLR 句柄使用独立 persistent 分配域；`tx_rewind`、`tx_reset_heap` 或 transient 回收不会释放活动玩家文档，调用方必须显式 `terra_plr_close`。
+
+### JSON 查询和编辑
+
+```c
+terrax_world_status terra_plr_get_json(
+    uint32_t handle, char* buffer, uint64_t buffer_size,
+    uint32_t* required_size);
+terrax_world_status terra_plr_get(
+    uint32_t handle, const char* pointer_utf8, char* buffer,
+    uint64_t buffer_size, uint32_t* required_size);
+terrax_world_status terra_plr_set(
+    uint32_t handle, const char* pointer_utf8,
+    const char* value_json_utf8);
+terrax_world_status terra_plr_set_many(
+    uint32_t handle, const char* edits_json_utf8);
+terrax_world_status terra_plr_apply_patch_json(
+    uint32_t handle, const char* patch_json_utf8);
+```
+
+JSON 为 UTF-8、无 BOM；`get_json`/`get` 的 `required_size` 是 `uint32_t*`，包含末尾 NUL。查询路径是 RFC 6901 JSON Pointer，例如 `/name`、`/inventory/0/stack`、`/loadouts/1/armor/3/prefix`；字段名中的 `~` 和 `/` 必须分别写成 `~0` 和 `~1`。`set_many` 先克隆模型，任一指针或模型验证失败时不会提交部分修改。
+
+结构化 patch 的顶层成员为：
+
+- `fields`：按顶层 camelCase（也接受 snake_case）字段替换 JSON 值；
+- `items`：`section`、`index`、`itemType`，以及可选 `stack`、`prefix`、`favorited`；
+- `buffs`：`index`、`buffType`、`buffTime`；
+- `loadoutSlots`：`loadoutIndex`、`slotKind`、`slotIndex`，其中 Armor/Dye 的 `itemType`、`stack`、`prefix` 和 Hide 的 `hide` 可为 JSON `null`，分别使用 `0`、`1`、`0`、`false` 默认值。
+
+错误时使用 `TERRAX_PLR_PARSE_ERROR`、`TERRAX_PLR_JSON_ERROR`、`TERRAX_PLR_VALIDATION_ERROR`、`TERRAX_INVALID_HANDLE` 或 `TERRAX_WASM_OOM` 等结构化 code；原文错误仍通过 `terra_info_get_last_error_json` 查询。
 
 ---
 
