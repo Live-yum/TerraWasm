@@ -52,9 +52,11 @@ jobs:
           version=i32(); u64(); u32(); u64(); name=s('name')
           def item(kind='full',fav=False,label='item'):
             t=i32(label+'.type')
+            if kind=='equip-modern':
+              pref=u8(label+'.prefix'); extra=u8(label+'.modernExtra')
+              return t,0,pref,extra
             if kind=='equip':
-              pref=u8(label+'.prefix'); extra=u8(label+'.v326extra') if version>=326 else 0
-              return t,0,pref,bool(extra)
+              pref=u8(label+'.prefix'); return t,0,pref,0
             st=i32(label+'.stack'); pref=u8(label+'.prefix'); f=bool(u8(label+'.fav')) if fav else False
             return t,st,pref,f
           def arr(n,**kw): return [item(label=f'i{i}',**kw) for i in range(n)]
@@ -62,10 +64,11 @@ jobs:
           difficulty=u8(); play=i64(); hair=i32(); hairdye=u8(); team=u8(); hide=(u8(),u8()); hidemisc=u8(); skin=u8(); stats=[i32() for _ in range(4)]
           legacy=[u8() for _ in range(11)]; newflag=u8('newflag'); tax=i32(); pve=i32(); pvp=i32(); colors=[tuple(u8() for _ in range(3)) for _ in range(7)]
           print('prefix',version,name,stats,legacy,newflag,tax,pve,pvp,colors); mark('prefix-end')
-          armor=arr(20,kind='equip'); dyes=arr(10,kind='equip'); inv=arr(58,fav=True)
+          armor=arr(20,kind='equip-modern'); dyes=arr(10,kind='equip-modern'); inv=arr(58,fav=True)
           misc=[]
-          for i in range(5): misc.append((item(kind='equip'),item(kind='equip')))
+          for i in range(5): misc.append((item(kind='equip',label=f'miscEquip{i}'),item(kind='equip',label=f'miscDye{i}')))
           pig=arr(40); safe=arr(40); forge=arr(40); vault=arr(40,fav=True); vi=u8(); buffs=[(i32(),i32()) for _ in range(44)]
+          print('armorExtras',[x[3] for x in armor]); print('dyeExtras',[x[3] for x in dyes])
           print('items sample',armor[:5],dyes[:2],inv[:3],misc[:2],pig[:2],vault[:2],vi,buffs[:3]); mark('buff-end')
           sp=[]
           for _ in range(201):
