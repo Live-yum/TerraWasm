@@ -6,6 +6,21 @@ option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
 option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
 
+set(TERRAWASM_FEATURE_SET "all" CACHE STRING "Compiled capability set: all, wld, or plr")
+set_property(CACHE TERRAWASM_FEATURE_SET PROPERTY STRINGS all wld plr)
+string(TOLOWER "${TERRAWASM_FEATURE_SET}" TERRAWASM_FEATURE_SET)
+if(NOT TERRAWASM_FEATURE_SET MATCHES "^(all|wld|plr)$")
+    message(FATAL_ERROR "TERRAWASM_FEATURE_SET must be one of: all, wld, plr")
+endif()
+set(TERRAWASM_ENABLE_WLD OFF)
+set(TERRAWASM_ENABLE_PLR OFF)
+if(TERRAWASM_FEATURE_SET STREQUAL "all" OR TERRAWASM_FEATURE_SET STREQUAL "wld")
+    set(TERRAWASM_ENABLE_WLD ON)
+endif()
+if(TERRAWASM_FEATURE_SET STREQUAL "all" OR TERRAWASM_FEATURE_SET STREQUAL "plr")
+    set(TERRAWASM_ENABLE_PLR ON)
+endif()
+
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -15,12 +30,14 @@ set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # Include headers from include/ directory
 include_directories(${INC_DIR})
 
-set(SOURCES
+set(COMMON_SOURCES
     "${SRC_DIR}/terra_abi.c"
     "${SRC_DIR}/terra_reader.c"
+    "${SRC_DIR}/terra_mem.c"
+)
+set(WLD_SOURCES
     "${SRC_DIR}/terra_commands.c"
     "${SRC_DIR}/terra_task.c"
-    "${SRC_DIR}/terra_mem.c"
     "${SRC_DIR}/terra_json.c"
     "${SRC_DIR}/terra_wld.c"
     "${SRC_DIR}/terra_wld_guard.c"
@@ -36,14 +53,22 @@ set(SOURCES
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
+)
+set(PLR_SOURCES
     "${SRC_DIR}/terra_plr.c"
 )
-
-# Keep the established decoder internal and expose only the guarded entry point.
-set_source_files_properties(
-    "${SRC_DIR}/terra_wld.c"
-    PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
-)
+set(SOURCES ${COMMON_SOURCES})
+if(TERRAWASM_ENABLE_WLD)
+    list(APPEND SOURCES ${WLD_SOURCES})
+    # Keep the established decoder internal and expose only the guarded entry point.
+    set_source_files_properties(
+        "${SRC_DIR}/terra_wld.c"
+        PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
+    )
+endif()
+if(TERRAWASM_ENABLE_PLR)
+    list(APPEND SOURCES ${PLR_SOURCES})
+endif()
 
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
 set(TERRAX_BUILD_DIRTY "false" CACHE STRING "Dirty state embedded in ABI identity")
@@ -108,21 +133,39 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
         TERRAX_MAXIMUM_MEMORY=${maximum_memory}
         TERRAX_BUILD_COMMON_FLAGS_TEXT="${common_flags_text}"
         TERRAX_BUILD_TARGET_FLAGS_TEXT="${target_flags_text}"
+        TERRAWASM_FEATURE_SET="${TERRAWASM_FEATURE_SET}"
+        TERRAWASM_FEATURE_WLD=$<BOOL:${TERRAWASM_ENABLE_WLD}>
+        TERRAWASM_FEATURE_PLR=$<BOOL:${TERRAWASM_ENABLE_PLR}>
     )
 endfunction()
 
 if(EMSCRIPTEN)
     # Header/format and player patching are cold administrative paths. Keep
-    # the global release profile at -O3, but size-optimize these schema-heavy
-    # encoders so the Web artifact remains inside the Mini Program budget.
-    set_source_files_properties(
-        "${SRC_DIR}/terra_mutators.c"
-        "${SRC_DIR}/terra_plr.c"
-        PROPERTIES COMPILE_OPTIONS "-Oz"
-    )
+    # the global release profile at -O3, but size-optimize enabled schema-heavy
+    # encoders so each feature set remains inside the Mini Program budget.
+    if(TERRAWASM_ENABLE_WLD)
+        set_source_files_properties(
+            "${SRC_DIR}/terra_mutators.c"
+            PROPERTIES COMPILE_OPTIONS "-Oz"
+        )
+    endif()
+    if(TERRAWASM_ENABLE_PLR)
+        set_source_files_properties(
+            "${SRC_DIR}/terra_plr.c"
+            PROPERTIES COMPILE_OPTIONS "-Oz"
+        )
+    endif()
 
-    set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
-    set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.web.txt")
+    if(TERRAWASM_FEATURE_SET STREQUAL "all")
+        set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
+        set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.web.txt")
+    elseif(TERRAWASM_FEATURE_SET STREQUAL "wld")
+        set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.wld.txt")
+        set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.wld.web.txt")
+    else()
+        set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.plr.txt")
+        set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.plr.txt")
+    endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${NODE_EXPORTS_FILE}"
         "${WEB_EXPORTS_FILE}"
@@ -153,8 +196,11 @@ if(EMSCRIPTEN)
         -fno-exceptions
         -fno-rtti
     )
-    set(COMMON_LINK_OPTIONS
-        "-sUSE_ZLIB=1"
+    set(COMMON_LINK_OPTIONS)
+    if(TERRAWASM_ENABLE_WLD)
+        list(APPEND COMMON_LINK_OPTIONS "-sUSE_ZLIB=1")
+    endif()
+    list(APPEND COMMON_LINK_OPTIONS
         "-sALLOW_MEMORY_GROWTH=1"
         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
         "-sMODULARIZE=1"
@@ -229,141 +275,87 @@ if(EMSCRIPTEN)
         ${WEB_LINK_OPTIONS}
     )
 else()
-    # Native LP64 zlib uses wider total counters than the legacy WASM-shaped
-    # declaration in terra_txci.c. Compile only native TXCI calls through the
-    # translating bridge; Emscripten keeps its established USE_ZLIB path.
-    set_source_files_properties(
-        "${SRC_DIR}/terra_txci.c"
-        PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
-    )
-    add_library(terrax_world_static STATIC
-        ${SOURCES}
-        "${SRC_DIR}/terra_zlib_bridge.c"
-    )
+    set(NATIVE_SOURCES ${SOURCES})
+    if(TERRAWASM_ENABLE_WLD)
+        # Native LP64 zlib uses wider total counters than the legacy WASM-shaped
+        # declaration in terra_txci.c. Compile native TXCI through the bridge.
+        set_source_files_properties(
+            "${SRC_DIR}/terra_txci.c"
+            PROPERTIES COMPILE_DEFINITIONS "inflateInit2_=terra_inflateInit2_;inflate=terra_inflate;inflateEnd=terra_inflateEnd"
+        )
+        list(APPEND NATIVE_SOURCES "${SRC_DIR}/terra_zlib_bridge.c")
+    endif()
+
+    add_library(terrax_world_static STATIC ${NATIVE_SOURCES})
     configure_terra_identity(terrax_world_static "native" 0 0 "" "")
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
     if(TERRAWASM_SANITIZERS)
         target_compile_options(terrax_world_static PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(terrax_world_static PRIVATE -fsanitize=address,undefined)
     endif()
+
     if(TERRAWASM_NATIVE_TESTS)
-        find_package(ZLIB REQUIRED)
         target_compile_definitions(terrax_world_static PRIVATE TERRAX_TESTING)
-        add_executable(terra_native_contract tests/native_contract.c)
-        target_link_libraries(terra_native_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_native_contract PRIVATE
-            TERRAX_STATIC
-            TERRAX_TESTING
-            TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        )
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_native_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_native_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_native_contract COMMAND terra_native_contract)
 
-        # Keep the PLR contract self-contained so standalone checkouts and CI
-        # always exercise encryption, parsing, edits, and allocator isolation.
-        set(TERRAWASM_PLR_JSON_FIXTURE_PATH
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-player.json"
-            CACHE FILEPATH "Semantic JSON fixture used by the native PLR contract")
-        if(NOT EXISTS "${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
-            message(FATAL_ERROR
-                "Native PLR contract fixture is missing: ${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
-        endif()
-        file(TO_CMAKE_PATH
-            "${TERRAWASM_PLR_JSON_FIXTURE_PATH}"
-            TERRAWASM_PLR_JSON_FIXTURE_DEFINE)
-        add_executable(terra_plr_contract tests/plr_contract.c)
-        target_link_libraries(terra_plr_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_plr_contract PRIVATE
-            TERRAX_STATIC
-            TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
-        )
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_plr_contract PRIVATE
-                -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_plr_contract PRIVATE
-                -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_plr_contract COMMAND terra_plr_contract)
-
-        add_executable(terra_error_json_contract tests/error_json_contract.c)
-        target_link_libraries(terra_error_json_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_error_json_contract PRIVATE TERRAX_STATIC)
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_error_json_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_error_json_contract COMMAND terra_error_json_contract)
-
-        add_executable(terra_zlib_bridge_contract tests/zlib_bridge_contract.c)
-        target_link_libraries(terra_zlib_bridge_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_zlib_bridge_contract PRIVATE TERRAX_STATIC)
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_zlib_bridge_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_zlib_bridge_contract COMMAND terra_zlib_bridge_contract)
-
-        add_executable(terra_json_parser_contract tests/json_parser_contract.c)
-        target_link_libraries(terra_json_parser_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_json_parser_contract PRIVATE TERRAX_STATIC)
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_json_parser_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_json_parser_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_json_parser_contract COMMAND terra_json_parser_contract)
-
-        add_executable(terra_string_section_guard_contract tests/string_section_guard_contract.c)
-        target_link_libraries(terra_string_section_guard_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_string_section_guard_contract PRIVATE TERRAX_STATIC)
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_string_section_guard_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_string_section_guard_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_string_section_guard_contract COMMAND terra_string_section_guard_contract)
-
-        add_executable(terra_marker_color_index_contract tests/marker_color_index_contract.c)
-        target_link_libraries(terra_marker_color_index_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-        target_compile_definitions(terra_marker_color_index_contract PRIVATE TERRAX_STATIC)
-        if(TERRAWASM_SANITIZERS)
-            target_compile_options(terra_marker_color_index_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(terra_marker_color_index_contract PRIVATE -fsanitize=address,undefined)
-        endif()
-        add_test(NAME terra_marker_color_index_contract COMMAND terra_marker_color_index_contract)
-
-        if(TERRAWASM_FUZZ_SMOKE)
-            add_executable(terra_fuzz_smoke
-                tests/fuzz/fuzz_smoke.c
-                tests/fuzz/fuzz_wld_open.c
-                tests/fuzz/fuzz_json.c
-            )
-            target_link_libraries(terra_fuzz_smoke PRIVATE terrax_world_static ZLIB::ZLIB)
-            target_compile_definitions(terra_fuzz_smoke PRIVATE TERRAX_STATIC)
+        function(add_terra_contract target source)
+            add_executable(${target} ${source})
+            target_link_libraries(${target} PRIVATE terrax_world_static ${ARGN})
+            target_compile_definitions(${target} PRIVATE TERRAX_STATIC)
+            target_compile_options(${target} PRIVATE -UNDEBUG)
             if(TERRAWASM_SANITIZERS)
-                target_compile_options(terra_fuzz_smoke PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-                target_link_options(terra_fuzz_smoke PRIVATE -fsanitize=address,undefined)
+                target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(${target} PRIVATE -fsanitize=address,undefined)
             endif()
-            add_test(NAME terra_fuzz_smoke COMMAND terra_fuzz_smoke)
+            add_test(NAME ${target} COMMAND ${target})
+        endfunction()
+
+        if(TERRAWASM_ENABLE_WLD)
+            find_package(ZLIB REQUIRED)
+            add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)
+            target_compile_definitions(terra_native_contract PRIVATE
+                TERRAX_TESTING
+                TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+            )
+            add_terra_contract(terra_error_json_contract tests/error_json_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_zlib_bridge_contract tests/zlib_bridge_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_json_parser_contract tests/json_parser_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_string_section_guard_contract tests/string_section_guard_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
+
+            if(TERRAWASM_FUZZ_SMOKE)
+                add_executable(terra_fuzz_smoke
+                    tests/fuzz/fuzz_smoke.c
+                    tests/fuzz/fuzz_wld_open.c
+                    tests/fuzz/fuzz_json.c
+                )
+                target_link_libraries(terra_fuzz_smoke PRIVATE terrax_world_static ZLIB::ZLIB)
+                target_compile_definitions(terra_fuzz_smoke PRIVATE TERRAX_STATIC)
+                target_compile_options(terra_fuzz_smoke PRIVATE -UNDEBUG)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_fuzz_smoke PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_fuzz_smoke PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_test(NAME terra_fuzz_smoke COMMAND terra_fuzz_smoke)
+            endif()
         endif()
 
-        # Release and RelWithDebInfo define NDEBUG by default. Native
-        # contracts intentionally use assert for side-effect-free
-        # invariants, so force assertions on for every test target.
-        foreach(TERRAWASM_CONTRACT_TARGET IN ITEMS
-            terra_native_contract
-            terra_plr_contract
-            terra_error_json_contract
-            terra_zlib_bridge_contract
-            terra_json_parser_contract
-            terra_string_section_guard_contract
-            terra_marker_color_index_contract
-            terra_fuzz_smoke
-        )
-            if(TARGET ${TERRAWASM_CONTRACT_TARGET})
-                target_compile_options(${TERRAWASM_CONTRACT_TARGET} PRIVATE -UNDEBUG)
+        if(TERRAWASM_ENABLE_PLR)
+            # Generate an encrypted PLR from semantic JSON so standalone CI
+            # always exercises parsing, editing, encryption, and allocator isolation.
+            set(TERRAWASM_PLR_JSON_FIXTURE_PATH
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-player.json"
+                CACHE FILEPATH "Semantic JSON fixture used by the native PLR contract")
+            if(NOT EXISTS "${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
+                message(FATAL_ERROR
+                    "Native PLR contract fixture is missing: ${TERRAWASM_PLR_JSON_FIXTURE_PATH}")
             endif()
-        endforeach()
+            file(TO_CMAKE_PATH
+                "${TERRAWASM_PLR_JSON_FIXTURE_PATH}"
+                TERRAWASM_PLR_JSON_FIXTURE_DEFINE)
+            add_terra_contract(terra_plr_contract tests/plr_contract.c)
+            target_compile_definitions(terra_plr_contract PRIVATE
+                TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
+            )
+        endif()
     endif()
 endif()

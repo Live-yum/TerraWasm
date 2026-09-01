@@ -79,3 +79,15 @@ test("artifact paths are repository-relative on every host platform", () => {
 test("the documented PowerShell size profile binds -Oz as a value", () => {
   assert.match(readme, /-OptimizeFlag\s+'-Oz'\s+-EnableLto/);
 });
+
+test("all, WLD-only, and PLR-only builds have independent sources and export boundaries", () => {
+  assert.match(buildScript, /ValidateSet\("all",\s*"wld",\s*"plr"\)/);
+  assert.match(buildScript, /TERRAWASM_FEATURE_SET=\$Features/);
+  assert.match(cmake, /set\(TERRAWASM_FEATURE_SET\s+"all"/);
+  assert.match(cmake, /set\(WLD_SOURCES[\s\S]*set\(PLR_SOURCES/);
+  assert.match(cmake, /exports\.wld\.txt/);
+  assert.match(cmake, /exports\.plr\.txt/);
+  assert.match(manifestScript, /--feature-set/);
+  assert.match(manifestScript, /nodeExportsFile/);
+  assert.match(manifestScript, /webExportsFile/);
+});

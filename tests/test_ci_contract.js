@@ -16,12 +16,13 @@ test("CI runs the independent native, sanitizer/fuzz, and pinned Wasm release ga
   assert.match(workflow, /native:\s*\n[\s\S]*TERRAWASM_NATIVE_TESTS=ON[\s\S]*ctest/);
   assert.match(workflow, /sanitizer-and-fuzz:\s*\n[\s\S]*TERRAWASM_SANITIZERS=ON[\s\S]*terra_fuzz_smoke/);
   assert.match(workflow, /EMSCRIPTEN_VERSION: ["']?5\.0\.7["']?/);
-  assert.match(workflow, /wasm-release:\s*\n[\s\S]*build\.ps1[\s\S]*-Target all[\s\S]*-Test/);
+  assert.match(workflow, /wasm-release:\s*\n[\s\S]*build\.ps1[\s\S]*-Target all[\s\S]*-Features all[\s\S]*-Test/);
+  assert.match(workflow, /wasm-feature-matrix:[\s\S]*features:\s*\[wld, plr\][\s\S]*-Features \$env:TERRAWASM_FEATURE_SET/);
   assert.match(workflow, /check-artifact-size\.mjs/);
-  assert.equal((workflow.match(/actions\/checkout@v7/g) || []).length, 3);
-  assert.equal((workflow.match(/\blfs:\s*true/g) || []).length, 3,
+  assert.equal((workflow.match(/actions\/checkout@v7/g) || []).length, 4);
+  assert.equal((workflow.match(/\blfs:\s*true/g) || []).length, 4,
     "every checkout that consumes LFS fixtures must hydrate them");
-  assert.equal((workflow.match(/actions\/setup-node@v7/g) || []).length, 1);
+  assert.equal((workflow.match(/actions\/setup-node@v7/g) || []).length, 2);
   assert.equal((workflow.match(/actions\/upload-artifact@v7/g) || []).length, 1);
   assert.match(workflow, /actions\/checkout@v7[\s\S]*fetch-depth: 0/);
   assert.doesNotMatch(workflow, /TerraX|viewer-app/);
