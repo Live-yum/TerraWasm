@@ -243,20 +243,24 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
   assert.equal(module._tx_heap_used(), baseline);
 });
 
-test("PLR rejects versions newer than Terraria's current release", async () => {
+test("real-layout PLR accepts a newer release when the persisted layout is unchanged", async () => {
   const module = await TerraWorldWasm();
   const baseline = module._tx_heap_used();
-  const model = JSON.parse(fs.readFileSync(MODEL_FIXTURE, "utf8"));
-  model.version = 326;
+  const source = realFixtureBytes();
   let handle = 0;
+  let reopened = 0;
   try {
-    handle = openJson(module, model);
+    handle = openBuffer(module, source);
     assert.equal(getField(module, handle, "/version"), 326);
-    assert.equal(setField(module, handle, "/version", 327), 6,
-      "release 327 must be rejected until Terraria defines that layout");
-    assert.equal(getField(module, handle, "/version"), 326,
-      "failed future-version edit must remain atomic");
+    assert.equal(setField(module, handle, "/version", 327), 0,
+      "release 327 must be accepted when it still matches the latest known layout");
+    const encoded = encode(module, handle, { expectCached: true });
+    reopened = openBuffer(module, encoded);
+    assert.equal(getField(module, reopened, "/version"), 327);
+    assert.equal(getField(module, reopened, "/taxMoney"), 113750);
+    assert.equal(getField(module, reopened, "/voiceVariant"), 2);
   } finally {
+    if (reopened) module._terra_player_close(reopened);
     if (handle) module._terra_player_close(handle);
   }
   assert.equal(module._tx_heap_used(), baseline);
