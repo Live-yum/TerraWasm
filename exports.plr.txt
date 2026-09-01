@@ -1,6 +1,7 @@
 _terra_abi_version
 _terra_capabilities
 _terra_build_info_json
+_terra_info_get_last_error_json
 _tx_malloc
 _tx_free
 _tx_heap_used

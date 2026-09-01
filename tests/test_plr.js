@@ -384,7 +384,24 @@ function encryptPlr(plain) {
 }
 
 function lastError(module) {
-  return twoCallJson(module, module._terra_info_get_last_error_json, []);
+  assert.equal(typeof module._terra_info_get_last_error_json, "function",
+    "structured last-error ABI must be exported by the selected feature set");
+  const required = module._tx_malloc(8);
+  assert(required, "last-error required-size allocation failed");
+  let output = 0;
+  try {
+    assert.equal(module._terra_info_get_last_error_json(0, 0n, required), 0);
+    const view = new DataView(module.HEAPU8.buffer);
+    const size = Number(view.getBigUint64(required, true));
+    assert(size > 1, "last-error JSON is empty");
+    output = module._tx_malloc(size);
+    assert(output, "last-error output allocation failed");
+    assert.equal(module._terra_info_get_last_error_json(output, BigInt(size), required), 0);
+    return JSON.parse(module.UTF8ToString(output, size));
+  } finally {
+    if (output) module._tx_free(output);
+    module._tx_free(required);
+  }
 }
 
 test("PLR recognizes every historical Terraria release 1-326", async () => {
@@ -473,7 +490,9 @@ test("PLR historical source gates keep old layouts aligned", async () => {
       assert.equal(getField(module, reopened, "/golferScoreAccumulated"), version >= 206 ? 55 : 0);
       assert.equal(getField(module, reopened, "/unlockedSuperCart"), version >= 253);
       assert.equal(getField(module, reopened, "/currentLoadoutIndex"), version >= 262 ? 2 : 0);
-      assert.equal(getField(module, reopened, "/voiceVariant"), version >= 280 ? 3 : 2);
+      const expectedVoiceVariant = version >= 280 ? 3 :
+        (version <= 17 ? ([5, 6, 9, 11].includes(model.hair) ? 2 : 1) : 2);
+      assert.equal(getField(module, reopened, "/voiceVariant"), expectedVoiceVariant);
       assert.equal(getField(module, reopened, "/voicePitchOffset"), version >= 281 ? 0.25 : 0);
       assert.equal(getField(module, reopened, "/pendingRefunds").length, version >= 300 ? 1 : 0);
       assert.equal(getField(module, reopened, "/oneTimeDialoguesSeen").length, version >= 310 ? 1 : 0);

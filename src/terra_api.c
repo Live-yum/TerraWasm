@@ -816,13 +816,6 @@ terrax_world_status terra_world_open_from_buffer(
  * V2 API: Info
  * ==================================================================== */
 
-terrax_world_status terra_info_get_last_error_json(
-    char* buffer,
-    uint64_t buffer_size,
-    uint64_t* required_size) {
-    return write_string_to_caller(tx_last_error, buffer, buffer_size, required_size);
-}
-
 terrax_world_status terra_info_list_sections_json(
     char* buffer,
     uint64_t buffer_size,

@@ -3,6 +3,9 @@
  */
 #include "terra_abi.h"
 
+extern char tx_last_error[256];
+extern uint32_t tx_strlen(const char *s);
+
 #ifndef TERRAX_ABI_VERSION
 #define TERRAX_ABI_VERSION 1
 #endif
@@ -91,4 +94,17 @@ const char* terra_capabilities(void) {
 
 const char* terra_build_info_json(void) {
     return g_build_info_json;
+}
+
+terrax_world_status terra_info_get_last_error_json(
+    char* buffer,
+    uint64_t buffer_size,
+    uint64_t* required_size) {
+    uint32_t len = tx_strlen(tx_last_error);
+    uint64_t needed = (uint64_t)len + 1u;
+    if (required_size) *required_size = needed;
+    if (!buffer || buffer_size == 0u) return TERRAX_WORLD_STATUS_OK;
+    if (buffer_size < needed) return TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL;
+    for (uint32_t i = 0u; i <= len; i++) buffer[i] = tx_last_error[i];
+    return TERRAX_WORLD_STATUS_OK;
 }
