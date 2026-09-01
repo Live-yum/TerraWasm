@@ -32,6 +32,7 @@ The PLR regression suite deliberately combines independent checks rather than re
 - a source-gate boundary matrix verifies both sides of historical layout changes;
 - releases **327** and **400** verify that a newer version with an unchanged 326 layout is accepted;
 - a deliberately extended newer-version payload verifies the dedicated newer-layout parse error;
-- the external `烟花.plr` release-326 fixture verifies real Terraria input, clean byte preservation, semantic editing, re-encoding, and reopen behavior.
+- the external `烟花.plr` release-326 fixture verifies real Terraria input, clean byte preservation, semantic editing, re-encoding, and reopen behavior;
+- `terra_info_get_last_error_json` is part of the common ABI and must be available in **all**, **WLD-only**, and **PLR-only** builds so parse failures expose the same structured error code/message in every feature configuration.
 
 For WLD V2, TerraWasm keeps its existing WLD compatibility rules independently; this PLR policy does not change WLD version handling.
