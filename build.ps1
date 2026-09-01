@@ -51,7 +51,6 @@ if ($Features -ne "plr") {
 }
 $CommonFlags += @(
     "-sALLOW_MEMORY_GROWTH=1",
-    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']",
     "-sMODULARIZE=1",
     "-sERROR_ON_UNDEFINED_SYMBOLS=1",
     "--no-entry"
@@ -61,6 +60,7 @@ if ($EnableLto) {
 }
 $NodeFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']",
     "-sINITIAL_MEMORY=$NodeInitialMemory",
     "-sMAXIMUM_MEMORY=$NodeMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasm'",
@@ -70,6 +70,7 @@ $NodeFlags = @(
 )
 $WebFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
+    "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']",
     "-sINITIAL_MEMORY=$WebInitialMemory",
     "-sMAXIMUM_MEMORY=$WebMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasmWeb'",
@@ -89,7 +90,6 @@ function Add-FlagArgs {
     }
 }
 
-# --- Activate Emscripten ---
 $env:EMSDK_QUIET = 1
 $emsdkEnv = Join-Path $EmsdkDir "emsdk_env.ps1"
 if (-not (Test-Path $emsdkEnv)) {
@@ -101,7 +101,6 @@ Push-Location $EmsdkDir
 & $emsdkEnv 2>$null
 Pop-Location
 
-# Quick mode is safe only when the cached build identity exactly matches this invocation.
 if ($Quick) {
     $cachePath = Join-Path $BuildDir "CMakeCache.txt"
     if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
@@ -125,7 +124,6 @@ if ($Quick) {
     }
 }
 
-# --- Configure (skip in Quick mode) ---
 if (-not $Quick) {
     Write-Host "=== Configuring CMake ===" -ForegroundColor Cyan
     if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
@@ -151,7 +149,6 @@ if (-not $Quick) {
     Pop-Location
 }
 
-# --- Build ---
 function Build-Target {
     param([string]$Name)
     Write-Host "=== Building $Name ===" -ForegroundColor Cyan
@@ -176,23 +173,17 @@ function Build-Target {
     }
 }
 
-# The provenance manifest records both targets, even when the caller only
-# consumes one of them. Always refresh the pair so a clean build never reuses
-# a missing or stale sibling artifact.
 $buildTargets = @("terrax_world_wasm", "terrax_world_wasm_web")
-
 foreach ($t in $buildTargets) {
     Build-Target -Name $t
 }
 
-# Refuse artifacts if the source changed while compilation was in flight.
 $CurrentSourceCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
 $CurrentSourceState = ((& git -C $ProjectDir status --porcelain -- . ':(exclude)build') -join "`n")
 if ($CurrentSourceCommit -ne $SourceCommit -or $CurrentSourceState -ne $SourceState) {
     throw "TerraWasm source changed during build; discard the artifacts and rebuild"
 }
 
-# --- Generate and validate the source/artifact identity manifest ---
 Write-Host "=== Generating artifact manifest ===" -ForegroundColor Cyan
 Push-Location $ProjectDir
 $manifestArgs = [System.Collections.Generic.List[string]]::new()
@@ -241,7 +232,6 @@ if ($Target -ne "node") {
     Pop-Location
 }
 
-# --- Optional explicit deployment ---
 if ($DeployDir) {
     if ($manifest.dirty) {
         throw "DeployDir requires a clean TerraWasm source tree"
@@ -294,7 +284,6 @@ if ($DeployDir) {
     Write-Host "=== Copied to $DeployDir ===" -ForegroundColor Cyan
 }
 
-# --- Test ---
 if ($Test) {
     if ($Target -eq "web") {
         throw "-Test requires the node or all target"
