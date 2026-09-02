@@ -51,7 +51,6 @@ if ($Features -ne "plr") {
 }
 $CommonFlags += @(
     "-sALLOW_MEMORY_GROWTH=1",
-    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']",
     "-sMODULARIZE=1",
     "-sERROR_ON_UNDEFINED_SYMBOLS=1",
     "--no-entry"
@@ -59,8 +58,11 @@ $CommonFlags += @(
 if ($EnableLto) {
     $CommonFlags += "-flto"
 }
+$WideRuntimeMethods = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
+$WebRuntimeMethods = if ($Features -eq "wld") { "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']" } else { $WideRuntimeMethods }
 $NodeFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
+    $WideRuntimeMethods,
     "-sINITIAL_MEMORY=$NodeInitialMemory",
     "-sMAXIMUM_MEMORY=$NodeMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasm'",
@@ -70,6 +72,7 @@ $NodeFlags = @(
 )
 $WebFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
+    $WebRuntimeMethods,
     "-sINITIAL_MEMORY=$WebInitialMemory",
     "-sMAXIMUM_MEMORY=$WebMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasmWeb'",

@@ -202,7 +202,6 @@ if(EMSCRIPTEN)
     endif()
     list(APPEND COMMON_LINK_OPTIONS
         "-sALLOW_MEMORY_GROWTH=1"
-        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
         "-sMODULARIZE=1"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
@@ -219,8 +218,16 @@ if(EMSCRIPTEN)
         list(APPEND COMMON_MANIFEST_FLAGS -flto)
     endif()
 
+    set(WIDE_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']")
+    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
+        set(WEB_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']")
+    else()
+        set(WEB_RUNTIME_METHODS "${WIDE_RUNTIME_METHODS}")
+    endif()
+
     set(NODE_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
+        "${WIDE_RUNTIME_METHODS}"
         "-sINITIAL_MEMORY=${TERRAX_NODE_INITIAL_MEMORY}"
         "-sMAXIMUM_MEMORY=${TERRAX_NODE_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasm'"
@@ -230,6 +237,7 @@ if(EMSCRIPTEN)
     )
     set(WEB_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
+        "${WEB_RUNTIME_METHODS}"
         "-sINITIAL_MEMORY=${TERRAX_WEB_INITIAL_MEMORY}"
         "-sMAXIMUM_MEMORY=${TERRAX_WEB_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
