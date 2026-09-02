@@ -10,6 +10,7 @@ export const WEB_MAXIMUM_MEMORY = 160 * 1024 * 1024
 export const NODE_INITIAL_MEMORY = 128 * 1024 * 1024
 export const NODE_MAXIMUM_MEMORY = 512 * 1024 * 1024
 export const ID_EXPORTS = ['_terra_abi_version', '_terra_capabilities', '_terra_build_info_json']
+export const WLD_WEB_ID_EXPORTS = ['_terra_build_info_json']
 export const FEATURE_SETS = Object.freeze(['all', 'wld', 'plr'])
 export const EXPORTED_RUNTIME_METHODS_FLAG = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
 export const DEFAULT_COMMON_FLAGS = Object.freeze([
@@ -156,13 +157,13 @@ function artifactSignature(artifacts) {
   return artifacts.map((artifact) => `${artifact.role}|${artifact.path}|${artifact.bytes}|${artifact.sha256}`)
 }
 
-function validateTarget(target, label, expectedMemory) {
+function validateTarget(target, label, expectedMemory, identityExports = ID_EXPORTS) {
   if (!target || typeof target !== 'object') fail(`${label} is missing`)
   if (target.memory?.initialBytes !== expectedMemory.initialBytes || target.memory?.maxBytes !== expectedMemory.maxBytes) {
     fail(`${label} memory is invalid`)
   }
   const exportsList = normalizeExports(target.exports, `${label} exports`)
-  for (const name of ID_EXPORTS) {
+  for (const name of identityExports) {
     if (!exportsList.includes(name)) fail(`${label} exports are missing ${name}`)
   }
   if (!isSha256(target.exportHash)) fail(`${label} export hash is invalid`)
@@ -178,9 +179,9 @@ function validateTarget(target, label, expectedMemory) {
   }
 }
 
-function verifyWrapperIdentity(root, relativePath, label) {
+function verifyWrapperIdentity(root, relativePath, label, identityExports = ID_EXPORTS) {
   const wrapperSource = fs.readFileSync(path.resolve(root, relativePath), 'utf8')
-  for (const name of ID_EXPORTS) {
+  for (const name of identityExports) {
     if (!wrapperSource.includes(name)) fail(`${label} is missing ${name}`)
   }
 }
@@ -202,10 +203,13 @@ export function validateManifest(manifest) {
   if (!isCommit(manifest.sourceCommit)) fail('source commit must be a 40-character commit hash')
   if (manifest.dirty !== false) fail('dirty build is not publishable')
 
+  const featureSet = normalizeFeatureSet(manifest.build?.featureSet ?? 'all')
+  const webIdentityExports = featureSet === 'wld' ? WLD_WEB_ID_EXPORTS : ID_EXPORTS
+
   const abi = manifest.abi
   if (!abi || abi.version !== ABI_VERSION) fail('ABI version is invalid')
   const requiredExports = normalizeExports(abi.requiredExports, 'ABI export set')
-  for (const name of ID_EXPORTS) {
+  for (const name of webIdentityExports) {
     if (!requiredExports.includes(name)) fail(`ABI export set is missing ${name}`)
   }
   if (!isSha256(abi.exportHash)) fail('ABI export hash is invalid')
@@ -215,7 +219,6 @@ export function validateManifest(manifest) {
   if (!build || typeof build.compiler !== 'string' || !build.compiler.trim()) {
     fail('compiler is required')
   }
-  const featureSet = normalizeFeatureSet(build.featureSet ?? 'all')
   const buildFlags = normalizeBuildFlags(build.flags)
 
   const memory = manifest.memory
@@ -230,7 +233,7 @@ export function validateManifest(manifest) {
   const webTarget = validateTarget(manifest.targets?.web, 'Web target', {
     initialBytes: WEB_INITIAL_MEMORY,
     maxBytes: WEB_MAXIMUM_MEMORY,
-  })
+  }, webIdentityExports)
 
   if (abi.exportHash !== webTarget.exportHash) fail('ABI export hash must match the Web target hash')
   if (requiredExports.join('\n') !== webTarget.exports.join('\n')) fail('ABI export set must match the Web target exports')
@@ -280,13 +283,14 @@ export function createManifest({
     web: DEFAULT_WEB_FLAGS,
   })
   const normalizedFeatureSet = normalizeFeatureSet(featureSet)
+  const webIdentityExports = normalizedFeatureSet === 'wld' ? WLD_WEB_ID_EXPORTS : ID_EXPORTS
   const normalizedWebExports = normalizeExports(webExports, 'Web target exports')
   const normalizedNodeExports = normalizeExports(nodeExports, 'Node target exports')
   const webArtifacts = [
     readArtifact(root, webWrapper, 'wrapper'),
     readArtifact(root, webWasm, 'wasm'),
   ]
-  verifyWrapperIdentity(root, webWrapper, 'Web wrapper')
+  verifyWrapperIdentity(root, webWrapper, 'Web wrapper', webIdentityExports)
   const nodeArtifacts = [
     readArtifact(root, nodeWrapper, 'wrapper'),
     readArtifact(root, nodeWasm, 'wasm'),
