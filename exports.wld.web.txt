@@ -1,5 +1,3 @@
-_terra_abi_version
-_terra_capabilities
 _terra_build_info_json
 _terra_world_open_begin
 _terra_world_open_step
@@ -16,12 +14,8 @@ _terra_op_get_thumbnail_png
 _terra_op_get_map
 _tx_malloc
 _tx_free
-_tx_heap_used
 _tx_bridge_heap_used
 _tx_native_heap_used
-_tx_heap_peak
-_tx_bridge_heap_peak
-_tx_native_heap_peak
 _terra_world_open_from_buffer
 _terra_world_save_to_buffer
 _terra_world_commit_to_buffer
