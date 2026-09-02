@@ -22,7 +22,6 @@ _txw_set_icon_atlas
 _txw_clear_icon_atlas
 _tx_memory_used
 _tx_reclaim_transients
-_txw_apply_pixel_art
 _txw_begin_pixel_art_indexed
 _txw_add_pixel_art_chunks_bulk_fast
 _tx_gunzip
