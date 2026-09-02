@@ -60,6 +60,9 @@ if ($EnableLto) {
 }
 $WideRuntimeMethods = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
 $WebRuntimeMethods = if ($Features -eq "wld") { "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']" } else { $WideRuntimeMethods }
+# The WLD-only Web target is buffer-only in the viewer. Keep all/plr and Node
+# builds unchanged while measuring the independent FILESYSTEM=0 experiment.
+$WebFilesystemFlag = if ($Features -eq "wld") { "-sFILESYSTEM=0" } else { "-sFILESYSTEM=1" }
 $NodeFlags = @(
     "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
     $WideRuntimeMethods,
@@ -77,7 +80,7 @@ $WebFlags = @(
     "-sMAXIMUM_MEMORY=$WebMaximumMemory",
     "-sEXPORT_NAME='TerraWorldWasmWeb'",
     "-sENVIRONMENT=web,worker",
-    "-sFILESYSTEM=1"
+    $WebFilesystemFlag
 )
 
 function Add-FlagArgs {
