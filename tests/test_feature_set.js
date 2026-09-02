@@ -49,4 +49,12 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), hasWld);
   assert.equal(manifest.targets.node.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
   assert.equal(manifest.targets.web.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
+
+  if (featureSet === "wld") {
+    assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
+    assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
+    assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);
+    assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk"), false);
+    assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk_fast"), true);
+  }
 });
