@@ -225,6 +225,14 @@ if(EMSCRIPTEN)
         set(WEB_RUNTIME_METHODS "${WIDE_RUNTIME_METHODS}")
     endif()
 
+    # The WLD-only Web target is buffer-only in the viewer. Keep the broader
+    # all/plr Web targets unchanged so this experiment cannot alter Node or
+    # the other capability sets.
+    set(WEB_FILESYSTEM_FLAG "-sFILESYSTEM=1")
+    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
+        set(WEB_FILESYSTEM_FLAG "-sFILESYSTEM=0")
+    endif()
+
     set(NODE_LINK_OPTIONS
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_node.json"
         "${WIDE_RUNTIME_METHODS}"
@@ -242,7 +250,7 @@ if(EMSCRIPTEN)
         "-sMAXIMUM_MEMORY=${TERRAX_WEB_MAXIMUM_MEMORY}"
         "-sEXPORT_NAME='TerraWorldWasmWeb'"
         "-sENVIRONMENT=web,worker"
-        "-sFILESYSTEM=1"
+        "${WEB_FILESYSTEM_FLAG}"
     )
     set(NODE_IDENTITY_FLAGS ${NODE_LINK_OPTIONS})
     list(POP_FRONT NODE_IDENTITY_FLAGS)
