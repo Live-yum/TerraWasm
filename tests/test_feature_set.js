@@ -31,8 +31,8 @@ const EXPECTED_FEATURES = {
   plr: ["plr-read-write"],
 };
 
-// The viewer WLD Web artifact uses build_info as its single runtime identity
-// export; Node WLD keeps the broader diagnostic identity/telemetry surface.
+// The viewer WLD Web artifact exposes only APIs used by the current browser
+// application. Node WLD keeps the broader compatibility/test surface.
 const WLD_WEB_TRIMMED_EXPORTS = [
   "_terra_abi_version",
   "_terra_capabilities",
@@ -42,6 +42,7 @@ const WLD_WEB_TRIMMED_EXPORTS = [
   "_tx_native_heap_peak",
   "_terra_world_open_from_buffer",
   "_terra_world_save_to_buffer",
+  "_txw_apply_pixel_art",
 ];
 
 test("compiled capabilities, manifest, identity, and exports agree on the feature set", async () => {
@@ -68,13 +69,12 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    assert.equal(manifest.targets.node.exports.includes("_terra_world_save_to_buffer"), true);
-    assert.equal(manifest.targets.web.exports.includes("_terra_world_save_to_buffer"), false);
-    assert.equal(manifest.targets.web.exports.length, 28);
+    assert.equal(manifest.targets.web.exports.length, 27);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk"), false);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk_fast"), true);
+    assert.equal(manifest.targets.web.exports.includes("_txw_begin_pixel_art_indexed"), true);
   }
 });
