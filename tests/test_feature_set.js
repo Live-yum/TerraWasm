@@ -31,6 +31,8 @@ const EXPECTED_FEATURES = {
   plr: ["plr-read-write"],
 };
 
+// The viewer WLD Web artifact uses build_info as its single runtime identity
+// export; Node WLD keeps the broader diagnostic identity/telemetry surface.
 const WLD_WEB_TRIMMED_EXPORTS = [
   "_terra_abi_version",
   "_terra_capabilities",
