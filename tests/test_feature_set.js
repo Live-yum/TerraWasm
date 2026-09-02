@@ -31,6 +31,15 @@ const EXPECTED_FEATURES = {
   plr: ["plr-read-write"],
 };
 
+const WLD_WEB_TRIMMED_EXPORTS = [
+  "_terra_abi_version",
+  "_terra_capabilities",
+  "_tx_heap_used",
+  "_tx_heap_peak",
+  "_tx_bridge_heap_peak",
+  "_tx_native_heap_peak",
+];
+
 test("compiled capabilities, manifest, identity, and exports agree on the feature set", async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "build", "terra.manifest.json"), "utf8"));
   const featureSet = manifest.build.featureSet;
@@ -51,6 +60,11 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.equal(manifest.targets.web.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
 
   if (featureSet === "wld") {
+    for (const name of WLD_WEB_TRIMMED_EXPORTS) {
+      assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
+      assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
+    }
+    assert.equal(manifest.targets.web.exports.length, 30);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);
