@@ -40,6 +40,8 @@ const WLD_WEB_TRIMMED_EXPORTS = [
   "_tx_heap_peak",
   "_tx_bridge_heap_peak",
   "_tx_native_heap_peak",
+  "_terra_world_open_from_buffer",
+  "_terra_world_save_to_buffer",
 ];
 
 test("compiled capabilities, manifest, identity, and exports agree on the feature set", async () => {
@@ -57,7 +59,7 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.equal(typeof M._terra_world_open_from_buffer, hasWld ? "function" : "undefined");
   assert.equal(typeof M._terra_plr_open_from_buffer, hasPlr ? "function" : "undefined");
   assert.equal(manifest.targets.node.exports.includes("_terra_world_open_from_buffer"), hasWld);
-  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), hasWld);
+  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), featureSet === "all");
   assert.equal(manifest.targets.node.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
   assert.equal(manifest.targets.web.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
 
@@ -66,7 +68,9 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    assert.equal(manifest.targets.web.exports.length, 30);
+    assert.equal(manifest.targets.node.exports.includes("_terra_world_save_to_buffer"), true);
+    assert.equal(manifest.targets.web.exports.includes("_terra_world_save_to_buffer"), false);
+    assert.equal(manifest.targets.web.exports.length, 28);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);
