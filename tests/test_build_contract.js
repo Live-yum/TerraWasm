@@ -91,3 +91,14 @@ test("all, WLD-only, and PLR-only builds have independent sources and export bou
   assert.match(manifestScript, /nodeExportsFile/);
   assert.match(manifestScript, /webExportsFile/);
 });
+
+test("WLD Web disables filesystem without changing Node or broader feature sets", () => {
+  assert.match(cmake, /set\(WEB_FILESYSTEM_FLAG\s+"-sFILESYSTEM=1"\)/);
+  assert.match(cmake, /if\(TERRAWASM_FEATURE_SET STREQUAL "wld"\)[\s\S]*set\(WEB_FILESYSTEM_FLAG\s+"-sFILESYSTEM=0"\)/);
+  assert.match(cmake, /set\(NODE_LINK_OPTIONS[\s\S]*"-sNODERAWFS=1"[\s\S]*"-sFILESYSTEM=1"/);
+  assert.match(cmake, /set\(WEB_LINK_OPTIONS[\s\S]*"\$\{WEB_FILESYSTEM_FLAG\}"/);
+
+  assert.match(buildScript, /\$WebFilesystemFlag\s*=\s*if\s*\(\$Features -eq "wld"\)\s*\{\s*"-sFILESYSTEM=0"\s*\}\s*else\s*\{\s*"-sFILESYSTEM=1"\s*\}/);
+  assert.match(buildScript, /\$NodeFlags\s*=\s*@\([\s\S]*"-sNODERAWFS=1"[\s\S]*"-sFILESYSTEM=1"/);
+  assert.match(buildScript, /\$WebFlags\s*=\s*@\([\s\S]*\$WebFilesystemFlag/);
+});
