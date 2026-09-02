@@ -76,5 +76,14 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk"), false);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunks_bulk_fast"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_begin_pixel_art_indexed"), true);
+
+    assert.equal(manifest.build.flags.web.includes("-sFILESYSTEM=0"), true,
+      "WLD Web must remain filesystem-free");
+    assert.equal(manifest.build.flags.web.includes("-sFILESYSTEM=1"), false,
+      "WLD Web must not silently re-enable Emscripten filesystem glue");
+    assert.equal(manifest.build.flags.node.includes("-sFILESYSTEM=1"), true,
+      "Node WLD must retain Emscripten filesystem support");
+    assert.equal(manifest.build.flags.node.includes("-sNODERAWFS=1"), true,
+      "Node WLD must retain NODERAWFS compatibility");
   }
 });
