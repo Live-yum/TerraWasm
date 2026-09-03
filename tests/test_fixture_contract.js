@@ -106,11 +106,12 @@ function readLastErrorJson(M) {
     let status = M._terra_info_get_last_error_json(0, 0n, sizePtr);
     assert.equal(status, 0, "last-error probe must succeed");
     const required = readU64(M, sizePtr);
-    if (!required) return {};
+    if (required <= 1) return {};
     outputPtr = mustAlloc(M, required, "error output");
     status = M._terra_info_get_last_error_json(outputPtr, BigInt(required), sizePtr);
     assert.equal(status, 0, "last-error copy must succeed");
-    return JSON.parse(M.UTF8ToString(outputPtr));
+    const text = M.UTF8ToString(outputPtr);
+    return text ? JSON.parse(text) : {};
   } finally {
     if (outputPtr) M._tx_free(outputPtr);
     M._tx_free(sizePtr);
@@ -231,11 +232,9 @@ test("render_preview_png keeps native 8400x2400 output on the low-memory route",
       max_w: 0,
       max_h: 0,
     });
-    assert.equal(
-      result.status,
-      0,
-      `native-size render_preview_png failed: ${JSON.stringify(readLastErrorJson(M))}`,
-    );
+    if (result.status !== 0) {
+      assert.fail(`native-size render_preview_png failed: ${JSON.stringify(readLastErrorJson(M))}`);
+    }
     assert.equal(result.value?.width, 8400);
     assert.equal(result.value?.height, 2400);
 
