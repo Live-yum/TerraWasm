@@ -82,11 +82,12 @@ function readLastError(M) {
     let status = M._terra_info_get_last_error_json(0, 0n, sizePtr);
     if (status !== 0) return { status };
     const required = readU64(M, sizePtr);
-    if (!required) return {};
+    if (required <= 1) return {};
     outputPtr = mustAlloc(M, required, "error output");
     status = M._terra_info_get_last_error_json(outputPtr, BigInt(required), sizePtr);
     if (status !== 0) return { status };
-    return JSON.parse(M.UTF8ToString(outputPtr));
+    const text = M.UTF8ToString(outputPtr);
+    return text ? JSON.parse(text) : {};
   } finally {
     if (outputPtr) M._tx_free(outputPtr);
     M._tx_free(sizePtr);
@@ -152,23 +153,17 @@ async function findLargeWorld(M) {
 
 (async () => {
   const M = await TerraWorldWasm();
-  const buildInfoRaw = M._terra_build_info_json();
-  if (typeof buildInfoRaw === "number" && buildInfoRaw) {
-    const buildInfo = JSON.parse(M.UTF8ToString(buildInfoRaw));
-    const maximumMemory = Number(buildInfo?.memory?.maximum_bytes || buildInfo?.maximum_memory || 0);
-    if (maximumMemory) assert.equal(maximumMemory, EXPECTED_MAX_BYTES);
-  }
+  const buildInfo = JSON.parse(M.UTF8ToString(M._terra_build_info_json()));
+  assert.equal(Number(buildInfo.maxMemory), EXPECTED_MAX_BYTES, "low-memory module must cap linear memory at 160 MiB");
 
   const fixture = await findLargeWorld(M);
   let opened;
   try {
     opened = openWorld(M, fixture.bytes);
     const result = executeRenderPreview(M, opened.handle);
-    assert.equal(
-      result.status,
-      0,
-      `160 MiB native-size preview failed: ${JSON.stringify(readLastError(M))}`,
-    );
+    if (result.status !== 0) {
+      assert.fail(`160 MiB native-size preview failed: ${JSON.stringify(readLastError(M))}`);
+    }
     assert.equal(result.value?.width, 8400);
     assert.equal(result.value?.height, 2400);
 
