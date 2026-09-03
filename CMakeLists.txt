@@ -46,6 +46,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_ops.c"
     "${SRC_DIR}/terra_mutators.c"
     "${SRC_DIR}/terra_render.c"
+    "${SRC_DIR}/terra_render_png_lowmem.c"
     "${SRC_DIR}/terra_map.c"
     "${SRC_DIR}/terra_icon.c"
     "${SRC_DIR}/terra_update.c"
@@ -64,6 +65,12 @@ if(TERRAWASM_ENABLE_WLD)
     set_source_files_properties(
         "${SRC_DIR}/terra_wld.c"
         PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
+    )
+    # Keep the legacy whole-image PNG encoder available for comparison while
+    # routing the public ABI through terra_render_png_lowmem.c.
+    set_source_files_properties(
+        "${SRC_DIR}/terra_render.c"
+        PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy"
     )
 endif()
 if(TERRAWASM_ENABLE_PLR)
