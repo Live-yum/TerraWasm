@@ -1,0 +1,101 @@
+name: One-time TerraWasm dead-code cleanup PR1
+
+on:
+  push:
+    branches:
+      - cleanup/dead-code-pr1
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+          ref: cleanup/dead-code-pr1
+      - name: Remove retired WLD helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def remove_function(text: str, name: str) -> str:
+              match = re.search(rf'\nint\s+{re.escape(name)}\s*\(', text)
+              if not match:
+                  raise SystemExit(f'function not found: {name}')
+              start = match.start() + 1
+              brace = text.find('{', match.end())
+              if brace < 0:
+                  raise SystemExit(f'opening brace not found: {name}')
+              depth = 0
+              end = None
+              for index in range(brace, len(text)):
+                  ch = text[index]
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = index + 1
+                          break
+              if end is None:
+                  raise SystemExit(f'closing brace not found: {name}')
+              while end < len(text) and text[end] in '\r\n':
+                  end += 1
+              return text[:start] + text[end:]
+
+          update_path = Path('src/terra_update.c')
+          update = update_path.read_text(encoding='utf-8')
+          for name in ['execute_set_visibility', 'execute_remove_all_wires']:
+              update = remove_function(update, name)
+          update_path.write_text(update, encoding='utf-8', newline='\n')
+
+          ops_path = Path('src/terra_ops.c')
+          ops = ops_path.read_text(encoding='utf-8')
+          for name in ['execute_set_visibility', 'execute_remove_all_wires']:
+              pattern = rf'^extern int {name}\([^;]+;\n'
+              ops, count = re.subn(pattern, '', ops, count=1, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f'extern declaration not found exactly once: {name}')
+          ops_path.write_text(ops, encoding='utf-8', newline='\n')
+
+          for relative in ['scripts/fix_update.py', 'scripts/fix_litmap.py']:
+              path = Path(relative)
+              if not path.exists():
+                  raise SystemExit(f'expected historical fix script missing: {relative}')
+              path.unlink()
+          PY
+
+          if grep -R --line-number -E 'execute_set_visibility|execute_remove_all_wires' src include CMakeLists.txt exports*.txt; then
+            echo 'retired helpers still referenced in production sources' >&2
+            exit 1
+          fi
+
+      - name: Run WLD native contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes zlib1g-dev
+          cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_FEATURE_SET=wld
+          cmake --build build-native --config Release --parallel
+          ctest --test-dir build-native --build-config Release --output-on-failure
+
+      - name: Commit validated cleanup and remove one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/one-time-dead-code-pr1.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "cleanup: remove retired WLD helpers"
+          git push origin HEAD:cleanup/dead-code-pr1
