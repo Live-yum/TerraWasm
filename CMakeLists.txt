@@ -5,6 +5,7 @@ include(CTest)
 option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
 option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
+option(TERRAX_ENABLE_LEGACY_RENDER_COMPARE "Build the legacy full-RGBA unmarked PNG renderer for comparison tests" OFF)
 
 set(TERRAWASM_FEATURE_SET "all" CACHE STRING "Compiled capability set: all, wld, or plr")
 set_property(CACHE TERRAWASM_FEATURE_SET PROPERTY STRINGS all wld plr)
@@ -66,12 +67,15 @@ if(TERRAWASM_ENABLE_WLD)
         "${SRC_DIR}/terra_wld.c"
         PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
     )
-    # Keep the legacy whole-image PNG encoder available for comparison while
-    # routing the public ABI through terra_render_png_lowmem.c.
-    set_source_files_properties(
-        "${SRC_DIR}/terra_render.c"
-        PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy"
-    )
+    # The public unmarked PNG entry point is always the low-memory renderer.
+    # Compile the historical full-RGBA implementation only for explicit
+    # comparison builds; normal release builds do not carry that function.
+    if(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)
+        set_source_files_properties(
+            "${SRC_DIR}/terra_render.c"
+            PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy;TERRAX_ENABLE_LEGACY_RENDER_COMPARE=1"
+        )
+    endif()
 endif()
 if(TERRAWASM_ENABLE_PLR)
     list(APPEND SOURCES ${PLR_SOURCES})
