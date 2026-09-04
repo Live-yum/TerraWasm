@@ -18,65 +18,36 @@ jobs:
           fetch-depth: 0
           lfs: true
           ref: cleanup/dead-code-pr1
-      - name: Remove retired WLD helpers
+      - name: Remove verified historical dead files
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
-
-          def remove_function(text: str, name: str) -> str:
-              match = re.search(rf'\nint\s+{re.escape(name)}\s*\(', text)
-              if not match:
-                  raise SystemExit(f'function not found: {name}')
-              start = match.start() + 1
-              brace = text.find('{', match.end())
-              if brace < 0:
-                  raise SystemExit(f'opening brace not found: {name}')
-              depth = 0
-              end = None
-              for index in range(brace, len(text)):
-                  ch = text[index]
-                  if ch == '{':
-                      depth += 1
-                  elif ch == '}':
-                      depth -= 1
-                      if depth == 0:
-                          end = index + 1
-                          break
-              if end is None:
-                  raise SystemExit(f'closing brace not found: {name}')
-              while end < len(text) and text[end] in '\r\n':
-                  end += 1
-              return text[:start] + text[end:]
-
-          update_path = Path('src/terra_update.c')
-          update = update_path.read_text(encoding='utf-8')
-          for name in ['execute_set_visibility', 'execute_remove_all_wires']:
-              update = remove_function(update, name)
-          update_path.write_text(update, encoding='utf-8', newline='\n')
-
-          ops_path = Path('src/terra_ops.c')
-          ops = ops_path.read_text(encoding='utf-8')
-          for name in ['execute_set_visibility', 'execute_remove_all_wires']:
-              pattern = rf'^extern int {name}\([^;]+;\n'
-              ops, count = re.subn(pattern, '', ops, count=1, flags=re.MULTILINE)
-              if count != 1:
-                  raise SystemExit(f'extern declaration not found exactly once: {name}')
-          ops_path.write_text(ops, encoding='utf-8', newline='\n')
 
           for relative in ['scripts/fix_update.py', 'scripts/fix_litmap.py']:
               path = Path(relative)
               if not path.exists():
                   raise SystemExit(f'expected historical fix script missing: {relative}')
               path.unlink()
+
+          ops_path = Path('src/terra_ops.c')
+          ops = ops_path.read_text(encoding='utf-8')
+          old = ' * set_visibility and remove_all_wires are merged into batch_update_tiles.\n'
+          new = (' * batch_update_tiles is the primary mutation path used by the viewer.\n'
+                 ' * set_visibility and remove_all_wires remain compatibility operations\n'
+                 ' * because they are still dispatched and documented by the public JSON ABI.\n')
+          if old not in ops:
+              raise SystemExit('expected stale operation comment not found')
+          ops_path.write_text(ops.replace(old, new, 1), encoding='utf-8', newline='\n')
           PY
 
-          if grep -R --line-number -E 'execute_set_visibility|execute_remove_all_wires' src include CMakeLists.txt exports*.txt; then
-            echo 'retired helpers still referenced in production sources' >&2
-            exit 1
-          fi
+          test ! -e scripts/fix_update.py
+          test ! -e scripts/fix_litmap.py
+          grep -q 'return execute_set_visibility' src/terra_ops.c
+          grep -q 'return execute_remove_all_wires' src/terra_ops.c
+          grep -q 'int execute_set_visibility' src/terra_update.c
+          grep -q 'int execute_remove_all_wires' src/terra_update.c
 
       - name: Run WLD native contracts
         shell: bash
@@ -97,5 +68,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "cleanup: remove retired WLD helpers"
+          git commit -m "cleanup: remove historical WLD repair scripts"
           git push origin HEAD:cleanup/dead-code-pr1
