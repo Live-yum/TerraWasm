@@ -223,6 +223,22 @@ test("render_preview_png keeps native 8400x2400 output on the low-memory route",
     /txw_render_preview_png=txw_render_preview_png_legacy/,
     "legacy whole-image encoder must not remain the public entry point",
   );
+  assert.match(
+    cmakeSource,
+    /option\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE[\s\S]*OFF\)/,
+    "legacy unmarked PNG renderer must be disabled by default",
+  );
+  assert.match(
+    cmakeSource,
+    /if\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\)[\s\S]*txw_render_preview_png=txw_render_preview_png_legacy/,
+    "legacy renderer rename must only exist inside the explicit comparison gate",
+  );
+  const legacyRenderSource = fs.readFileSync(path.join(ROOT, "src", "terra_render.c"), "utf8");
+  assert.match(
+    legacyRenderSource,
+    /#if defined\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\)[\s\S]*int32_t txw_render_preview_png/,
+    "legacy full-RGBA unmarked renderer must be compile-time gated",
+  );
 
   const M = await TerraWorldWasm();
   const fixture = await find8400x2400Fixture(M);

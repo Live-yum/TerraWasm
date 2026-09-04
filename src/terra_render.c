@@ -1957,6 +1957,7 @@ int32_t txw_render_preview_rgba(TxWorld* w, uint32_t max_w, uint32_t max_h) {
  * Result pointer available via tx_last_ptr/tx_last_len.
  * ==================================================================== */
 
+#if defined(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)
 int32_t txw_render_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h) {
   /* Render RGBA first */
   int32_t n = txw_render_preview_rgba(w, max_w, max_h);
@@ -1966,6 +1967,8 @@ int32_t txw_render_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h) {
   uint32_t pw = tx_last_width, ph = tx_last_height;
   return encode_png_from_owned_rgba(rgba, pw, ph);
 }
+#endif
+
 
 int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h,
                                       const MapMarkerEntry* chest_markers, uint32_t chest_count,
