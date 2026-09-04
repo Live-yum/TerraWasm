@@ -8,7 +8,9 @@
  * convert_world_biome, batch_update_tiles, unlock_bestiary,
  * apply_pixel_art_mapping.
  *
- * set_visibility and remove_all_wires are merged into batch_update_tiles.
+ * batch_update_tiles is the primary mutation path used by the viewer.
+ * set_visibility and remove_all_wires remain compatibility operations
+ * because they are still dispatched and documented by the public JSON ABI.
  */
 #include "terra_types.h"
 #include "terra_map.h"
