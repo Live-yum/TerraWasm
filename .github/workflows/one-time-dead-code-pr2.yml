@@ -1,0 +1,137 @@
+name: One-time TerraWasm architectural cleanup PR2
+
+on:
+  push:
+    branches:
+      - cleanup/dead-code-pr2
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-and-evaluate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+          ref: cleanup/dead-code-pr2
+      - name: Gate legacy unmarked PNG renderer behind compare option
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cmake_path = Path('CMakeLists.txt')
+          cmake = cmake_path.read_text(encoding='utf-8')
+          anchor = 'option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)\n'
+          option = 'option(TERRAX_ENABLE_LEGACY_RENDER_COMPARE "Build the legacy full-RGBA unmarked PNG renderer for comparison tests" OFF)\n'
+          if option not in cmake:
+              if anchor not in cmake:
+                  raise SystemExit('CMake option anchor not found')
+              cmake = cmake.replace(anchor, anchor + option, 1)
+
+          old = '''    # Keep the legacy whole-image PNG encoder available for comparison while\n    # routing the public ABI through terra_render_png_lowmem.c.\n    set_source_files_properties(\n        "${SRC_DIR}/terra_render.c"\n        PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy"\n    )\n'''
+          new = '''    # The public unmarked PNG entry point is always the low-memory renderer.\n    # Compile the historical full-RGBA implementation only for explicit\n    # comparison builds; normal release builds do not carry that function.\n    if(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)\n        set_source_files_properties(\n            "${SRC_DIR}/terra_render.c"\n            PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy;TERRAX_ENABLE_LEGACY_RENDER_COMPARE=1"\n        )\n    endif()\n'''
+          if old not in cmake:
+              raise SystemExit('legacy renderer CMake block not found')
+          cmake_path.write_text(cmake.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          render_path = Path('src/terra_render.c')
+          render = render_path.read_text(encoding='utf-8')
+          signature = 'int32_t txw_render_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h) {'
+          start = render.find(signature)
+          if start < 0:
+              raise SystemExit('legacy preview renderer not found')
+          brace = render.find('{', start)
+          depth = 0
+          end = None
+          for i in range(brace, len(render)):
+              if render[i] == '{':
+                  depth += 1
+              elif render[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit('legacy preview renderer closing brace not found')
+          if '#if defined(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)' not in render[max(0, start-80):start]:
+              render = (render[:start]
+                        + '#if defined(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)\n'
+                        + render[start:end]
+                        + '\n#endif\n'
+                        + render[end:])
+          render_path.write_text(render, encoding='utf-8', newline='\n')
+
+          contract_path = Path('tests/test_fixture_contract.js')
+          contract = contract_path.read_text(encoding='utf-8')
+          marker = '  assert.match(\n    cmakeSource,\n    /txw_render_preview_png=txw_render_preview_png_legacy/,\n    "legacy whole-image encoder must not remain the public entry point",\n  );\n'
+          if marker not in contract:
+              raise SystemExit('legacy renderer source contract marker not found')
+          expanded = marker + '''  assert.match(\n    cmakeSource,\n    /option\\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE[\\s\\S]*OFF\\)/,\n    "legacy unmarked PNG renderer must be disabled by default",\n  );\n  assert.match(\n    cmakeSource,\n    /if\\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\\)[\\s\\S]*txw_render_preview_png=txw_render_preview_png_legacy/,\n    "legacy renderer rename must only exist inside the explicit comparison gate",\n  );\n  const legacyRenderSource = fs.readFileSync(path.join(ROOT, "src", "terra_render.c"), "utf8");\n  assert.match(\n    legacyRenderSource,\n    /#if defined\\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\\)[\\s\\S]*int32_t txw_render_preview_png/,\n    "legacy full-RGBA unmarked renderer must be compile-time gated",\n  );\n'''
+          contract_path.write_text(contract.replace(marker, expanded, 1), encoding='utf-8', newline='\n')
+          PY
+          git diff --check
+
+      - name: Validate native default and compare builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes zlib1g-dev
+          cmake -S . -B build-native-default -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_FEATURE_SET=wld
+          cmake --build build-native-default --config Release --parallel
+          ctest --test-dir build-native-default --build-config Release --output-on-failure
+          cmake -S . -B build-native-compare -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_FEATURE_SET=wld -DTERRAX_ENABLE_LEGACY_RENDER_COMPARE=ON
+          cmake --build build-native-compare --config Release --parallel
+          ctest --test-dir build-native-compare --build-config Release --output-on-failure
+          node tests/test_fixture_contract.js
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 5.0.7
+          actions-cache-folder: emsdk-cache
+
+      - name: Build WLD Web with and without LTO
+        shell: bash
+        run: |
+          set -euo pipefail
+          emcmake cmake -S . -B build-web-no-lto -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_FEATURE_SET=wld -DTERRAX_ENABLE_LTO=OFF
+          cmake --build build-web-no-lto --target terrax_world_wasm_web --parallel
+          emcmake cmake -S . -B build-web-lto -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_FEATURE_SET=wld -DTERRAX_ENABLE_LTO=ON
+          cmake --build build-web-lto --target terrax_world_wasm_web --parallel
+
+          OFF_WASM=build-web-no-lto/terrax_world_wasm_web.wasm
+          ON_WASM=build-web-lto/terrax_world_wasm_web.wasm
+          test -f "$OFF_WASM"
+          test -f "$ON_WASM"
+          OFF_RAW=$(stat -c%s "$OFF_WASM")
+          ON_RAW=$(stat -c%s "$ON_WASM")
+          OFF_GZIP=$(gzip -9 -c "$OFF_WASM" | wc -c)
+          ON_GZIP=$(gzip -9 -c "$ON_WASM" | wc -c)
+          echo "LTO_EVAL no_lto_raw=$OFF_RAW lto_raw=$ON_RAW no_lto_gzip=$OFF_GZIP lto_gzip=$ON_GZIP"
+          {
+            echo '### WLD Web LTO evaluation'
+            echo '| Build | Raw wasm bytes | gzip -9 bytes |'
+            echo '|---|---:|---:|'
+            echo "| LTO OFF | $OFF_RAW | $OFF_GZIP |"
+            echo "| LTO ON | $ON_RAW | $ON_GZIP |"
+            echo
+            echo 'LTO remains opt-in; this workflow only measures it.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit validated cleanup and remove one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/one-time-dead-code-pr2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "cleanup: gate legacy PNG renderer behind compare builds"
+          git push origin HEAD:cleanup/dead-code-pr2
