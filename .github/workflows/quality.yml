@@ -111,6 +111,27 @@ jobs:
       - name: Build and test selected capability set
         shell: pwsh
         run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Run native-size PNG under Mini Program memory ceiling
+        if: matrix.features == 'wld'
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/emsdk/emsdk_env.ps1" 2>$null
+          & emcmake cmake -S . -B build-lowmem `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DTERRAWASM_FEATURE_SET=wld `
+            -DTERRAX_BUILD_COMMIT=$env:GITHUB_SHA `
+            -DTERRAX_BUILD_DIRTY=false `
+            -DTERRAX_BUILD_COMPILER=emscripten `
+            -DTERRAX_NODE_INITIAL_MEMORY=67108864 `
+            -DTERRAX_NODE_MAXIMUM_MEMORY=167772160
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & cmake --build build-lowmem --config Release --target terrax_world_wasm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:TERRAWASM_LOW_MEMORY_MODULE = (Resolve-Path "build-lowmem/terrax_world_wasm.js").Path
+          & node -e "const f=require(process.env.TERRAWASM_LOW_MEMORY_MODULE);f().then(M=>{const i=JSON.parse(M.UTF8ToString(M._terra_build_info_json()));if(i.maxMemory!==167772160)throw new Error('expected 160 MiB maxMemory, got '+i.maxMemory);console.log('maxMemory='+i.maxMemory)})"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & node tests/test_preview_png_lowmem_160.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload WLD viewer artifacts
         if: matrix.features == 'wld'
         uses: actions/upload-artifact@v7

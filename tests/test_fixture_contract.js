@@ -16,6 +16,7 @@ const {
 
 const ROOT = path.resolve(__dirname, "..");
 const TerraWorldWasm = require(path.join(ROOT, "build", "terrax_world_wasm.js"));
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const REQUIRED_TEST_FILES = [
   "tests/test_all.js",
   "tests/test_batch_update_thumbnail.js",
@@ -98,6 +99,92 @@ function readSectionJson(M, handle, sectionName) {
   }
 }
 
+function readLastErrorJson(M) {
+  const sizePtr = mustAlloc(M, 8, "error size");
+  let outputPtr = 0;
+  try {
+    let status = M._terra_info_get_last_error_json(0, 0n, sizePtr);
+    assert.equal(status, 0, "last-error probe must succeed");
+    const required = readU64(M, sizePtr);
+    if (required <= 1) return {};
+    outputPtr = mustAlloc(M, required, "error output");
+    status = M._terra_info_get_last_error_json(outputPtr, BigInt(required), sizePtr);
+    assert.equal(status, 0, "last-error copy must succeed");
+    const text = M.UTF8ToString(outputPtr);
+    return text ? JSON.parse(text) : {};
+  } finally {
+    if (outputPtr) M._tx_free(outputPtr);
+    M._tx_free(sizePtr);
+  }
+}
+
+function executeOperation(M, handle, operationName, request) {
+  const namePtr = allocCString(M, operationName);
+  const requestPtr = allocCString(M, JSON.stringify(request));
+  const sizePtr = mustAlloc(M, 8, `${operationName} size`);
+  let outputPtr = 0;
+  try {
+    let status = M._terra_op_execute_json(handle, namePtr, requestPtr, 0, 0n, sizePtr);
+    if (status !== 0) return { status, value: null };
+    const required = readU64(M, sizePtr);
+    outputPtr = mustAlloc(M, required, `${operationName} output`);
+    status = M._terra_op_execute_json(
+      handle, namePtr, requestPtr, outputPtr, BigInt(required), sizePtr,
+    );
+    return { status, value: status === 0 ? JSON.parse(M.UTF8ToString(outputPtr)) : null };
+  } finally {
+    if (outputPtr) M._tx_free(outputPtr);
+    M._tx_free(sizePtr);
+    M._tx_free(requestPtr);
+    M._tx_free(namePtr);
+  }
+}
+
+function getThumbnailPng(M, handle) {
+  const sizePtr = mustAlloc(M, 8, "thumbnail size");
+  const widthPtr = mustAlloc(M, 4, "thumbnail width");
+  const heightPtr = mustAlloc(M, 4, "thumbnail height");
+  let outputPtr = 0;
+  try {
+    let status = M._terra_op_get_thumbnail_png(handle, 0, 0n, sizePtr, widthPtr, heightPtr);
+    assert.equal(status, 2, "thumbnail probe must report buffer-too-small");
+    const required = readU64(M, sizePtr);
+    assert.ok(required > PNG_SIGNATURE.length, "thumbnail PNG must be non-empty");
+    outputPtr = mustAlloc(M, required, "thumbnail output");
+    status = M._terra_op_get_thumbnail_png(
+      handle, outputPtr, BigInt(required), sizePtr, widthPtr, heightPtr,
+    );
+    assert.equal(status, 0, `thumbnail copy failed with status ${status}`);
+    return {
+      png: Buffer.from(M.HEAPU8.slice(outputPtr, outputPtr + required)),
+      width: M.HEAPU32[widthPtr >>> 2] >>> 0,
+      height: M.HEAPU32[heightPtr >>> 2] >>> 0,
+    };
+  } finally {
+    if (outputPtr) M._tx_free(outputPtr);
+    M._tx_free(heightPtr);
+    M._tx_free(widthPtr);
+    M._tx_free(sizePtr);
+  }
+}
+
+async function find8400x2400Fixture(M) {
+  const fixturePaths = getWorldFixturePaths().slice().sort((left, right) => left.localeCompare(right));
+  for (const fixturePath of fixturePaths) {
+    const bytes = fs.readFileSync(fixturePath);
+    const opened = openBuffer(M, bytes);
+    try {
+      const header = readSectionJson(M, opened.handle, "header");
+      if (header.maxTilesX === 8400 && header.maxTilesY === 2400) {
+        return { fixturePath, bytes, header };
+      }
+    } finally {
+      releaseOpenBuffer(M, opened);
+    }
+  }
+  assert.fail("missing required 8400x2400 fixture in checked-in tests/*.wld");
+}
+
 test("checked-in fixtures replace sibling TerraX dependencies", () => {
   for (const relativePath of REQUIRED_TEST_FILES) {
     const source = fs.readFileSync(path.join(ROOT, relativePath), "utf8");
@@ -120,17 +207,42 @@ test("checked-in fixtures replace sibling TerraX dependencies", () => {
 
 test("checked-in world fixtures include the required 8400x2400 regression world", async () => {
   const M = await TerraWorldWasm();
-  const fixturePaths = getWorldFixturePaths().slice().sort((left, right) => left.localeCompare(right));
+  await find8400x2400Fixture(M);
+});
 
-  for (const fixturePath of fixturePaths) {
-    const opened = openBuffer(M, fs.readFileSync(fixturePath));
-    try {
-      const header = readSectionJson(M, opened.handle, "header");
-      if (header.maxTilesX === 8400 && header.maxTilesY === 2400) return;
-    } finally {
-      releaseOpenBuffer(M, opened);
+test("render_preview_png keeps native 8400x2400 output on the low-memory route", async () => {
+  const lowMemorySource = fs.readFileSync(
+    path.join(ROOT, "src", "terra_render_png_lowmem.c"),
+    "utf8",
+  );
+  const cmakeSource = fs.readFileSync(path.join(ROOT, "CMakeLists.txt"), "utf8");
+  assert.match(lowMemorySource, /txw_render_marked_preview_png\s*\(/);
+  assert.doesNotMatch(lowMemorySource, /txw_render_preview_rgba\s*\(/);
+  assert.match(
+    cmakeSource,
+    /txw_render_preview_png=txw_render_preview_png_legacy/,
+    "legacy whole-image encoder must not remain the public entry point",
+  );
+
+  const M = await TerraWorldWasm();
+  const fixture = await find8400x2400Fixture(M);
+  const opened = openBuffer(M, fixture.bytes);
+  try {
+    const result = executeOperation(M, opened.handle, "render_preview_png", {
+      max_w: 0,
+      max_h: 0,
+    });
+    if (result.status !== 0) {
+      assert.fail(`native-size render_preview_png failed: ${JSON.stringify(readLastErrorJson(M))}`);
     }
-  }
+    assert.equal(result.value?.width, 8400);
+    assert.equal(result.value?.height, 2400);
 
-  assert.fail("missing required 8400x2400 fixture in checked-in tests/*.wld");
+    const thumbnail = getThumbnailPng(M, opened.handle);
+    assert.equal(thumbnail.width, 8400);
+    assert.equal(thumbnail.height, 2400);
+    assert.deepEqual(thumbnail.png.subarray(0, PNG_SIGNATURE.length), PNG_SIGNATURE);
+  } finally {
+    releaseOpenBuffer(M, opened);
+  }
 });
