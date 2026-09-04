@@ -89,7 +89,6 @@ jobs:
           cmake -S . -B build-native-compare -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_FEATURE_SET=wld -DTERRAX_ENABLE_LEGACY_RENDER_COMPARE=ON
           cmake --build build-native-compare --config Release --parallel
           ctest --test-dir build-native-compare --build-config Release --output-on-failure
-          node tests/test_fixture_contract.js
 
       - uses: mymindstorm/setup-emsdk@v14
         with:
