@@ -536,21 +536,6 @@ test("malformed, unknown, duplicate, oversized, and out-of-range fields fail ato
   }
 });
 
-test("legacy unlock_bestiary no longer reports success without changing bytes", async () => {
-  const M = await TerraWorldWasm();
-  let opened;
-  try {
-    opened = openBytes(M, TEST_BYTES);
-    const before = digest(saveBytes(M, opened.handle));
-    const failure = executeOperation(M, opened.handle, "unlock_bestiary", {}, { expectFailure: true });
-    assert.equal(failure.status, 4, "unsupported operations must return NOT_SUPPORTED status");
-    assert.equal(failure.error.code, "TERRAX_NOT_SUPPORTED");
-    assert.equal(digest(saveBytes(M, opened.handle)), before);
-  } finally {
-    closeBytes(M, opened);
-  }
-});
-
 test("native encoder OOM leaves the active world byte-identical and close reclaims all roots", async () => {
   const M = await TerraWorldWasm();
   const baseline = M._tx_heap_used() >>> 0;

@@ -17,7 +17,6 @@ _terra_info_get_section_schema_json
 _terra_section_get_json
 _terra_section_set_json
 _terra_op_execute_json
-_terra_op_get_preview_rgba
 _terra_op_get_thumbnail_png
 _terra_op_get_map
 _tx_malloc

@@ -10,37 +10,30 @@ const cmake = fs.readFileSync(path.join(ROOT, "CMakeLists.txt"), "utf8");
 const build = fs.readFileSync(path.join(ROOT, "build.ps1"), "utf8");
 const ops = fs.readFileSync(path.join(ROOT, "src", "terra_ops.c"), "utf8");
 const render = fs.readFileSync(path.join(ROOT, "src", "terra_render.c"), "utf8");
-const api = fs.readFileSync(path.join(ROOT, "docs", "API.md"), "utf8");
+const sourceApi = fs.readFileSync(path.join(ROOT, "src", "terra_api.c"), "utf8");
+const update = fs.readFileSync(path.join(ROOT, "src", "terra_update.c"), "utf8");
+const docs = fs.readFileSync(path.join(ROOT, "docs", "API.md"), "utf8");
 const abi = fs.readFileSync(path.join(ROOT, "src", "terra_abi.c"), "utf8");
 const manifest = fs.readFileSync(path.join(ROOT, "scripts", "generate-manifest.mjs"), "utf8");
 const workflow = fs.readFileSync(path.join(ROOT, ".github", "workflows", "quality.yml"), "utf8");
 
-const PROFILE_GUARD = "#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)";
-
-function dispatcherPosition(operation) {
-  const needle = `if (op_streq(op_name, "${operation}"))`;
-  const position = ops.indexOf(needle);
-  assert.notEqual(position, -1, `${operation} dispatcher clause must exist`);
-  return position;
+function dispatcherClause(operation) {
+  return `if (op_streq(op_name, "${operation}"))`;
 }
 
-function assertProfileGuarded(operation) {
-  const position = dispatcherPosition(operation);
-  const guardStart = ops.lastIndexOf(PROFILE_GUARD, position);
-  const previousEnd = ops.lastIndexOf("#endif", position);
-  const nextEnd = ops.indexOf("#endif", position);
-  assert.ok(guardStart >= 0, `${operation} must have a viewer-profile exclusion guard`);
-  assert.ok(guardStart > previousEnd, `${operation} must be inside its nearest viewer-profile exclusion guard`);
-  assert.ok(nextEnd > position, `${operation} viewer-profile exclusion guard must close after the dispatcher clause`);
+function assertDispatcherRetired(operation) {
+  assert.equal(
+    ops.includes(dispatcherClause(operation)),
+    false,
+    `${operation} must be absent from the dispatcher`,
+  );
 }
 
-function assertRetainedOutsideProfileGuard(operation) {
-  const position = dispatcherPosition(operation);
-  const guardStart = ops.lastIndexOf(PROFILE_GUARD, position);
-  const guardEnd = ops.lastIndexOf("#endif", position);
-  assert.ok(
-    guardStart < 0 || guardEnd > guardStart,
-    `${operation} must remain outside viewer-profile exclusion guards`,
+function assertDispatcherRetained(operation) {
+  assert.equal(
+    ops.includes(dispatcherClause(operation)),
+    true,
+    `${operation} dispatcher clause must remain available`,
   );
 }
 
@@ -56,7 +49,7 @@ test("viewer Web profile is WLD-only and target-local", () => {
   assert.match(abi, /TERRAX_VIEWER_WEB_PROFILE_JSON/);
 });
 
-test("viewer profile dispatcher excludes only compatibility operations", () => {
+test("viewer profile keeps retired operations out of every dispatcher", () => {
   for (const operation of [
     "render_preview_rgba",
     "mark_chest_items_preview",
@@ -66,8 +59,9 @@ test("viewer profile dispatcher excludes only compatibility operations", () => {
     "remove_all_wires",
     "unlock_bestiary",
   ]) {
-    assertProfileGuarded(operation);
+    assertDispatcherRetired(operation);
   }
+  assert.doesNotMatch(ops, /TERRAWASM_VIEWER_WEB_PROFILE/);
 
   for (const operation of [
     "render_preview_png",
@@ -80,14 +74,20 @@ test("viewer profile dispatcher excludes only compatibility operations", () => {
     "replace_chests",
     "replace_bestiary",
   ]) {
-    assertRetainedOutsideProfileGuard(operation);
+    assertDispatcherRetained(operation);
   }
 });
 
 test("deprecated pixel mapping and legacy PNG compare implementation stay retired", () => {
   assert.doesNotMatch(ops, /apply_pixel_art_mapping/);
-  assert.doesNotMatch(api, /apply_pixel_art_mapping/);
+  assert.doesNotMatch(sourceApi, /apply_pixel_art_mapping/);
   assert.doesNotMatch(cmake, /TERRAX_ENABLE_LEGACY_RENDER_COMPARE/);
+  for (const source of [sourceApi, update, render, docs]) {
+    assert.doesNotMatch(
+      source,
+      /render_preview_rgba|mark_chest_items_preview|mark_chest_items_map|convert_world_biome|set_visibility|remove_all_wires|unlock_bestiary/,
+    );
+  }
   assert.match(abi, /viewerWebProfile.*TERRAX_VIEWER_WEB_PROFILE_JSON/);
   assert.match(manifest, /viewerWebProfile.*boolean/);
   assert.doesNotMatch(render, /TERRAX_ENABLE_LEGACY_RENDER_COMPARE|int32_t txw_render_preview_png\s*\(/);
@@ -104,9 +104,9 @@ test("historical compact TXCI artifacts stay absent", () => {
   }
 });
 
-test("quality workflow performs an actual generic-vs-profile artifact comparison", () => {
-  assert.match(workflow, /Build and compare viewer Web profile/);
+test("quality workflow validates the viewer Web profile artifact", () => {
+  assert.match(workflow, /Build and validate viewer Web profile/);
   assert.match(workflow, /-ViewerWebProfile/);
   assert.match(workflow, /check_viewer_web_profile_artifact\.js/);
-  assert.match(workflow, /profileBytes\s+-ge\s+\$genericBytes/);
+  assert.doesNotMatch(workflow, /profileBytes\s+-ge\s+\$genericBytes/);
 });

@@ -5,7 +5,7 @@ include(CTest)
 option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
 option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
-option(TERRAWASM_VIEWER_WEB_PROFILE "Trim unused JSON operations from the viewer WLD Web target" OFF)
+option(TERRAWASM_VIEWER_WEB_PROFILE "Mark the WLD Web target as the viewer profile" OFF)
 
 set(TERRAWASM_FEATURE_SET "all" CACHE STRING "Compiled capability set: all, wld, or plr")
 set_property(CACHE TERRAWASM_FEATURE_SET PROPERTY STRINGS all wld plr)

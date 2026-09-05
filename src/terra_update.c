@@ -1,5 +1,5 @@
 /*
- * terra_update.c -- Streaming tile modifications: biome conversion + batch updates.
+ * terra_update.c -- Streaming tile modifications with batch updates.
  *
  * All tile modifications are applied as a single streaming pass through the
  * raw .wld tile data. No full tile array is ever materialized.
@@ -11,19 +11,15 @@ extern void* memcpy(void* dst, const void* src, unsigned long n);
 
 extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
-extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 extern int set_result_buf(TxBuf* b);
 extern void buf_init(TxBuf* b, uint32_t cap);
 extern int tx_streq_c(const char* a, const char* b);
-extern int32_t tx_last_status;
 extern void buf_u8(TxBuf* b, uint8_t v);
 extern void buf_bytes(TxBuf* b, const void* p, uint32_t n);
 extern void buf_u32le(TxBuf* b, uint32_t v);
 extern void buf_cstr(TxBuf* b, const char* s);
 extern void json_u32(TxBuf* b, uint32_t v);
-extern void json_i32(TxBuf* b, int32_t v);
-extern void json_string(TxBuf* b, const char* s);
 
 extern int read_tile_at(TxWorld* w, uint32_t* off, uint32_t end, TxTile* t);
 extern void write_tile(TxWorld* w, TxBuf* b, const TxTile* t, uint32_t same);
@@ -689,87 +685,4 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
     int result = set_result_buf(response);
     tx_internal_free(rules);
     return result;
-}
-
-int execute_set_visibility(TxWorld* w, const char* request, int jlen,
-                           TxBuf* response) {
-    extern int json_find_key(const char* json, int jlen, const char* key);
-    extern int json_extract_bool(const char* json, int jlen, int pos, int* out);
-    int blocks_visible = 1, walls_visible = 1;
-    int p = json_find_key(request, jlen, "blocks_visible");
-    if (p >= 0) json_extract_bool(request, jlen, p, &blocks_visible);
-    p = json_find_key(request, jlen, "walls_visible");
-    if (p >= 0) json_extract_bool(request, jlen, p, &walls_visible);
-    TxTileRule rules[2];
-    init_tile_rule(&rules[0]);
-    init_tile_rule(&rules[1]);
-    int rule_count = 0;
-    if (!blocks_visible) {
-        rules[rule_count].is_active = 1;
-        rules[rule_count].type = -1;
-        rules[rule_count].patch_invisible_block = 1;
-        rule_count++;
-    } else {
-        rules[rule_count].invisible_block = 1;
-        rules[rule_count].patch_invisible_block = 0;
-        rule_count++;
-    }
-    if (!walls_visible) {
-        rules[rule_count].wall = -1;
-        rules[rule_count].patch_invisible_wall = 1;
-        rule_count++;
-    } else {
-        rules[rule_count].invisible_wall = 1;
-        rules[rule_count].patch_invisible_wall = 0;
-        rule_count++;
-    }
-    uint32_t vis_cap = w->section_overrides[1].active
-        ? w->section_overrides[1].len : (w->ends[1] - w->starts[1]);
-    TxBuf tile_buf;
-    if (!init_tile_buffer(&tile_buf, vis_cap, "failed to allocate visibility tile buffer"))
-        return -1;
-    if (!rebuild_tile_section(w, &tile_buf, rules, (uint32_t)rule_count)) {
-        if (tile_buf.data) tx_internal_free(tile_buf.data);
-        tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed"); return -1;
-    }
-    extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
-    if (!set_section_override_data(w, 1, tile_buf.data, tile_buf.len)) {
-        if (tile_buf.data) tx_internal_free(tile_buf.data);
-        return -1;
-    }
-    buf_cstr(response, "{\"status\":\"ok\",\"blocks_visible\":");
-    json_u32(response, (uint32_t)blocks_visible);
-    buf_cstr(response, ",\"walls_visible\":");
-    json_u32(response, (uint32_t)walls_visible);
-    buf_u8(response, '}');
-    return set_result_buf(response);
-}
-
-int execute_remove_all_wires(TxWorld* w, const char* request, int jlen,
-                             TxBuf* response) {
-    (void)request; (void)jlen;
-    TxTileRule rules[1];
-    init_tile_rule(&rules[0]);
-    rules[0].wire_red = -1; rules[0].wire_blue = -1;
-    rules[0].wire_green = -1; rules[0].wire_yellow = -1;
-    rules[0].patch_wire_red = 0; rules[0].patch_wire_blue = 0;
-    rules[0].patch_wire_green = 0; rules[0].patch_wire_yellow = 0;
-    uint32_t wire_cap = w->section_overrides[1].active
-        ? w->section_overrides[1].len : (w->ends[1] - w->starts[1]);
-    TxBuf tile_buf;
-    if (!init_tile_buffer(&tile_buf, wire_cap, "failed to allocate wire tile buffer"))
-        return -1;
-    if (!rebuild_tile_section(w, &tile_buf, rules, 1)) {
-        if (tile_buf.data) tx_internal_free(tile_buf.data);
-        tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed"); return -1;
-    }
-    extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
-    if (!set_section_override_data(w, 1, tile_buf.data, tile_buf.len)) {
-        if (tile_buf.data) tx_internal_free(tile_buf.data);
-        return -1;
-    }
-    buf_cstr(response, "{\"status\":\"ok\",\"removed\":\"all_wires\",\"tile_count\":");
-    json_u32(response, rules[0].matched);
-    buf_cstr(response, "}");
-    return set_result_buf(response);
 }

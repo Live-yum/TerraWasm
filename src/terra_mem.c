@@ -95,7 +95,6 @@ uint32_t tx_last_ptr = 0;
 uint32_t tx_last_len = 0;
 uint32_t tx_last_width = 0;
 uint32_t tx_last_height = 0;
-uint32_t tx_last_stride = 0;
 
 /* Error state */
 int32_t tx_last_status = 0;
@@ -378,7 +377,6 @@ void tx_reset_heap(void) {
     tx_last_len = 0;
     tx_last_width = 0;
     tx_last_height = 0;
-    tx_last_stride = 0;
 }
 
 /* ---------- Heap mark management ---------- */
@@ -506,10 +504,14 @@ static void tx_error_append_json_text(const char* text, uint32_t* position, uint
 }
 
 void tx_set_error(const char* code, const char* message) {
-    /* Preserve the public NOT_SUPPORTED status through operation dispatch. */
-    tx_last_status = tx_streq_c(code, "TERRAX_NOT_SUPPORTED")
-        ? TERRAX_WORLD_STATUS_NOT_SUPPORTED
-        : -1;
+    /* Preserve public NOT_FOUND/NOT_SUPPORTED statuses through dispatch. */
+    if (tx_streq_c(code, "TERRAX_NOT_SUPPORTED"))
+        tx_last_status = TERRAX_WORLD_STATUS_NOT_SUPPORTED;
+    else if (tx_streq_c(code, "TERRAX_NOT_FOUND") ||
+             tx_streq_c(code, "TERRAX_UNKNOWN_OPERATION"))
+        tx_last_status = TERRAX_WORLD_STATUS_NOT_FOUND;
+    else
+        tx_last_status = -1;
 
     const char* prefix = "{\"code\":\"";
     const char* middle = "\",\"message\":\"";

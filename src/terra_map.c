@@ -28,7 +28,6 @@ extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
-extern uint32_t tx_last_stride;
 
 extern void     buf_init(TxBuf* b, uint32_t cap);
 extern int      buf_reserve(TxBuf* b, uint32_t extra);
@@ -1445,7 +1444,6 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     tx_last_len = 0u;
     tx_last_width = 0u;
     tx_last_height = 0u;
-    tx_last_stride = 0u;
 
     if (!w) {
         tx_set_error("TERRAX_SESSION_NOT_FOUND", "world handle not found");
@@ -1590,7 +1588,6 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
 finalized:
     tx_last_width = width;
     tx_last_height = height;
-    tx_last_stride = width * 4u;
     if (result >= 0) {
         if (matched_chest_count) *matched_chest_count = chest_point_count;
         if (matched_tile_count) *matched_tile_count = tile_matches;

@@ -867,18 +867,19 @@ test("marked map reports scanned matches, dimensions, and a v33083 single-use pa
     assert.ok(expectedChests > 0);
 
     const duplicateRuleCount = expectedChests + 5;
-    let result = executeOperation(M, opened.handle, "mark_chest_items_map", {
-      markers: Array.from({ length: duplicateRuleCount }, () => ({
+    let result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", {
+      chest_markers: Array.from({ length: duplicateRuleCount }, () => ({
         item_id: itemType,
         color: "#FF2020C8",
       })),
+      tile_markers: [{ tile_type: -1, color: "#20A0FFFF" }],
     });
     assert.equal(result.status, 0);
     let response = JSON.parse(result.value);
     assert.equal(response.matched_chest_count, expectedChests);
     assert.equal(response.width, header.maxTilesX);
     assert.equal(response.height, header.maxTilesY);
-    assert.equal(response.marker_count, duplicateRuleCount);
+    assert.equal(response.matched_tile_count, 0);
     assert.ok(response.map_bytes > 0);
 
     result = executeOperation(M, opened.handle, "mark_tiles_and_chests_map", {
@@ -1078,7 +1079,7 @@ test("next operation and close reclaim unconsumed map output", async () => {
     assert.equal(M._terra_op_get_map(opened.handle, 0, 0n, sizePtr, widthPtr, heightPtr), 2);
     const withMap = M._tx_native_heap_used() >>> 0;
 
-    result = executeOperation(M, opened.handle, "render_preview_rgba", { max_w: 32, max_h: 32 });
+    result = executeOperation(M, opened.handle, "render_thumbnail_png", { max_w: 32 });
     assert.equal(result.status, 0);
     assert.equal(M._terra_op_get_map(opened.handle, 0, 0n, sizePtr, widthPtr, heightPtr), 8);
     assert.ok((M._tx_native_heap_used() >>> 0) < withMap, "next operation must reclaim map bytes");

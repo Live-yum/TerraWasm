@@ -131,61 +131,6 @@ function renderThumbnailPng(M, handle, maxWidth, cacheKey) {
   }
 }
 
-function renderPreviewRgba(M, handle, maxWidth, cacheKey) {
-  const render = executeOperation(M, handle, "render_preview_rgba", {
-    max_w: maxWidth,
-    cache_key: cacheKey,
-  });
-  assert.equal(render.status, "ok");
-
-  const requiredPtr = mustAlloc(M, 8, "preview required size");
-  const widthPtr = mustAlloc(M, 4, "preview width");
-  const heightPtr = mustAlloc(M, 4, "preview height");
-  const stridePtr = mustAlloc(M, 4, "preview stride");
-  let outputPtr = 0;
-  try {
-    let status = M._terra_op_get_preview_rgba(
-      handle,
-      0,
-      0n,
-      requiredPtr,
-      widthPtr,
-      heightPtr,
-      stridePtr,
-    );
-    assert.equal(status, 2, "preview probe must report buffer-too-small");
-    const required = readU64(M, requiredPtr);
-    assert.ok(required > 0, "preview must report a non-empty RGBA payload");
-    outputPtr = mustAlloc(M, required, "preview output");
-    status = M._terra_op_get_preview_rgba(
-      handle,
-      outputPtr,
-      BigInt(required),
-      requiredPtr,
-      widthPtr,
-      heightPtr,
-      stridePtr,
-    );
-    assert.equal(status, 0, `preview copy failed with status ${status}`);
-
-    const rgba = Buffer.from(M.HEAPU8.slice(outputPtr, outputPtr + required));
-    return {
-      rgba,
-      hash: sha256(rgba),
-      width: readU32(M, widthPtr),
-      height: readU32(M, heightPtr),
-      stride: readU32(M, stridePtr),
-      reportedSize: required,
-    };
-  } finally {
-    if (outputPtr) M._tx_free(outputPtr);
-    M._tx_free(stridePtr);
-    M._tx_free(heightPtr);
-    M._tx_free(widthPtr);
-    M._tx_free(requiredPtr);
-  }
-}
-
 function saveWorldToBuffer(M, handle) {
   const requiredPtr = mustAlloc(M, 4, "save required size");
   let outputPtr = 0;
@@ -215,7 +160,6 @@ test("batch_update_tiles changes same-handle thumbnails and survives save/reopen
   try {
     opened = openBytes(M, TEST_BYTES);
     const before = renderThumbnailPng(M, opened.handle, THUMB_MAX_WIDTH, "before");
-    const beforeRgba = renderPreviewRgba(M, opened.handle, THUMB_MAX_WIDTH, "before-rgba");
     assert.ok(before.width > 0 && before.height > 0, "pre-mutation thumbnail dimensions must be populated");
 
     const mutation = executeOperation(M, opened.handle, "batch_update_tiles", {
@@ -224,7 +168,6 @@ test("batch_update_tiles changes same-handle thumbnails and survives save/reopen
     assert.ok(mutation.total_updated > 0, "mutation must update at least one tile");
 
     const after = renderThumbnailPng(M, opened.handle, THUMB_MAX_WIDTH, "after");
-    const afterRgba = renderPreviewRgba(M, opened.handle, THUMB_MAX_WIDTH, "after-rgba");
     const savedBytes = saveWorldToBuffer(M, opened.handle);
     const savedHash = sha256(savedBytes);
 
@@ -233,7 +176,6 @@ test("batch_update_tiles changes same-handle thumbnails and survives save/reopen
 
     reopened = openBytes(M, savedBytes);
     const reopenedThumb = renderThumbnailPng(M, reopened.handle, THUMB_MAX_WIDTH, "reopened");
-    const reopenedRgba = renderPreviewRgba(M, reopened.handle, THUMB_MAX_WIDTH, "reopened-rgba");
     const repeatedMutation = executeOperation(M, reopened.handle, "batch_update_tiles", {
       rules: [{ where: { is_active: true, type: 25 }, patch: { type: 1 } }],
     });
@@ -243,18 +185,10 @@ test("batch_update_tiles changes same-handle thumbnails and survives save/reopen
       beforeHash: before.hash,
       afterHash: after.hash,
       reopenedHash: reopenedThumb.hash,
-      beforeRgbaHash: beforeRgba.hash,
-      afterRgbaHash: afterRgba.hash,
-      reopenedRgbaHash: reopenedRgba.hash,
       inputHash,
       savedHash,
     };
 
-    assert.notEqual(
-      afterRgba.hash,
-      beforeRgba.hash,
-      `same-handle RGBA preview must change after the mutation: ${JSON.stringify(diagnostics)}`,
-    );
     assert.notEqual(
       after.hash,
       before.hash,

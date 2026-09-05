@@ -3,7 +3,7 @@
  *
  * Pure C, no libc dependencies. Implements:
  *   - Color system (tile/wall/background)
- *   - Preview RGBA rendering (column-major tile scan)
+ *   - Preview rendering (column-major tile scan)
  *   - CRC32 for PNG chunks
  *   - Fixed-Huffman zlib deflate with LZ77 hash-chain matching
  *   - PNG encoding (RGBA -> filter bytes -> zlib -> PNG chunks)
@@ -31,7 +31,6 @@ extern void tx_internal_free(void* ptr);
 extern void  tx_set_error(const char* code, const char* message);
 extern void  tx_clear_error(void);
 extern int   set_result_buf(TxBuf* b);
-extern int   set_result_bytes(uint8_t* p, uint32_t len);
 
 extern const uint8_t* tx_get_tile_colors(void);
 extern uint32_t       tx_get_tile_color_count(void);
@@ -42,7 +41,6 @@ extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
-extern uint32_t tx_last_stride;
 
 /* ====================================================================
  * Extern declarations from terra_wld.c
@@ -889,7 +887,6 @@ static int encode_png_from_owned_rgba(uint8_t* rgba, uint32_t pw, uint32_t ph) {
 
         tx_last_width = pw;
         tx_last_height = ph;
-        tx_last_stride = pw * 4u;
         return set_result_buf(&out);
       }
     }
@@ -1805,7 +1802,6 @@ static int encode_marked_preview_png_stream(
 
   tx_last_width = pw;
   tx_last_height = ph;
-  tx_last_stride = stride;
   return set_result_buf(&out);
 }
 
@@ -1921,32 +1917,7 @@ static int encode_full_preview_rgb_png(
 
   tx_last_width = pw;
   tx_last_height = ph;
-  tx_last_stride = 0u;
   return set_result_buf(&out);
-}
-
-/* ====================================================================
- * Exported: render preview to RGBA buffer in WASM memory
- *
- * Returns byte count on success, -1 on error.
- * Result pointer available via tx_last_ptr/tx_last_len.
- * ==================================================================== */
-
-int32_t txw_render_preview_rgba(TxWorld* w, uint32_t max_w, uint32_t max_h) {
-  uint32_t pw = 0u;
-  uint32_t ph = 0u;
-  uint32_t stride = 0u;
-  if (!compute_preview_size(w, max_w, max_h, &pw, &ph, &stride)) return -1;
-  uint32_t rgba_len = stride * ph;
-  uint8_t* rgba = tx_alloc(rgba_len);
-  if (!rgba) { tx_set_error("TERRAX_WASM_OOM", "preview allocation failed"); return -1; }
-
-  render_preview_to(w, rgba, pw, ph);
-
-  tx_last_width  = pw;
-  tx_last_height = ph;
-  tx_last_stride = stride;
-  return set_result_bytes(rgba, rgba_len);
 }
 
 /* ====================================================================

@@ -1,24 +1,16 @@
 /*
  * terra_ops.c -- Operation dispatcher for terra_op_execute_json.
  *
- * Dispatches named operations to their implementations.
- * Operations are: txw_render_preview_png, txw_render_preview_rgba, render_lit_map,
- * mark_chest_items_preview, mark_chest_items_map,
- * mark_tiles_and_chests_preview, mark_tiles_and_chests_map,
- * convert_world_biome, batch_update_tiles, unlock_bestiary.
- *
- * batch_update_tiles is the primary mutation path used by the viewer.
- * set_visibility and remove_all_wires remain compatibility operations
- * because they are still dispatched and documented by the public JSON ABI.
+ * Dispatches the maintained WLD operations used by viewer-app and the
+ * supported Node/Web API surface. Viewer-unused compatibility aliases are
+ * intentionally retired instead of being hidden behind a build profile.
  */
 #include "terra_types.h"
 #include "terra_map.h"
-#include <stdio.h>
 
 /* External declarations */
 extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
-extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 extern int set_result_buf(TxBuf* b);
 extern void buf_init(TxBuf* b, uint32_t cap);
@@ -35,7 +27,6 @@ extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
-extern uint32_t tx_last_stride;
 
 /* From terra_json.c */
 extern int json_validate_document(const char* json, int jlen);
@@ -46,7 +37,6 @@ extern int json_skip_value(const char* json, int jlen, int pos);
 
 /* From terra_render.c */
 extern int txw_render_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h);
-extern int txw_render_preview_rgba(TxWorld* w, uint32_t max_w, uint32_t max_h);
 extern int txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h,
                                          const MapMarkerEntry* chest_markers, uint32_t chest_count,
                                          const MapMarkerEntry* tile_markers, uint32_t tile_count,
@@ -55,8 +45,6 @@ extern int txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t ma
 
 /* From terra_update.c */
 extern int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen, TxBuf* response);
-extern int execute_set_visibility(TxWorld* w, const char* request, int jlen, TxBuf* response);
-extern int execute_remove_all_wires(TxWorld* w, const char* request, int jlen, TxBuf* response);
 
 /* From terra_api.c */
 extern int write_file_from_heap(const char* path, const uint8_t* data, uint32_t len);
@@ -301,7 +289,6 @@ static int finish_map_response(TxBuf* response, uint8_t* map_data, uint32_t map_
     tx_last_len = map_len;
     tx_last_width = map_width;
     tx_last_height = map_height;
-    tx_last_stride = 0u;
     return response_len;
 }
 
@@ -337,14 +324,12 @@ static int finish_preview_png_response(TxWorld* w, TxBuf* response,
         w->media_result_len = png_len;
         w->media_result_width = png_width;
         w->media_result_height = png_height;
-        w->media_result_stride = 0u;
         w->media_result_kind = 2u;
 
         tx_last_ptr = (uint32_t)(uintptr_t)png_data;
         tx_last_len = png_len;
         tx_last_width = png_width;
         tx_last_height = png_height;
-        tx_last_stride = 0u;
         return response_len;
     }
 }
@@ -356,14 +341,12 @@ static int finish_preview_png_response(TxWorld* w, TxBuf* response,
 
 static int execute_txw_render_preview_png(TxWorld* w, const char* request, int jlen,
                                       TxBuf* response) {
-    /* Parse optional max_w, max_h from request */
     int32_t max_w = 0, max_h = 0;
     int p = json_find_key(request, jlen, "max_w");
     if (p >= 0) json_extract_int(request, jlen, p, &max_w);
     p = json_find_key(request, jlen, "max_h");
     if (p >= 0) json_extract_int(request, jlen, p, &max_h);
 
-    /* Parse and validate output_path before the expensive render. */
     char output_path[512] = {0};
     p = json_find_key(request, jlen, "output_path");
     if (p >= 0 && !json_extract_str(request, jlen, p, output_path, sizeof(output_path))) {
@@ -372,11 +355,9 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
     }
     if (!validate_operation_output_path(output_path, ".png")) return -1;
 
-    /* Render PNG into WASM memory */
     int result = txw_render_preview_png(w, (uint32_t)max_w, (uint32_t)max_h);
     if (result < 0) return -1;
 
-    /* Save PNG pointer before set_result_buf overwrites it */
     uint32_t png_ptr = tx_last_ptr, png_len = tx_last_len;
     uint32_t png_w = tx_last_width, png_h = tx_last_height;
 
@@ -386,7 +367,6 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
         return -1;
     }
 
-    /* Build response */
     buf_cstr(response, "{\"status\":\"ok\",\"output_path\":");
     json_string(response, output_path);
     buf_cstr(response, ",\"width\":");
@@ -397,7 +377,6 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
     json_u32(response, png_len);
     buf_u8(response, '}');
     int rlen = set_result_buf(response);
-    /* Restore PNG pointer so it remains accessible */
     tx_last_ptr = png_ptr; tx_last_len = png_len;
     tx_last_width = png_w; tx_last_height = png_h;
     return rlen;
@@ -420,11 +399,9 @@ static int execute_txw_render_thumbnail_png(TxWorld* w, const char* request, int
     int result = txw_render_preview_png(w, (uint32_t)max_w, 0);
     if (result < 0) return -1;
 
-    /* Save PNG pointer so terra_op_get_thumbnail_png can retrieve it */
     uint32_t png_ptr = tx_last_ptr, png_len = tx_last_len;
     uint32_t png_w = tx_last_width, png_h = tx_last_height;
 
-    /* Build response */
     buf_cstr(response, "{\"status\":\"ok\",\"width\":");
     json_u32(response, png_w);
     buf_cstr(response, ",\"height\":");
@@ -433,45 +410,8 @@ static int execute_txw_render_thumbnail_png(TxWorld* w, const char* request, int
     json_u32(response, png_len);
     buf_u8(response, '}');
     int rlen = set_result_buf(response);
-    /* Restore PNG pointer so terra_op_get_thumbnail_png works */
     tx_last_ptr = png_ptr; tx_last_len = png_len;
     tx_last_width = png_w; tx_last_height = png_h;
-    return rlen;
-}
-
-/* ====================================================================
- * Operation: txw_render_preview_rgba
- * Renders RGBA buffer into WASM memory.
- * ==================================================================== */
-
-static int execute_txw_render_preview_rgba(TxWorld* w, const char* request, int jlen,
-                                       TxBuf* response) {
-    int32_t max_w = 0, max_h = 0;
-    int p = json_find_key(request, jlen, "max_w");
-    if (p >= 0) json_extract_int(request, jlen, p, &max_w);
-    p = json_find_key(request, jlen, "max_h");
-    if (p >= 0) json_extract_int(request, jlen, p, &max_h);
-
-    int result = txw_render_preview_rgba(w, (uint32_t)max_w, (uint32_t)max_h);
-    if (result < 0) return -1;
-
-    /* Save RGBA pointers before set_result_buf overwrites them */
-    uint32_t sv_ptr = tx_last_ptr, sv_len = tx_last_len;
-    uint32_t sv_w = tx_last_width, sv_h = tx_last_height, sv_s = tx_last_stride;
-
-    buf_cstr(response, "{\"status\":\"ok\",\"pixel_format\":\"rgba8\",\"width\":");
-    json_u32(response, sv_w);
-    buf_cstr(response, ",\"height\":");
-    json_u32(response, sv_h);
-    buf_cstr(response, ",\"stride\":");
-    json_u32(response, sv_s);
-    buf_cstr(response, ",\"buffer_size\":");
-    json_u32(response, sv_len);
-    buf_u8(response, '}');
-    int rlen = set_result_buf(response);
-    /* Restore RGBA buffer pointers so terra_op_get_preview_rgba works */
-    tx_last_ptr = sv_ptr; tx_last_len = sv_len;
-    tx_last_width = sv_w; tx_last_height = sv_h; tx_last_stride = sv_s;
     return rlen;
 }
 
@@ -517,136 +457,6 @@ static int execute_render_lit_map(TxWorld* w, const char* request, int jlen,
     json_u32(response, map_w);
     buf_cstr(response, ",\"height\":");
     json_u32(response, map_h);
-    buf_cstr(response, ",\"map_bytes\":");
-    json_u32(response, map_len);
-    buf_cstr(response, ",\"file_written\":");
-    buf_cstr(response, wrote_file ? "true" : "false");
-    buf_u8(response, '}');
-    return finish_map_response(response, map_data, map_len, map_w, map_h);
-}
-static int execute_unlock_bestiary(TxWorld* w, const char* request, int jlen,
-                                   TxBuf* response) {
-    (void)w; (void)request; (void)jlen; (void)response;
-    tx_set_error("TERRAX_NOT_SUPPORTED",
-                 "unlock_bestiary has no verified built-in catalog; use replace_bestiary");
-    return -1;
-}
-
-/* ====================================================================
- * Operation: mark_chest_items_preview
- * Renders a preview PNG with chest marker rings using the legacy request shape.
- * ==================================================================== */
-
-static int execute_mark_chest_items_preview(TxWorld* w, const char* request, int jlen,
-                                            TxBuf* response) {
-    MapMarkerEntry* chest_markers = NULL;
-    uint32_t chest_count = 0u;
-    uint32_t max_w = 0u;
-    uint32_t max_h = 0u;
-    uint32_t matched_chests = 0u;
-    uint32_t matched_tiles = 0u;
-
-    if (!parse_marker_array(
-            request, jlen, "markers", "item_id", &chest_markers, &chest_count)) {
-        return -1;
-    }
-    if (chest_count == 0u) {
-        tx_set_error("TERRAX_VALIDATION_ERROR", "markers must contain at least one marker");
-        return -1;
-    }
-
-    load_preview_bounds(request, jlen, &max_w, &max_h);
-    if (txw_render_marked_preview_png(
-            w, max_w, max_h, chest_markers, chest_count, NULL, 0u,
-            &matched_chests, &matched_tiles) < 0) {
-        tx_internal_free(chest_markers);
-        return -1;
-    }
-    tx_internal_free(chest_markers);
-
-    {
-        uint8_t* png_data = (uint8_t*)(uintptr_t)tx_last_ptr;
-        uint32_t png_len = tx_last_len;
-        uint32_t png_w = tx_last_width;
-        uint32_t png_h = tx_last_height;
-
-        buf_cstr(response, "{\"status\":\"ok\",\"matched_chest_count\":");
-        json_u32(response, matched_chests);
-        buf_cstr(response, ",\"width\":");
-        json_u32(response, png_w);
-        buf_cstr(response, ",\"height\":");
-        json_u32(response, png_h);
-        buf_cstr(response, ",\"marker_count\":");
-        json_u32(response, chest_count);
-        buf_cstr(response, ",\"thumbnail_png_bytes\":");
-        json_u32(response, png_len);
-        buf_u8(response, '}');
-        return finish_preview_png_response(w, response, png_data, png_len, png_w, png_h);
-    }
-}
-
-/* ====================================================================
- * Operation: mark_chest_items_map
- * Generates a marked map from the legacy `markers` request shape.
- * ==================================================================== */
-
-static int execute_mark_chest_items_map(TxWorld* w, const char* request, int jlen,
-                                        TxBuf* response) {
-    char output_dir[512] = {0};
-    int output_pos = json_find_key(request, jlen, "output_dir");
-    if (output_pos >= 0 && !json_extract_str(
-            request, jlen, output_pos, output_dir, sizeof(output_dir))) {
-        tx_set_error("TERRAX_VALIDATION_ERROR", "operation output_dir must be a string under 512 bytes");
-        return -1;
-    }
-    if (!validate_operation_output_path(output_dir, NULL)) return -1;
-
-    MapMarkerEntry* chest_markers = NULL;
-    uint32_t chest_count = 0u;
-    if (!parse_marker_array(
-            request, jlen, "markers", "item_id", &chest_markers, &chest_count)) {
-        return -1;
-    }
-    if (chest_count == 0u) {
-        tx_set_error("TERRAX_VALIDATION_ERROR", "markers must contain at least one marker");
-        return -1;
-    }
-
-    uint32_t matched_chests = 0u;
-    uint32_t matched_tiles = 0u;
-    int32_t result = terra_render_lit_map_marked(
-        w, chest_markers, chest_count, NULL, 0u, &matched_chests, &matched_tiles);
-    tx_internal_free(chest_markers);
-    if (result < 0) return -1;
-
-    uint8_t* map_data = (uint8_t*)(uintptr_t)tx_last_ptr;
-    uint32_t map_len = tx_last_len;
-    uint32_t map_w = tx_last_width;
-    uint32_t map_h = tx_last_height;
-
-    int wrote_file = 0;
-    if (output_dir[0] && map_data && map_len > 0) {
-        char map_path[768];
-        uint32_t pos = 0u;
-        for (uint32_t i = 0; output_dir[i] && pos < sizeof(map_path) - 32u; i++)
-            map_path[pos++] = output_dir[i];
-        if (pos > 0u && map_path[pos - 1u] != '/' && map_path[pos - 1u] != '\\')
-            map_path[pos++] = '/';
-        const char* filename = "marked_world.map";
-        for (uint32_t i = 0; filename[i] && pos < sizeof(map_path) - 1u; i++)
-            map_path[pos++] = filename[i];
-        map_path[pos] = 0;
-        wrote_file = write_file_from_heap(map_path, map_data, map_len);
-    }
-
-    buf_cstr(response, "{\"status\":\"ok\",\"matched_chest_count\":");
-    json_u32(response, matched_chests);
-    buf_cstr(response, ",\"width\":");
-    json_u32(response, map_w);
-    buf_cstr(response, ",\"height\":");
-    json_u32(response, map_h);
-    buf_cstr(response, ",\"marker_count\":");
-    json_u32(response, chest_count);
     buf_cstr(response, ",\"map_bytes\":");
     json_u32(response, map_len);
     buf_cstr(response, ",\"file_written\":");
@@ -727,7 +537,6 @@ static int execute_mark_tiles_and_chests_preview(TxWorld* w, const char* request
 
 static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, int jlen,
                                              TxBuf* response) {
-    /* Parse output_dir */
     char output_dir[512] = {0};
     int p = json_find_key(request, jlen, "output_dir");
     if (p >= 0 && !json_extract_str(request, jlen, p, output_dir, sizeof(output_dir))) {
@@ -758,7 +567,6 @@ static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, in
         return -1;
     }
 
-    /* Generate map with multi-color markers */
     uint32_t matched_chests = 0u;
     uint32_t matched_tiles = 0u;
     int32_t result = terra_render_lit_map_marked(w, chest_markers, chest_count,
@@ -773,7 +581,6 @@ static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, in
     uint32_t map_w = tx_last_width;
     uint32_t map_h = tx_last_height;
 
-    /* Write map file to output_dir */
     int wrote_file = 0;
     if (output_dir[0] && map_data && map_len > 0) {
         char map_path[768];
@@ -809,7 +616,6 @@ static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, in
  * Main operation dispatcher
  * ==================================================================== */
 
-/* Inline string comparison to avoid cross-file linkage issues */
 static int op_streq(const char* a, const char* b) {
     if (!a || !b) return 0;
     while (*a && *b) { if (*a != *b) return 0; a++; b++; }
@@ -818,7 +624,6 @@ static int op_streq(const char* a, const char* b) {
 
 int op_execute_json(TxWorld* w, const char* op_name, const char* request,
                     TxBuf* response) {
-    /* Debug: report operation name in response for diagnostics */
     if (!op_name || !request || tx_strlen(op_name) == 0) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "empty operation name");
         return -1;
@@ -834,51 +639,27 @@ int op_execute_json(TxWorld* w, const char* op_name, const char* request,
         return execute_txw_render_preview_png(w, request, jlen, response);
     if (op_streq(op_name, "render_thumbnail_png"))
         return execute_txw_render_thumbnail_png(w, request, jlen, response);
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (op_streq(op_name, "render_preview_rgba"))
-        return execute_txw_render_preview_rgba(w, request, jlen, response);
-#endif
     if (op_streq(op_name, "render_lit_map"))
         return execute_render_lit_map(w, request, jlen, response);
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (op_streq(op_name, "mark_chest_items_preview"))
-        return execute_mark_chest_items_preview(w, request, jlen, response);
-    if (op_streq(op_name, "mark_chest_items_map"))
-        return execute_mark_chest_items_map(w, request, jlen, response);
-#endif
     if (op_streq(op_name, "mark_tiles_and_chests_preview"))
         return execute_mark_tiles_and_chests_preview(w, request, jlen, response);
     if (op_streq(op_name, "mark_tiles_and_chests_map"))
         return execute_mark_tiles_and_chests_map(w, request, jlen, response);
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (op_streq(op_name, "convert_world_biome"))
-        return execute_batch_update_tiles(w, request, jlen, response);
-#endif
     if (op_streq(op_name, "batch_update_tiles"))
         return execute_batch_update_tiles(w, request, jlen, response);
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (op_streq(op_name, "set_visibility"))
-        return execute_set_visibility(w, request, jlen, response);
-    if (op_streq(op_name, "remove_all_wires"))
-        return execute_remove_all_wires(w, request, jlen, response);
-#endif
     if (op_streq(op_name, "header_patch"))
         return tx_mutate_header_patch(w, request, (uint32_t)jlen, response);
     if (op_streq(op_name, "replace_chests"))
         return tx_mutate_replace_chests(w, request, (uint32_t)jlen, response);
     if (op_streq(op_name, "replace_bestiary"))
         return tx_mutate_replace_bestiary(w, request, (uint32_t)jlen, response);
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (op_streq(op_name, "unlock_bestiary"))
-        return execute_unlock_bestiary(w, request, jlen, response);
-#endif
 
-    /* Include operation name in error for debugging */
     {
         char err_msg[128];
         uint32_t olen = tx_strlen(op_name);
         const char* prefix = "unknown op: ";
         uint32_t i = 0;
+        (void)olen;
         for (i = 0; prefix[i] && i < 127; i++) err_msg[i] = prefix[i];
         for (uint32_t j = 0; op_name[j] && i < 127; j++, i++) err_msg[i] = op_name[j];
         err_msg[i] = 0;

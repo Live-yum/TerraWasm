@@ -35,11 +35,11 @@ TerraWasm 是一个将 Terraria 世界文件（`.wld`）解析、编辑、渲染
 │    terra_info_* / terra_plr_*                        │
 │    terra_section_get_json / set_json                 │
 │    terra_op_execute_json                             │
-│    terra_op_get_preview_rgba / get_thumbnail_png     │
+│    terra_op_get_thumbnail_png / terra_op_get_map    │
 ├──────────────┬──────────────────────────────────────┤
 │  terra_api.c │  terra_ops.c (操作分发)               │
 │              │  terra_mutators.c (安全 section 编码) │
-│  terra_wld.c │  terra_render.c (PNG/RGBA渲染)       │
+│  terra_wld.c │  terra_render.c (PNG 渲染)           │
 │  terra_map.c │  terra_update.c (批量修改)            │
 ├──────────────┴──────────────────────────────────────┤
 │  terra_mem.c   (bump allocator)                     │
@@ -457,29 +457,6 @@ terrax_world_status terra_op_execute_json(
 
 ---
 
-### `terra_op_get_preview_rgba`
-
-获取最近一次 `render_preview_rgba` 操作的 RGBA 缓冲区数据。
-
-```c
-terrax_world_status terra_op_get_preview_rgba(
-    TxWorld*  world,         // [in]  世界句柄
-    uint8_t*  buffer,        // [out] 可选，接收 RGBA 像素
-    uint64_t  buffer_size,
-    uint64_t* required_size, // [out] 所需大小 (width * height * 4)
-    uint32_t* width,         // [out] 图像宽度
-    uint32_t* height,        // [out] 图像高度
-    uint32_t* stride         // [out] 每行字节数 (通常 = width * 4)
-);
-```
-
-**使用流程：**
-1. 先调用 `terra_op_execute_json("render_preview_rgba", ...)` 渲染
-2. 第一次调用获取 `required_size`、`width`、`height`
-3. 分配缓冲区，第二次调用获取像素数据
-
----
-
 ### `terra_op_get_thumbnail_png`
 
 获取最近一次 `render_thumbnail_png` 操作的 PNG 数据。
@@ -522,34 +499,6 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 以下是 `terra_op_execute_json` 支持的所有操作：
 
 ### 渲染操作
-
-#### `render_preview_rgba`
-
-渲染世界为 RGBA 像素缓冲区。
-
-**请求 JSON：**
-```json
-{
-  "max_w": 0,   // 最大宽度 (0 = 原始尺寸)
-  "max_h": 0    // 最大高度 (0 = 原始尺寸)
-}
-```
-
-**响应 JSON：**
-```json
-{
-  "status": "ok",
-  "pixel_format": "rgba8",
-  "width": 8400,
-  "height": 2400,
-  "stride": 33600,
-  "buffer_size": 80640000
-}
-```
-
-之后用 `terra_op_get_preview_rgba` 获取像素数据。
-
----
 
 #### `render_preview_png`
 
@@ -749,48 +698,6 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 ---
 
-#### `convert_world_biome`
-
-生物群系转换（内部调用 batch_update_tiles）。
-
-**请求 JSON：**
-```json
-{
-  "mode": "purify"     // "purify" | "corruption" | "crimson" | "hallow"
-}
-```
-
-| 模式 | 效果 |
-|------|------|
-| `purify` | 净化（移除腐化/猩红/神圣） |
-| `corruption` | 转为腐化 |
-| `crimson` | 转为猩红 |
-| `hallow` | 转为神圣 |
-
----
-
-#### `set_visibility`
-
-切换方块/墙的隐形状态。
-
-**请求 JSON：**
-```json
-{
-  "invisible_block": 1,   // 1=隐形, 0=显示, null=不改
-  "invisible_wall": 1
-}
-```
-
----
-
-#### `remove_all_wires`
-
-移除所有电线。
-
-**请求 JSON：** `{}`（无参数）
-
----
-
 ### 像素画映射
 
 
@@ -837,14 +744,7 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 ---
 
-### 占位操作（未完全实现）
-
-| 操作名 | 状态 | 说明 |
-|--------|------|------|
-| `mark_chest_items_preview` | 占位 | 返回空标记 |
-| `mark_chest_items_map` | 占位 | 返回空标记 |
-| `mark_tiles_and_chests_preview` | 占位 | 返回空标记 |
-| `unlock_bestiary` | 不支持 | 返回 `TERRAX_NOT_SUPPORTED`，避免未修改字节却报告成功；请使用 `replace_bestiary` |
+未列出的 operation 名称会返回 `NOT_FOUND`，不会执行任何 WLD 修改。
 
 ---
 
@@ -889,7 +789,7 @@ function twoCall(fn) {
 
 ```javascript
 // 执行操作
-const status = terra_op_execute_json(world, "render_preview_rgba", "{}", 0, 0n, rp);
+const status = terra_op_execute_json(world, "render_thumbnail_png", "{\"max_w\":1920}", 0, 0n, rp);
 
 if (status !== 0) {
     // 获取结构化错误信息

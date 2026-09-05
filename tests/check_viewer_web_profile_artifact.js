@@ -60,7 +60,7 @@ for (const retained of [
 }
 
 // Build identity is compiled into the artifact and independently proves that
-// this is the viewer-profile build rather than the generic WLD Web artifact.
+// this is the viewer-profile build rather than an accidental generic artifact.
 assert.equal(
   hasRuntimeString("viewerWebProfile"),
   true,
@@ -80,12 +80,23 @@ assert.equal(
   "retired apply_pixel_art_mapping literal leaked into viewer Web runtime data",
 );
 
-// Do not require every profile-gated operation name to disappear byte-for-byte.
-// Names such as render_preview_rgba can remain reachable through generic
-// rendering/API code even when their JSON dispatcher branch is compiled out.
-// Exact dispatcher guards are verified by test_viewer_web_profile_contract.js,
-// while CI separately requires the profile .wasm to be strictly smaller than
-// the generic WLD Web build.
+// These operations are globally retired, not merely hidden from the viewer
+// profile. Keep the runtime data contract aligned with the source dispatcher.
+for (const retired of [
+  "render_preview_rgba",
+  "mark_chest_items_preview",
+  "mark_chest_items_map",
+  "convert_world_biome",
+  "set_visibility",
+  "remove_all_wires",
+  "unlock_bestiary",
+]) {
+  assert.equal(
+    hasRuntimeString(retired),
+    false,
+    `retired ${retired} literal leaked into viewer Web runtime data`,
+  );
+}
 console.log(
   `viewer Web profile artifact contract passed: ${wasmPath} (${bytes.length} bytes, runtimeData=${runtimeData.length} bytes)`,
 );

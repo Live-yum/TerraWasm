@@ -126,7 +126,6 @@ terrax_world_status terra_world_open_step(uint32_t id, uint32_t work_units) {
         world->media_result_len = tx_last_len;
         world->media_result_width = tx_last_width;
         world->media_result_height = tx_last_height;
-        world->media_result_stride = 0u;
         world->media_result_kind = 2u;
         task->stage = 2u;
         task->progress = 100u;

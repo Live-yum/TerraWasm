@@ -84,7 +84,7 @@ python scripts/build_txci.py
 `-Target` 选择 Node/Web 宿主产物，`-Features` 独立选择业务能力集合。直接使用 CMake 时传入
 `-DTERRAWASM_FEATURE_SET=all|wld|plr`；默认 `all` 保持原有完整 ABI。
 
-viewer-app 部署可额外使用 `-ViewerWebProfile`（仅允许与 `-Features wld` 组合）。该开关只给 Web/Mini Program target 定义 `TERRAWASM_VIEWER_WEB_PROFILE=1`，裁掉 viewer 未使用的兼容 JSON operation；同一次构建的 Node target 仍保持完整 WLD ABI。
+viewer-app 部署可额外使用 `-ViewerWebProfile`（仅允许与 `-Features wld` 组合）。该开关只给 Web/Mini Program target 定义 `TERRAWASM_VIEWER_WEB_PROFILE=1`，并在 build identity 中标记 viewer 专用产物；viewer 未使用的旧 WLD operation 已从所有构建中永久移除，同一次构建的 Node target 仍保持完整 WLD ABI。
 
 产出：
 - `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128 MiB 初始内存，512 MiB 最大内存）

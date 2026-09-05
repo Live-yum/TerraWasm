@@ -1,7 +1,7 @@
 /*
  * terra_world.h -- Public V2 API header for TerraWasm.
  *
- * Declares the 11 exported C functions matching the TERRAX_WORLD_V2_API_SPEC.
+ * Declares the exported C functions matching the TERRAX_WORLD_V2_API_SPEC.
  * All buffer sizes use uint64_t per the spec. Internally we use uint32_t
  * (WASM is 32-bit) but the API boundary must match the spec exactly.
  */
@@ -85,15 +85,6 @@ terrax_world_status terra_op_execute_json(
     char*                response_buffer,
     uint64_t             response_buffer_size,
     uint64_t*            required_size);
-
-terrax_world_status terra_op_get_preview_rgba(
-    uint32_t handle,
-    uint8_t*             buffer,
-    uint64_t             buffer_size,
-    uint64_t*            required_size,
-    uint32_t*            width,
-    uint32_t*            height,
-    uint32_t*            stride);
 
 terrax_world_status terra_op_get_thumbnail_png(
     uint32_t handle,

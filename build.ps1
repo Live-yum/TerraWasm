@@ -330,6 +330,7 @@ if ($Test) {
         "tests/test_batch_update_thumbnail.js",
         "tests/test_commands.js",
         "tests/test_marker_outputs.js",
+        "tests/test_removed_api_contract.js",
         "tests/test_icon_atlas_bridge.js",
         "tests/test_open_task.js",
         "tests/test_reader_safety.js",

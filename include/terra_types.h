@@ -395,11 +395,6 @@ typedef struct TxWorld {
     /* Optional TXCI palette used when marker colors are written to MAP. */
     TxciIndex marker_color_index;
 
-    /* Cached preview state */
-    uint32_t preview_width;
-    uint32_t preview_height;
-    uint32_t preview_stride;
-
     /* Operation heap tracking -- end-of-previous-operation heap position.
      * Used by terra_op_execute_json to release only the previous operation's
      * transient allocations without corrupting caller-allocated data. */
@@ -420,8 +415,7 @@ typedef struct TxWorld {
     uint32_t media_result_len;
     uint32_t media_result_width;
     uint32_t media_result_height;
-    uint32_t media_result_stride;
-    uint8_t  media_result_kind;  /* 1 = RGBA, 2 = PNG, 3 = MAP */
+    uint8_t  media_result_kind;  /* 2 = PNG, 3 = MAP */
 
     /* Pixel art queue (applied during save) */
     uint8_t* pixel_art_pixels;     /* RGBA pixel data */

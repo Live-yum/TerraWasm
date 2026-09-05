@@ -1,5 +1,5 @@
 /*
- * terra_api.c -- V2 API implementation (11 exported functions).
+ * terra_api.c -- V2 API implementation.
  *
  * Handles the two-call pattern, error propagation, and dispatches
  * to internal functions for section serialization and operations.
@@ -40,7 +40,6 @@ extern void tx_internal_free(void* ptr);
 extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 extern int set_result_buf(TxBuf* b);
-extern int set_result_bytes(uint8_t* p, uint32_t len);
 extern void buf_init(TxBuf* b, uint32_t cap);
 extern void buf_u8(TxBuf* b, uint8_t v);
 extern void buf_cstr(TxBuf* b, const char* s);
@@ -54,13 +53,11 @@ extern void json_i32(TxBuf* b, int32_t v);
 extern void json_u64(TxBuf* b, uint64_t v);
 extern uint32_t tx_strlen(const char* s);
 extern int tx_streq_c(const char* a, const char* b);
-extern int tx_streq_n(const char* a, uint32_t alen, const char* b);
 
 extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
-extern uint32_t tx_last_stride;
 extern int32_t tx_last_status;
 extern char tx_last_error[256];
 
@@ -78,9 +75,6 @@ extern int serialize_section_json(TxWorld* w, int section_idx, TxBuf* out);
 
 /* ---------- External from terra_ops.c ---------- */
 extern int op_execute_json(TxWorld* w, const char* op_name, const char* request, TxBuf* response);
-
-/* ---------- External from terra_render.c ---------- */
-extern int render_preview_rgba(TxWorld* w, uint32_t max_w, uint32_t max_h);
 
 /* ---------- External from terra_update.c ---------- */
 extern int rebuild_tile_section(TxWorld* w, TxBuf* out,
@@ -160,7 +154,6 @@ void tx_reclaim_transients(void) {
         world->media_result_len = 0;
         world->media_result_width = 0;
         world->media_result_height = 0;
-        world->media_result_stride = 0;
         world->media_result_kind = 0;
         world->last_op_heap_end = world->heap_mark;
     }
@@ -168,7 +161,7 @@ void tx_reclaim_transients(void) {
     if (current > mark) {
         tx_rewind(mark);
     }
-    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = tx_last_stride = 0;
+    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
 }
 
 /* ---------- Helper: copy string to caller buffer (two-call pattern) ---------- */
@@ -478,7 +471,7 @@ terrax_world_status terra_world_close(
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();
     if (count > 0) tx_set_world_open_count(count - 1);
-    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = tx_last_stride = 0;
+    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
     tx_rewind(allocation_mark);
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
@@ -1037,14 +1030,12 @@ static void tx_clear_media_result(TxWorld* world, int release_root) {
         tx_last_len = 0u;
         tx_last_width = 0u;
         tx_last_height = 0u;
-        tx_last_stride = 0u;
     }
     if (release_root && media) tx_internal_free(media);
     world->media_result = NULL;
     world->media_result_len = 0;
     world->media_result_width = 0;
     world->media_result_height = 0;
-    world->media_result_stride = 0;
     world->media_result_kind = 0;
 }
 
@@ -1123,17 +1114,15 @@ terrax_world_status terra_op_execute_json(
             tx_last_len = 0;
             tx_last_width = 0;
             tx_last_height = 0;
-            tx_last_stride = 0;
         }
     }
 
     world->heap_mark = tx_mark();
 
     /* Execute the operation FIRST, then allocate the response buffer.
-       Operations like biome conversion store section overrides on the
-       bump heap.  By allocating the response buffer *after* the
-       operation, override data sits below the response and is not
-       corrupted when we copy the response back to the caller. */
+       Operations that store section overrides on the bump heap must finish
+       before the response allocation so override data is not corrupted when
+       the response is copied back to the caller. */
     TxBuf response;
     response.data = NULL;
     response.len = 0;
@@ -1149,32 +1138,18 @@ terrax_world_status terra_op_execute_json(
             tx_last_status : TERRAX_WORLD_STATUS_INTERNAL_ERROR);
     }
 
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-    if (tx_streq_c(on_copy, "render_preview_rgba")) {
-        world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
-        world->media_result_len = tx_last_len;
-        world->media_result_width = tx_last_width;
-        world->media_result_height = tx_last_height;
-        world->media_result_stride = tx_last_stride;
-        world->media_result_kind = 1u;
-    } else
-#endif
     if (tx_streq_c(on_copy, "render_preview_png") ||
                tx_streq_c(on_copy, "render_thumbnail_png")) {
         world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
         world->media_result_len = tx_last_len;
         world->media_result_width = tx_last_width;
         world->media_result_height = tx_last_height;
-        world->media_result_stride = tx_last_stride;
         world->media_result_kind = 2u;
     } else if (tx_streq_c(on_copy, "render_lit_map") ||
-#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
-               tx_streq_c(on_copy, "mark_chest_items_map") ||
-#endif
                tx_streq_c(on_copy, "mark_tiles_and_chests_map")) {
         if (!tx_last_ptr || tx_last_len == 0u || tx_last_len > TX_MAP_MAX_OUTPUT_BYTES) {
             if (tx_last_ptr) tx_internal_free((void*)(uintptr_t)tx_last_ptr);
-            tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = tx_last_stride = 0u;
+            tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0u;
             if (response.data) tx_internal_free(response.data);
             world->last_op_heap_end = world->heap_mark;
             tx_set_error("TERRAX_RESULT_TOO_LARGE", "map output is empty or exceeds the 128 MiB budget");
@@ -1184,7 +1159,6 @@ terrax_world_status terra_op_execute_json(
         world->media_result_len = tx_last_len;
         world->media_result_width = tx_last_width;
         world->media_result_height = tx_last_height;
-        world->media_result_stride = 0u;
         world->media_result_kind = 3u;
     }
 
@@ -1196,7 +1170,7 @@ terrax_world_status terra_op_execute_json(
     if (!response.ok || !response.data) {
         if (response.data) tx_internal_free(response.data);
         tx_clear_media_result(world, 1);
-        tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = tx_last_stride = 0;
+        tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
         tx_set_error("TERRAX_WASM_OOM", "operation response allocation failed");
         return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
     }
@@ -1227,42 +1201,6 @@ terrax_world_status terra_op_execute_json(
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
-terrax_world_status terra_op_get_preview_rgba(
-    uint32_t handle,
-    uint8_t* buffer,
-    uint64_t buffer_size,
-    uint64_t* required_size,
-    uint32_t* width,
-    uint32_t* height,
-    uint32_t* stride) {
-    if (required_size) *required_size = 0;
-    TxWorld* world = tx_get_world(handle);
-    if (!world) return tx_invalid_handle();
-
-    if (world->media_result_kind != 1u || !world->media_result || world->media_result_len == 0) {
-        tx_set_error("TERRAX_STATE_ERROR", "no preview rendered yet");
-        return TERRAX_WORLD_STATUS_STATE_ERROR;
-    }
-
-    uint64_t needed = (uint64_t)world->media_result_len;
-    if (required_size) *required_size = needed;
-    if (width) *width = world->media_result_width;
-    if (height) *height = world->media_result_height;
-    if (stride) *stride = world->media_result_stride;
-
-    if (!buffer || buffer_size == 0) {
-        return TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL;
-    }
-    if (buffer_size < needed) {
-        return TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL;
-    }
-
-    memcpy(buffer, world->media_result, world->media_result_len);
-    tx_clear_media_result(world, 1);
-    tx_clear_error();
-    return TERRAX_WORLD_STATUS_OK;
-}
-
 /* ====================================================================
  * Exported: retrieve rendered PNG thumbnail from WASM memory.
  *
