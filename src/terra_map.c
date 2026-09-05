@@ -1663,14 +1663,6 @@ int32_t terra_generate_map(TxWorld* w) {
     return generate_map(w, NULL, 0u, NULL, 0u, 0u);
 }
 
-/* render_lit_map -- map generation with optional chest/tile markers */
-int32_t terra_render_lit_map(TxWorld* w, const int32_t* item_ids, uint32_t item_id_count,
-                             const int32_t* tile_types, uint32_t tile_type_count,
-                             uint32_t mark_chests) {
-    return generate_map(w, item_ids, item_id_count, tile_types, tile_type_count,
-                        mark_chests ? 1u : 0u);
-}
-
 /* render_lit_map_marked -- map generation with per-marker colors */
 int32_t terra_render_lit_map_marked(TxWorld* w,
                                      const MapMarkerEntry* chest_markers, uint32_t chest_count,

@@ -26,9 +26,7 @@ extern void buf_init(TxBuf* b, uint32_t cap);
 extern void buf_u8(TxBuf* b, uint8_t v);
 extern void buf_cstr(TxBuf* b, const char* s);
 extern void json_u32(TxBuf* b, uint32_t v);
-extern void json_i32(TxBuf* b, int32_t v);
 extern void json_string(TxBuf* b, const char* s);
-extern int tx_streq_c(const char* a, const char* b);
 extern uint32_t tx_strlen(const char* s);
 extern int tx_mutate_header_patch(TxWorld* w, const char* request, uint32_t request_len, TxBuf* response);
 extern int tx_mutate_replace_chests(TxWorld* w, const char* request, uint32_t request_len, TxBuf* response);
@@ -60,13 +58,6 @@ extern int txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t ma
 extern int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen, TxBuf* response);
 extern int execute_set_visibility(TxWorld* w, const char* request, int jlen, TxBuf* response);
 extern int execute_remove_all_wires(TxWorld* w, const char* request, int jlen, TxBuf* response);
-
-/* From terra_pixel_art.c */
-extern int txw_queue_pixel_art(uint32_t handle, int32_t start_x, int32_t start_y,
-                                uint32_t width, uint32_t height,
-                                uint32_t pixels_ptr, uint32_t pixels_len,
-                                uint32_t map_ptr, uint32_t map_count,
-                                int32_t skip_transparent);
 
 /* From terra_api.c */
 extern int write_file_from_heap(const char* path, const uint8_t* data, uint32_t len);
