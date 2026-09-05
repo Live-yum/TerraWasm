@@ -5,8 +5,7 @@
  * Operations are: txw_render_preview_png, txw_render_preview_rgba, render_lit_map,
  * mark_chest_items_preview, mark_chest_items_map,
  * mark_tiles_and_chests_preview, mark_tiles_and_chests_map,
- * convert_world_biome, batch_update_tiles, unlock_bestiary,
- * apply_pixel_art_mapping.
+ * convert_world_biome, batch_update_tiles, unlock_bestiary.
  *
  * batch_update_tiles is the primary mutation path used by the viewer.
  * set_visibility and remove_all_wires remain compatibility operations
@@ -807,19 +806,6 @@ static int execute_mark_tiles_and_chests_map(TxWorld* w, const char* request, in
 }
 
 /* ====================================================================
- * Operation: apply_pixel_art_mapping
- * Placeholder.
- * ==================================================================== */
-
-static int execute_apply_pixel_art_mapping(TxWorld* w, const char* request, int jlen,
-                                           TxBuf* response) {
-    (void)w; (void)request; (void)jlen; (void)response;
-    tx_set_error("TERRAX_DEPRECATED",
-                 "apply_pixel_art_mapping is removed. Use txw_queue_pixel_art + terra_world_save instead.");
-    return -1;
-}
-
-/* ====================================================================
  * Main operation dispatcher
  * ==================================================================== */
 
@@ -848,36 +834,44 @@ int op_execute_json(TxWorld* w, const char* op_name, const char* request,
         return execute_txw_render_preview_png(w, request, jlen, response);
     if (op_streq(op_name, "render_thumbnail_png"))
         return execute_txw_render_thumbnail_png(w, request, jlen, response);
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (op_streq(op_name, "render_preview_rgba"))
         return execute_txw_render_preview_rgba(w, request, jlen, response);
+#endif
     if (op_streq(op_name, "render_lit_map"))
         return execute_render_lit_map(w, request, jlen, response);
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (op_streq(op_name, "mark_chest_items_preview"))
         return execute_mark_chest_items_preview(w, request, jlen, response);
     if (op_streq(op_name, "mark_chest_items_map"))
         return execute_mark_chest_items_map(w, request, jlen, response);
+#endif
     if (op_streq(op_name, "mark_tiles_and_chests_preview"))
         return execute_mark_tiles_and_chests_preview(w, request, jlen, response);
     if (op_streq(op_name, "mark_tiles_and_chests_map"))
         return execute_mark_tiles_and_chests_map(w, request, jlen, response);
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (op_streq(op_name, "convert_world_biome"))
         return execute_batch_update_tiles(w, request, jlen, response);
+#endif
     if (op_streq(op_name, "batch_update_tiles"))
         return execute_batch_update_tiles(w, request, jlen, response);
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (op_streq(op_name, "set_visibility"))
         return execute_set_visibility(w, request, jlen, response);
     if (op_streq(op_name, "remove_all_wires"))
         return execute_remove_all_wires(w, request, jlen, response);
+#endif
     if (op_streq(op_name, "header_patch"))
         return tx_mutate_header_patch(w, request, (uint32_t)jlen, response);
     if (op_streq(op_name, "replace_chests"))
         return tx_mutate_replace_chests(w, request, (uint32_t)jlen, response);
     if (op_streq(op_name, "replace_bestiary"))
         return tx_mutate_replace_bestiary(w, request, (uint32_t)jlen, response);
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (op_streq(op_name, "unlock_bestiary"))
         return execute_unlock_bestiary(w, request, jlen, response);
-    if (op_streq(op_name, "apply_pixel_art_mapping"))
-        return execute_apply_pixel_art_mapping(w, request, jlen, response);
+#endif
 
     /* Include operation name in error for debugging */
     {

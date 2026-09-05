@@ -43,6 +43,7 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     build: {
       compiler: "test-compiler",
       featureSet: "all",
+      viewerWebProfile: false,
       flags: {
         common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
         node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
@@ -91,6 +92,9 @@ test("manifest validation rejects missing identity, memory, hash, and export dat
     ["artifact path", (manifest) => { manifest.targets.node.artifacts[0].path = "//server/share/wrapper.js"; }],
     ["build flags", (manifest) => { manifest.build.flags = ["-O3"]; }],
     ["feature set", (manifest) => { manifest.build.featureSet = "invalid"; }],
+    ["viewer Web profile", (manifest) => { manifest.build.viewerWebProfile = "true"; }],
+    ["viewer Web profile", (manifest) => { manifest.build.viewerWebProfile = null; }],
+    ["viewer Web profile feature set", (manifest) => { manifest.build.viewerWebProfile = true; }],
   ]) {
     const candidate = structuredClone(base);
     mutate(candidate);
@@ -137,6 +141,7 @@ test("manifest artifact hashes match the files on disk", async () => {
     assert.match(manifest.targets.node.artifacts[0].path, /node-wrapper\.js$/);
     assert.deepEqual(manifest.build.flags.common, ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"]);
     assert.equal(manifest.build.featureSet, "all");
+    assert.equal(manifest.build.viewerWebProfile, false);
     assert.doesNotThrow(() => validateManifest(manifest));
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });

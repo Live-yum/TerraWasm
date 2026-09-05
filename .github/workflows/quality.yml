@@ -111,6 +111,18 @@ jobs:
       - name: Build and test selected capability set
         shell: pwsh
         run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Build and compare viewer Web profile
+        if: matrix.features == 'wld'
+        shell: pwsh
+        run: |
+          $genericBytes = (Get-Item "build/terrax_world_wasm_web.wasm").Length
+          ./build.ps1 -Target all -Features wld -ViewerWebProfile -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $profileBytes = (Get-Item "build/terrax_world_wasm_web.wasm").Length
+          & node tests/check_viewer_web_profile_artifact.js build/terrax_world_wasm_web.wasm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "generic WLD Web bytes=$genericBytes; viewer profile bytes=$profileBytes; saved=$($genericBytes - $profileBytes)"
+          if ($profileBytes -ge $genericBytes) { throw "viewer Web profile did not reduce the WLD Web wasm artifact" }
       - name: Run native-size PNG under Mini Program memory ceiling
         if: matrix.features == 'wld'
         shell: pwsh

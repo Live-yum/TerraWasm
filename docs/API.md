@@ -793,50 +793,6 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 ### 像素画映射
 
-#### `apply_pixel_art_mapping`
-
-将图片文件（JPEG/PNG）映射为 Terraria 方块，放置到世界指定位置。WASM 内部加载和解码图片，使用 TXCI v3 色彩索引进行 O(1) 颜色查找。内存由 WASM 内部管理，无需手动释放。
-
-**请求 JSON：**
-```json
-{
-  "image_path": "/path/to/image.png",  // 图片文件路径（必需，支持 JPEG/PNG）
-  "lut_path": "/path/to/index.txci",   // TXCI v3 文件路径（必需，也接受 txci_path）
-  "start_x": 3816,                     // 世界中放置起始 X 坐标
-  "start_y": 816,                      // 世界中放置起始 Y 坐标
-  "prefer_wall": false,                // 优先使用墙壁而非方块
-  "block_inactive": false,             // 放置的方块设为非激活状态
-  "mapping_json": {                    // 颜色覆盖映射（可选）
-    "mappings": [
-      { "color": "#FF0000", "blockId": 166, "blockType": "blocks", "paintId": 0 },
-      { "color": "#0000FF", "blockId": 54,  "blockType": "walls",  "paintId": 0 },
-      { "color": "#000000", "blockId": 0,   "blockType": "empty",  "paintId": 0 }
-    ]
-  },
-  "output_dir": "/path/to/output",     // 输出目录（可选，保存修改后的 .wld）
-  "output_filename": "pixel_art.wld"   // 输出文件名（可选）
-}
-```
-
-**使用示例：**
-```javascript
-const req = JSON.stringify({
-    image_path: '/path/to/pixel_art.png',
-    lut_path: 'data/terraria_color_index.txci',
-    start_x: 100, start_y: 200,
-    output_dir: 'output', output_filename: 'result.wld'
-});
-// 调用: terra_op_execute_json(world, "apply_pixel_art_mapping", req)
-```
-
-**响应 JSON：**
-```json
-{
-  "status": "ok",
-  "replaced_tiles": 589824,
-  "total_tiles": 20160000
-}
-```
 
 ---
 

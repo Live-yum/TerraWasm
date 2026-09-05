@@ -11,6 +11,7 @@ param(
     [ValidateSet("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz")]
     [string]$OptimizeFlag = "-O3",
     [switch]$EnableLto,
+    [switch]$ViewerWebProfile,
     [string]$DeployDir
 )
 
@@ -23,6 +24,10 @@ $SourceState = $DirtyOutput -join "`n"
 $Dirty = -not [string]::IsNullOrWhiteSpace($SourceState)
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
 $EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
+$ViewerWebProfileFlag = if ($ViewerWebProfile) { "ON" } else { "OFF" }
+if ($ViewerWebProfile -and $Features -ne "wld") {
+    throw "-ViewerWebProfile requires -Features wld"
+}
 $NodeInitialMemory = 134217728
 $NodeMaximumMemory = 536870912
 $WebInitialMemory = 67108864
@@ -120,6 +125,7 @@ if ($Quick) {
         "TERRAWASM_FEATURE_SET:STRING=$Features",
         "TERRAX_OPTIMIZE_FLAG:STRING=$OptimizeFlag",
         "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag",
+        "TERRAWASM_VIEWER_WEB_PROFILE:BOOL=$ViewerWebProfileFlag",
         "TERRAX_NODE_INITIAL_MEMORY:STRING=$NodeInitialMemory",
         "TERRAX_NODE_MAXIMUM_MEMORY:STRING=$NodeMaximumMemory",
         "TERRAX_WEB_INITIAL_MEMORY:STRING=$WebInitialMemory",
@@ -145,6 +151,7 @@ if (-not $Quick) {
         "-DTERRAWASM_FEATURE_SET=$Features" `
         "-DTERRAX_OPTIMIZE_FLAG=$OptimizeFlag" `
         "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" `
+        "-DTERRAWASM_VIEWER_WEB_PROFILE=$ViewerWebProfileFlag" `
         "-DTERRAX_NODE_INITIAL_MEMORY=$NodeInitialMemory" `
         "-DTERRAX_NODE_MAXIMUM_MEMORY=$NodeMaximumMemory" `
         "-DTERRAX_WEB_INITIAL_MEMORY=$WebInitialMemory" `
@@ -219,6 +226,7 @@ $manifestArgs.Add("--source-commit")
 $manifestArgs.Add($SourceCommit)
 $manifestArgs.Add("--dirty")
 $manifestArgs.Add($DirtyFlag)
+if ($ViewerWebProfile) { $manifestArgs.Add("--viewer-web-profile") }
 if ($AllowDirty) { $manifestArgs.Add("--allow-dirty") }
 Add-FlagArgs -Arguments $manifestArgs -Option "--common-flag" -Values $CommonFlags
 Add-FlagArgs -Arguments $manifestArgs -Option "--node-flag" -Values $NodeFlags
@@ -312,7 +320,8 @@ if ($Test) {
         "tests/test_ci_contract.js",
         "tests/test_manifest_contract.js",
         "tests/test_artifact_size_contract.js",
-        "tests/test_feature_set.js"
+        "tests/test_feature_set.js",
+        "tests/test_viewer_web_profile_contract.js"
     )
     $wldTests = @(
         "tests/test_memory_lifecycle.js",

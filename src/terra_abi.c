@@ -51,6 +51,15 @@ extern uint32_t tx_strlen(const char *s);
 #ifndef TERRAWASM_FEATURE_PLR
 #define TERRAWASM_FEATURE_PLR 1
 #endif
+#ifndef TERRAWASM_VIEWER_WEB_PROFILE
+#define TERRAWASM_VIEWER_WEB_PROFILE 0
+#endif
+
+#if TERRAWASM_VIEWER_WEB_PROFILE
+#define TERRAX_VIEWER_WEB_PROFILE_JSON "true"
+#else
+#define TERRAX_VIEWER_WEB_PROFILE_JSON "false"
+#endif
 
 #define TERRAX_STRINGIFY_VALUE(value) #value
 #define TERRAX_STRINGIFY(value) TERRAX_STRINGIFY_VALUE(value)
@@ -78,6 +87,7 @@ static const char g_build_info_json[] =
     ",\"compiler\":\"" TERRAX_BUILD_COMPILER "\""
     ",\"target\":\"" TERRAX_BUILD_TARGET "\""
     ",\"featureSet\":\"" TERRAWASM_FEATURE_SET "\""
+    ",\"viewerWebProfile\":" TERRAX_VIEWER_WEB_PROFILE_JSON
     ",\"initialMemory\":" TERRAX_STRINGIFY(TERRAX_INITIAL_MEMORY)
     ",\"maxMemory\":" TERRAX_STRINGIFY(TERRAX_MAXIMUM_MEMORY)
     ",\"commonFlagsText\":\"" TERRAX_BUILD_COMMON_FLAGS_TEXT "\""

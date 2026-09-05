@@ -5,13 +5,16 @@ include(CTest)
 option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
 option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
-option(TERRAX_ENABLE_LEGACY_RENDER_COMPARE "Build the legacy full-RGBA unmarked PNG renderer for comparison tests" OFF)
+option(TERRAWASM_VIEWER_WEB_PROFILE "Trim unused JSON operations from the viewer WLD Web target" OFF)
 
 set(TERRAWASM_FEATURE_SET "all" CACHE STRING "Compiled capability set: all, wld, or plr")
 set_property(CACHE TERRAWASM_FEATURE_SET PROPERTY STRINGS all wld plr)
 string(TOLOWER "${TERRAWASM_FEATURE_SET}" TERRAWASM_FEATURE_SET)
 if(NOT TERRAWASM_FEATURE_SET MATCHES "^(all|wld|plr)$")
     message(FATAL_ERROR "TERRAWASM_FEATURE_SET must be one of: all, wld, plr")
+endif()
+if(TERRAWASM_VIEWER_WEB_PROFILE AND NOT TERRAWASM_FEATURE_SET STREQUAL "wld")
+    message(FATAL_ERROR "TERRAWASM_VIEWER_WEB_PROFILE requires TERRAWASM_FEATURE_SET=wld")
 endif()
 set(TERRAWASM_ENABLE_WLD OFF)
 set(TERRAWASM_ENABLE_PLR OFF)
@@ -67,15 +70,7 @@ if(TERRAWASM_ENABLE_WLD)
         "${SRC_DIR}/terra_wld.c"
         PROPERTIES COMPILE_DEFINITIONS "parse_header=terra_parse_header_unchecked"
     )
-    # The public unmarked PNG entry point is always the low-memory renderer.
-    # Compile the historical full-RGBA implementation only for explicit
-    # comparison builds; normal release builds do not carry that function.
-    if(TERRAX_ENABLE_LEGACY_RENDER_COMPARE)
-        set_source_files_properties(
-            "${SRC_DIR}/terra_render.c"
-            PROPERTIES COMPILE_DEFINITIONS "txw_render_preview_png=txw_render_preview_png_legacy;TERRAX_ENABLE_LEGACY_RENDER_COMPARE=1"
-        )
-    endif()
+    # The public unmarked PNG entry point is permanently the low-memory renderer.
 endif()
 if(TERRAWASM_ENABLE_PLR)
     list(APPEND SOURCES ${PLR_SOURCES})
@@ -295,6 +290,9 @@ if(EMSCRIPTEN)
         ${TERRAX_WEB_INITIAL_MEMORY} ${TERRAX_WEB_MAXIMUM_MEMORY}
         "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}"
     )
+    if(TERRAWASM_VIEWER_WEB_PROFILE)
+        target_compile_definitions(terrax_world_wasm_web PRIVATE TERRAWASM_VIEWER_WEB_PROFILE=1)
+    endif()
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
     target_link_options(terrax_world_wasm_web PRIVATE
         "${TERRAX_OPTIMIZE_FLAG}"

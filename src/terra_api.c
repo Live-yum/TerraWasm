@@ -1149,6 +1149,7 @@ terrax_world_status terra_op_execute_json(
             tx_last_status : TERRAX_WORLD_STATUS_INTERNAL_ERROR);
     }
 
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
     if (tx_streq_c(on_copy, "render_preview_rgba")) {
         world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
         world->media_result_len = tx_last_len;
@@ -1156,7 +1157,9 @@ terrax_world_status terra_op_execute_json(
         world->media_result_height = tx_last_height;
         world->media_result_stride = tx_last_stride;
         world->media_result_kind = 1u;
-    } else if (tx_streq_c(on_copy, "render_preview_png") ||
+    } else
+#endif
+    if (tx_streq_c(on_copy, "render_preview_png") ||
                tx_streq_c(on_copy, "render_thumbnail_png")) {
         world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
         world->media_result_len = tx_last_len;
@@ -1165,7 +1168,9 @@ terrax_world_status terra_op_execute_json(
         world->media_result_stride = tx_last_stride;
         world->media_result_kind = 2u;
     } else if (tx_streq_c(on_copy, "render_lit_map") ||
+#if !defined(TERRAWASM_VIEWER_WEB_PROFILE)
                tx_streq_c(on_copy, "mark_chest_items_map") ||
+#endif
                tx_streq_c(on_copy, "mark_tiles_and_chests_map")) {
         if (!tx_last_ptr || tx_last_len == 0u || tx_last_len > TX_MAP_MAX_OUTPUT_BYTES) {
             if (tx_last_ptr) tx_internal_free((void*)(uintptr_t)tx_last_ptr);

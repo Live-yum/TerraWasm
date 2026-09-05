@@ -218,26 +218,16 @@ test("render_preview_png keeps native 8400x2400 output on the low-memory route",
   const cmakeSource = fs.readFileSync(path.join(ROOT, "CMakeLists.txt"), "utf8");
   assert.match(lowMemorySource, /txw_render_marked_preview_png\s*\(/);
   assert.doesNotMatch(lowMemorySource, /txw_render_preview_rgba\s*\(/);
-  assert.match(
+  assert.doesNotMatch(
     cmakeSource,
-    /txw_render_preview_png=txw_render_preview_png_legacy/,
-    "legacy whole-image encoder must not remain the public entry point",
-  );
-  assert.match(
-    cmakeSource,
-    /option\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE[\s\S]*OFF\)/,
-    "legacy unmarked PNG renderer must be disabled by default",
-  );
-  assert.match(
-    cmakeSource,
-    /if\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\)[\s\S]*txw_render_preview_png=txw_render_preview_png_legacy/,
-    "legacy renderer rename must only exist inside the explicit comparison gate",
+    /TERRAX_ENABLE_LEGACY_RENDER_COMPARE|txw_render_preview_png=txw_render_preview_png_legacy/,
+    "retired full-RGBA unmarked PNG renderer must not remain configurable",
   );
   const legacyRenderSource = fs.readFileSync(path.join(ROOT, "src", "terra_render.c"), "utf8");
-  assert.match(
+  assert.doesNotMatch(
     legacyRenderSource,
-    /#if defined\(TERRAX_ENABLE_LEGACY_RENDER_COMPARE\)[\s\S]*int32_t txw_render_preview_png/,
-    "legacy full-RGBA unmarked renderer must be compile-time gated",
+    /TERRAX_ENABLE_LEGACY_RENDER_COMPARE|int32_t txw_render_preview_png\s*\(/,
+    "retired full-RGBA unmarked renderer must be absent from terra_render.c",
   );
 
   const M = await TerraWorldWasm();

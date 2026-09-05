@@ -219,6 +219,9 @@ export function validateManifest(manifest) {
   if (!build || typeof build.compiler !== 'string' || !build.compiler.trim()) {
     fail('compiler is required')
   }
+  const viewerWebProfile = build.viewerWebProfile === undefined ? false : build.viewerWebProfile
+  if (typeof viewerWebProfile !== 'boolean') fail('viewer Web profile must be a boolean')
+  if (viewerWebProfile && featureSet !== 'wld') fail('viewer Web profile feature set must be wld')
   const buildFlags = normalizeBuildFlags(build.flags)
 
   const memory = manifest.memory
@@ -252,6 +255,7 @@ export function validateManifest(manifest) {
     build: {
       compiler: build.compiler.trim(),
       featureSet,
+      viewerWebProfile,
       flags: buildFlags,
     },
     targets: {
@@ -268,6 +272,7 @@ export function createManifest({
   dirty,
   compiler,
   featureSet = 'all',
+  viewerWebProfile = false,
   buildFlags,
   flags,
   webWrapper,
@@ -283,6 +288,8 @@ export function createManifest({
     web: DEFAULT_WEB_FLAGS,
   })
   const normalizedFeatureSet = normalizeFeatureSet(featureSet)
+  if (typeof viewerWebProfile !== 'boolean') fail('viewer Web profile must be a boolean')
+  if (viewerWebProfile && normalizedFeatureSet !== 'wld') fail('viewer Web profile feature set must be wld')
   const webIdentityExports = normalizedFeatureSet === 'wld' ? WLD_WEB_ID_EXPORTS : ID_EXPORTS
   const normalizedWebExports = normalizeExports(webExports, 'Web target exports')
   const normalizedNodeExports = normalizeExports(nodeExports, 'Node target exports')
@@ -310,6 +317,7 @@ export function createManifest({
     build: {
       compiler,
       featureSet: normalizedFeatureSet,
+      viewerWebProfile,
       flags: normalizedBuildFlags,
     },
     targets: {
@@ -352,6 +360,7 @@ export function generateManifest({
   dirty,
   compiler,
   featureSet,
+  viewerWebProfile = false,
   nodeExportsFile,
   webExportsFile,
   commonFlags,
@@ -366,6 +375,7 @@ export function generateManifest({
     dirty: dirty ?? Boolean(gitValue(repositoryRoot, ['status', '--porcelain', '--', '.', ':(exclude)build'], '')),
     compiler: compiler ?? (process.env.EMSCRIPTEN ? 'emscripten' : 'native'),
     featureSet: featureSet ?? 'all',
+    viewerWebProfile,
     buildFlags: {
       common: commonFlags?.length ? commonFlags : DEFAULT_COMMON_FLAGS,
       node: nodeFlags?.length ? nodeFlags : DEFAULT_NODE_FLAGS,
@@ -398,6 +408,7 @@ function parseArgs(argv) {
     commonFlags: [],
     nodeFlags: [],
     webFlags: [],
+    viewerWebProfile: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
@@ -416,6 +427,7 @@ function parseArgs(argv) {
     else if (value === '--common-flag') args.commonFlags.push(argv[++index])
     else if (value === '--node-flag') args.nodeFlags.push(argv[++index])
     else if (value === '--web-flag') args.webFlags.push(argv[++index])
+    else if (value === '--viewer-web-profile') args.viewerWebProfile = true
     else if (value === '--flags') args.commonFlags.push(argv[++index])
     else if (value === '--allow-dirty') args.allowDirty = true
     else fail(`unknown option ${value}`)

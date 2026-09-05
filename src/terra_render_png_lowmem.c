@@ -1,7 +1,7 @@
 /*
  * terra_render_png_lowmem.c -- Low-memory public PNG preview entry point.
  *
- * The legacy txw_render_preview_png implementation materializes a full RGBA
+ * The retired full-RGBA preview implementation materialized a full RGBA
  * surface, a second full PNG scanline buffer, and a compression/output buffer
  * at the same time. A native 8400x2400 world needs about 76.9 MiB for each of
  * the first two buffers alone, which cannot fit inside the 160 MiB Web/Mini
