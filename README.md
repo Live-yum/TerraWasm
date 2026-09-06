@@ -57,6 +57,32 @@ TerraWasm/
 - [Node.js](https://nodejs.org/) 18+
 - Python 3.8+（仅用于 TXCI 数据生成）
 
+## Runner 使用说明（仅记录，暂不切换）
+
+这里的 runner 指 TerraWasm 的本地构建/测试入口，以及生成 WebAssembly 交付物的 GitHub Actions job。本节只记录调用方式，不自动替换 `PlayerWebsite` 的 WASM 文件、不改变默认构建参数，也不切换 CI runner；以后确认切换时再单独执行部署。
+
+### 本地 runner
+
+完整构建并运行回归测试：
+
+```powershell
+.\build.ps1 -Target all -Features all -Test
+```
+
+为 PlayerWebsite 准备包含 PLR ABI 的 Web/Node 产物：
+
+```powershell
+.\build.ps1 -Target all -Features plr
+```
+
+构建后先检查 `build/terra.manifest.json` 的 `sourceCommit`、`dirty`、导出列表、内存预算和 SHA-256，再由明确的发布步骤复制 Web 产物。`build.ps1` 默认不会修改其他仓库；只有显式传入 `-DeployDir` 才会部署，而且要求干净工作树。当前不要用 runner 自动覆盖 `PlayerWebsite/wasm/`。
+
+### GitHub Actions runner
+
+- `quality.yml`：使用 GitHub-hosted `ubuntu-latest`，执行 native/ASan/UBSan、Emscripten 构建、manifest 和体积门禁。
+- `debug-real-plr.yml`：使用 `ubuntu-latest`，用于真实 `.plr` 调试路径。
+- 未来若切换到其他 runner，应先准备 CMake 3.27+、Emscripten 5.0.7、Node.js 18+ 和 Python 3.8+，再单独修改 workflow；当前不修改 `runs-on`。
+
 ## 构建
 
 ### 1. 生成 TXCI 色彩索引（一次性）
