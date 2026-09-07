@@ -6,10 +6,45 @@
  * one PNG strip used to restart the WLD tile stream for every 128 output rows.
  * When the complete scaled RGBA surface fits a bounded cache, render it once,
  * draw markers once, then keep the existing 128-row PNG compression cadence.
+ *
+ * The renderer core historically queried four color-table getter functions
+ * for every non-empty decoded tile. The getters live in terra_mem.c and normal
+ * release builds do not enable LTO, so those cross-translation-unit calls sit
+ * directly in the world-render hot path. Snapshot the immutable table metadata
+ * once at the public render entry and let the core read the cached values.
  */
+extern const uint8_t* tx_get_tile_colors(void);
+extern uint32_t tx_get_tile_color_count(void);
+extern const uint8_t* tx_get_wall_colors(void);
+extern uint32_t tx_get_wall_color_count(void);
+
+const uint8_t* tx_render_cached_tile_colors = NULL;
+uint32_t tx_render_cached_tile_color_count = 0u;
+const uint8_t* tx_render_cached_wall_colors = NULL;
+uint32_t tx_render_cached_wall_color_count = 0u;
+
+static void tx_render_refresh_color_tables(void) {
+  tx_render_cached_tile_colors = tx_get_tile_colors();
+  tx_render_cached_tile_color_count = tx_get_tile_color_count();
+  tx_render_cached_wall_colors = tx_get_wall_colors();
+  tx_render_cached_wall_color_count = tx_get_wall_color_count();
+}
+
+/* Function-like variadic macros intentionally also rewrite the core's extern
+ * getter declarations into extern declarations for these cached variables.
+ * Calls such as tx_get_tile_colors() then compile to direct variable reads.
+ */
+#define tx_get_tile_colors(...) tx_render_cached_tile_colors
+#define tx_get_tile_color_count(...) tx_render_cached_tile_color_count
+#define tx_get_wall_colors(...) tx_render_cached_wall_colors
+#define tx_get_wall_color_count(...) tx_render_cached_wall_color_count
 #define txw_render_marked_preview_png txw_render_marked_preview_png_striped_fallback
 #include "terra_render_core.inc"
 #undef txw_render_marked_preview_png
+#undef tx_get_wall_color_count
+#undef tx_get_wall_colors
+#undef tx_get_tile_color_count
+#undef tx_get_tile_colors
 
 #define SCALED_PREVIEW_CACHE_BUDGET (16u * 1024u * 1024u)
 #define SCALED_PREVIEW_CACHE_UNAVAILABLE (-2)
@@ -140,6 +175,8 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
   if (matched_chest_count) *matched_chest_count = 0u;
   if (matched_tile_count) *matched_tile_count = 0u;
   if (!compute_preview_size(w, max_w, max_h, &pw, &ph, &stride)) return -1;
+
+  tx_render_refresh_color_tables();
 
   /* Native-size previews already have a dedicated single-scan RGB path. */
   if (max_w == 0u && max_h == 0u) {
