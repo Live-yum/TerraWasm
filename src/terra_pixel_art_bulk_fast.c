@@ -74,6 +74,11 @@ static int validate_bulk_fast_record(
     }
 
     const uint8_t* indices = record + TX_PIXEL_ART_BULK_HEADER_BYTES;
+    uint64_t chunk_origin_x = (uint64_t)chunk_x * TX_PIXEL_ART_CHUNK_SIZE;
+    uint64_t chunk_origin_y = (uint64_t)chunk_y * TX_PIXEL_ART_CHUNK_SIZE;
+    int needs_canvas_bounds =
+        chunk_origin_x + TX_PIXEL_ART_CHUNK_SIZE > w->pixel_art_width ||
+        chunk_origin_y + TX_PIXEL_ART_CHUNK_SIZE > w->pixel_art_height;
     uint32_t actual_used = 0u;
     for (uint32_t cell = 0u; cell < TX_PIXEL_ART_CHUNK_CELLS; cell++) {
         uint32_t palette_index = pixel_bulk_fast_u16le(indices + cell * sizeof(uint16_t));
@@ -82,13 +87,13 @@ static int validate_bulk_fast_record(
             return 0;
         }
         if (palette_index == 0u) continue;
-        uint64_t pixel_x = (uint64_t)chunk_x * TX_PIXEL_ART_CHUNK_SIZE +
-            (cell & TX_PIXEL_ART_CHUNK_MASK);
-        uint64_t pixel_y = (uint64_t)chunk_y * TX_PIXEL_ART_CHUNK_SIZE +
-            (cell >> TX_PIXEL_ART_CHUNK_BITS);
-        if (pixel_x >= w->pixel_art_width || pixel_y >= w->pixel_art_height) {
-            tx_set_error("TERRAX_INVALID_ARGUMENT", "indexed bulk contains pixels outside the canvas");
-            return 0;
+        if (needs_canvas_bounds) {
+            uint64_t pixel_x = chunk_origin_x + (cell & TX_PIXEL_ART_CHUNK_MASK);
+            uint64_t pixel_y = chunk_origin_y + (cell >> TX_PIXEL_ART_CHUNK_BITS);
+            if (pixel_x >= w->pixel_art_width || pixel_y >= w->pixel_art_height) {
+                tx_set_error("TERRAX_INVALID_ARGUMENT", "indexed bulk contains pixels outside the canvas");
+                return 0;
+            }
         }
         actual_used++;
     }
