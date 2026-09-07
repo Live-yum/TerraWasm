@@ -14,6 +14,7 @@
  * once at the public render entry and let the core read the cached values.
  */
 #include "terra_types.h"
+#include "terra_render_task.h"
 
 extern const uint8_t* tx_get_tile_colors(void);
 extern uint32_t tx_get_tile_color_count(void);
@@ -50,6 +51,185 @@ static void tx_render_refresh_color_tables(void) {
 
 #define SCALED_PREVIEW_CACHE_BUDGET (16u * 1024u * 1024u)
 #define SCALED_PREVIEW_CACHE_UNAVAILABLE (-2)
+#define OPEN_PREVIEW_MAX_RGBA_BYTES (16u * 1024u * 1024u)
+
+/* The initial 384px thumbnail is part of world opening. Unlike the public
+ * preview renderer, this state machine keeps the tile-stream cursor between
+ * open_step calls so a caller-selected work budget actually limits each call.
+ */
+int tx_open_preview_begin(TxWorld* world, TxOpenPreviewTask* task) {
+  uint32_t pw = 0u;
+  uint32_t ph = 0u;
+  uint32_t stride = 0u;
+  uint64_t rgba_len64;
+
+  if (!world || !task) {
+    tx_set_error("TERRAX_INVALID_ARGUMENT", "null incremental preview state");
+    return 0;
+  }
+  memset(task, 0, sizeof(*task));
+  if (!compute_preview_size(world, 384u, 0u, &pw, &ph, &stride)) return 0;
+  if (world->pointer_count <= 1u || world->starts[1] > world->ends[1]
+      || world->ends[1] > world->file_len) {
+    tx_set_error("TERRAX_BAD_POINTERS", "tile section bounds are invalid");
+    return 0;
+  }
+
+  rgba_len64 = (uint64_t)stride * ph;
+  if (rgba_len64 == 0u || rgba_len64 > OPEN_PREVIEW_MAX_RGBA_BYTES
+      || rgba_len64 > UINT32_MAX) {
+    tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "open thumbnail exceeds incremental preview budget");
+    return 0;
+  }
+
+  task->rgba = tx_alloc((uint32_t)rgba_len64);
+  if (!task->rgba) {
+    tx_set_error("TERRAX_WASM_OOM", "open thumbnail allocation failed");
+    return 0;
+  }
+  task->preview_width = pw;
+  task->preview_height = ph;
+  task->stride = stride;
+  task->source_width = (uint32_t)world->maxTilesX;
+  task->source_height = (uint32_t)world->maxTilesY;
+  task->ground = (uint32_t)world->worldSurface;
+  task->rock = (uint32_t)world->rockLayer;
+  task->tile_start = world->starts[1];
+  task->tile_end = world->ends[1];
+  task->offset = task->tile_start;
+  task->x = 0u;
+  task->y = 0u;
+  task->initialized = 1u;
+
+  tx_render_refresh_color_tables();
+
+  /* Match render_preview_rows_to exactly: background RGB is prefilled and the
+   * alpha byte temporarily counts non-empty source samples for downsampling. */
+  for (uint32_t py = 0u; py < ph; py++) {
+    uint8_t bg[4];
+    uint32_t wy = (uint32_t)(((uint64_t)py * task->source_height) / ph);
+    background_color(wy, task->source_height, task->ground, task->rock, bg);
+    for (uint32_t px = 0u; px < pw; px++) {
+      uint32_t o = (py * pw + px) * 4u;
+      task->rgba[o] = bg[0];
+      task->rgba[o + 1u] = bg[1];
+      task->rgba[o + 2u] = bg[2];
+      task->rgba[o + 3u] = 0u;
+    }
+  }
+  return 1;
+}
+
+static void tx_open_preview_finalize_alpha(TxOpenPreviewTask* task) {
+  if (!task || !task->rgba) return;
+  uint64_t pixels = (uint64_t)task->preview_width * task->preview_height;
+  for (uint64_t index = 0u; index < pixels; index++) {
+    task->rgba[index * 4u + 3u] = 255u;
+  }
+}
+
+int tx_open_preview_step(TxWorld* world, TxOpenPreviewTask* task, uint32_t record_budget) {
+  if (!world || !task || !task->initialized || !task->rgba) {
+    tx_set_error("TERRAX_STATE_ERROR", "incremental preview is not initialized");
+    return -1;
+  }
+  if (task->finished) return 1;
+  if (record_budget == 0u) record_budget = 1u;
+
+  while (record_budget-- > 0u && task->x < task->source_width) {
+    TxTile tile;
+    if (!read_tile_at(world, &task->offset, task->tile_end, &tile)) {
+      /* Preserve the established preview behavior: a short tile stream yields
+       * the partial image rather than converting open into a new parse error. */
+      task->finished = 1u;
+      break;
+    }
+
+    {
+      uint32_t run = (uint32_t)tile.same + 1u;
+      if (tile_is_non_empty(&tile)) {
+        uint8_t color[4];
+        uint32_t px = (uint32_t)(((uint64_t)task->x * task->preview_width)
+            / task->source_width);
+        uint32_t py0 = (uint32_t)(((uint64_t)task->y * task->preview_height)
+            / task->source_height);
+        uint32_t py1 = (uint32_t)((((uint64_t)task->y + run) * task->preview_height)
+            / task->source_height);
+        if (py1 <= py0) py1 = py0 + 1u;
+        if (py1 > task->preview_height) py1 = task->preview_height;
+
+        color_for_tile(
+            &tile, task->y, task->source_height,
+            task->ground, task->rock, color);
+        if (px < task->preview_width && py0 < task->preview_height) {
+          for (uint32_t py = py0; py < py1; py++) {
+            uint32_t o = (py * task->preview_width + px) * 4u;
+            uint32_t count = task->rgba[o + 3u];
+            if (count == 0u) {
+              task->rgba[o] = color[0];
+              task->rgba[o + 1u] = color[1];
+              task->rgba[o + 2u] = color[2];
+              task->rgba[o + 3u] = 1u;
+            } else if (count < 255u) {
+              uint32_t next = count + 1u;
+              task->rgba[o] = (uint8_t)(((uint32_t)task->rgba[o] * count + color[0]) / next);
+              task->rgba[o + 1u] = (uint8_t)(((uint32_t)task->rgba[o + 1u] * count + color[1]) / next);
+              task->rgba[o + 2u] = (uint8_t)(((uint32_t)task->rgba[o + 2u] * count + color[2]) / next);
+              task->rgba[o + 3u] = (uint8_t)next;
+            } else {
+              task->rgba[o] = (uint8_t)(((uint32_t)task->rgba[o] * 255u + color[0]) >> 8);
+              task->rgba[o + 1u] = (uint8_t)(((uint32_t)task->rgba[o + 1u] * 255u + color[1]) >> 8);
+              task->rgba[o + 2u] = (uint8_t)(((uint32_t)task->rgba[o + 2u] * 255u + color[2]) >> 8);
+            }
+          }
+        }
+      }
+
+      task->y += run;
+      if (task->y >= task->source_height) {
+        task->x++;
+        task->y = 0u;
+      }
+    }
+  }
+
+  if (task->x >= task->source_width) task->finished = 1u;
+  if (task->finished) {
+    tx_open_preview_finalize_alpha(task);
+    return 1;
+  }
+  return 0;
+}
+
+uint32_t tx_open_preview_progress(const TxOpenPreviewTask* task) {
+  if (!task || !task->initialized) return 0u;
+  if (task->finished) return 100u;
+  if (task->tile_end <= task->tile_start || task->offset <= task->tile_start) return 0u;
+  {
+    uint64_t done = task->offset - task->tile_start;
+    uint64_t total = task->tile_end - task->tile_start;
+    uint64_t percent = (done * 100u) / total;
+    return percent > 99u ? 99u : (uint32_t)percent;
+  }
+}
+
+int32_t tx_open_preview_finish_png(TxOpenPreviewTask* task) {
+  uint8_t* rgba;
+  if (!task || !task->initialized || !task->finished || !task->rgba) {
+    tx_set_error("TERRAX_STATE_ERROR", "incremental preview is not ready to encode");
+    return -1;
+  }
+  rgba = task->rgba;
+  task->rgba = NULL;
+  return encode_png_from_owned_rgba(
+      rgba, task->preview_width, task->preview_height);
+}
+
+void tx_open_preview_discard(TxOpenPreviewTask* task) {
+  if (!task) return;
+  if (task->rgba) tx_internal_free(task->rgba);
+  memset(task, 0, sizeof(*task));
+}
 
 static int encode_cached_scaled_preview_png(
     TxWorld* w, uint32_t pw, uint32_t ph, uint32_t stride,
