@@ -13,6 +13,8 @@
  * directly in the world-render hot path. Snapshot the immutable table metadata
  * once at the public render entry and let the core read the cached values.
  */
+#include "terra_types.h"
+
 extern const uint8_t* tx_get_tile_colors(void);
 extern uint32_t tx_get_tile_color_count(void);
 extern const uint8_t* tx_get_wall_colors(void);
