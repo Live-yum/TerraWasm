@@ -144,15 +144,16 @@ for (const [target, factory] of [["Node", createNode], ["Web", webFactory]]) {
         handle = M.HEAPU32[handleOut >>> 2];
         const incrementalHeader = validateLegacyWorld(M, handle, version);
         if (synchronousHeader) assert.deepEqual(incrementalHeader, synchronousHeader);
+        validateThumbnail(M, handle);
 
-        // commit_to_buffer is the persistence API retained by the trimmed
-        // viewer Web profile. It must preserve the legacy stream byte-for-byte
-        // and return a replacement handle that remains fully readable.
+        // commit_to_buffer closes the current session, so world-owned preview
+        // media is intentionally invalidated. Validate preview before commit,
+        // then verify the retained viewer persistence API preserves bytes and
+        // returns a replacement handle whose sections remain readable.
         const committed = commit(M, handle);
         handle = committed.handle;
         assert.deepEqual(committed.bytes, bytes);
         assert.deepEqual(validateLegacyWorld(M, handle, version), incrementalHeader);
-        validateThumbnail(M, handle);
       } finally {
         if (handle) M._terra_world_close(handle);
         if (task) M._terra_world_task_close(task);
