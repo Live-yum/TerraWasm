@@ -1,0 +1,44 @@
+name: PLR distribution
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/publish-plr-artifacts]
+  pull_request:
+    paths:
+      - .github/workflows/plr-distribution.yml
+permissions:
+  contents: read
+jobs:
+  plr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install pinned Emscripten
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
+          & "$env:RUNNER_TEMP/emsdk/emsdk" install 5.0.7
+          & "$env:RUNNER_TEMP/emsdk/emsdk" activate 5.0.7
+      - name: Build and test PLR-only Node and Web ABI
+        shell: pwsh
+        run: ./build.ps1 -Target all -Features plr -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Enforce manifest and size contract
+        run: node scripts/check-artifact-size.mjs build/terra.manifest.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: terrawasm-plr-${{ github.sha }}
+          path: |
+            build/terra.manifest.json
+            build/terrax_world_wasm.js
+            build/terrax_world_wasm.wasm
+            build/terrax_world_wasm_web.js
+            build/terrax_world_wasm_web.wasm
+          if-no-files-found: error
+          retention-days: 14
