@@ -15,6 +15,13 @@ function alloc(M, bytes) {
   return pointer;
 }
 
+function utf8(M, pointer, length) {
+  const bytes = M.HEAPU8.subarray(pointer, pointer + length);
+  const terminator = bytes.indexOf(0);
+  const text = terminator >= 0 ? bytes.subarray(0, terminator) : bytes;
+  return Buffer.from(text).toString("utf8");
+}
+
 function json(M, fn, ...args) {
   const required = alloc(M, 8);
   let output = 0;
@@ -23,7 +30,7 @@ function json(M, fn, ...args) {
     const size = M.HEAPU32[required >>> 2];
     output = alloc(M, size);
     assert.equal(fn(...args, output, BigInt(size), required), 0);
-    return JSON.parse(M.UTF8ToString(output));
+    return JSON.parse(utf8(M, output, size));
   } finally {
     if (output) M._tx_free(output);
     M._tx_free(required);
@@ -41,6 +48,30 @@ function save(M, handle) {
     return Buffer.from(M.HEAPU8.slice(output, output + size));
   } finally {
     if (output) M._tx_free(output);
+    M._tx_free(required);
+  }
+}
+
+function commit(M, handle) {
+  const required = alloc(M, 4);
+  const newHandleOut = alloc(M, 4);
+  let output = 0;
+  try {
+    assert.equal(M._terra_world_commit_to_buffer(handle, 0, 0, required, newHandleOut), 0);
+    const size = M.HEAPU32[required >>> 2];
+    assert.ok(size > 0);
+    assert.equal(M.HEAPU32[newHandleOut >>> 2], 0);
+    output = alloc(M, size);
+    assert.equal(M._terra_world_commit_to_buffer(handle, output, size, required, newHandleOut), 0);
+    const newHandle = M.HEAPU32[newHandleOut >>> 2];
+    assert.ok(newHandle);
+    return {
+      bytes: Buffer.from(M.HEAPU8.slice(output, output + size)),
+      handle: newHandle,
+    };
+  } finally {
+    if (output) M._tx_free(output);
+    M._tx_free(newHandleOut);
     M._tx_free(required);
   }
 }
@@ -93,7 +124,8 @@ for (const [target, factory] of [["Node", createNode], ["Web", webFactory]]) {
       let synchronousHeader = null;
       try {
         // The viewer WLD Web profile intentionally trims the synchronous open
-        // export. Broader Node/all-feature artifacts still exercise it here.
+        // and direct save exports. Broader Node/all-feature artifacts still
+        // exercise the synchronous save path here.
         if (typeof M._terra_world_open_from_buffer === "function") {
           assert.equal(M._terra_world_open_from_buffer(input, bytes.length, handleOut), 0);
           handle = M.HEAPU32[handleOut >>> 2];
@@ -112,7 +144,14 @@ for (const [target, factory] of [["Node", createNode], ["Web", webFactory]]) {
         handle = M.HEAPU32[handleOut >>> 2];
         const incrementalHeader = validateLegacyWorld(M, handle, version);
         if (synchronousHeader) assert.deepEqual(incrementalHeader, synchronousHeader);
-        assert.deepEqual(save(M, handle), bytes);
+
+        // commit_to_buffer is the persistence API retained by the trimmed
+        // viewer Web profile. It must preserve the legacy stream byte-for-byte
+        // and return a replacement handle that remains fully readable.
+        const committed = commit(M, handle);
+        handle = committed.handle;
+        assert.deepEqual(committed.bytes, bytes);
+        assert.deepEqual(validateLegacyWorld(M, handle, version), incrementalHeader);
         validateThumbnail(M, handle);
       } finally {
         if (handle) M._terra_world_close(handle);
