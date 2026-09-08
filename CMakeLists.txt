@@ -352,6 +352,7 @@ else()
             add_terra_contract(terra_wld_guard_task_versions_contract tests/wld_guard_task_versions_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_wld_tile_versions_contract tests/wld_tile_versions_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_wld_sections_versions_contract tests/wld_sections_versions_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_wld_version_patch_contract tests/wld_version_patch_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
 
             if(TERRAWASM_FUZZ_SMOKE)

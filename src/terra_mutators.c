@@ -752,9 +752,9 @@ static int encode_manifest(TxBuf *header,TxWorld *w,TxJsonParser *request,
     }
 
 static int header_versions_compatible(uint32_t current,uint32_t next){
-    static const uint16_t gates[]={95u,99u,101u,104u,107u,108u,109u,112u,113u,118u,128u,129u,131u,135u,140u,141u,170u,174u,178u,179u,180u,181u,196u,201u,204u,207u,208u,209u,211u,212u,215u,216u,217u,222u,223u,227u,238u,239u,240u,241u,249u,250u,251u,257u,259u,260u,261u,264u,266u,267u,284u,287u,288u,291u,296u,297u,299u,302u,304u,313u};
+    static const uint16_t gates[]={95u,99u,101u,104u,107u,108u,109u,112u,113u,118u,128u,129u,131u,135u,140u,141u,170u,174u,178u,179u,180u,181u,195u,196u,201u,204u,207u,208u,209u,211u,212u,215u,216u,217u,222u,223u,227u,238u,239u,240u,241u,249u,250u,251u,257u,259u,260u,261u,264u,266u,267u,284u,287u,288u,289u,291u,296u,297u,299u,302u,304u,313u};
     /* A header-only patch cannot migrate the payload of another section. */
-    static const uint16_t section_gates[]={116u,122u,189u,190u,210u,213u,220u,294u,307u,308u,311u,312u,315u};
+    static const uint16_t section_gates[]={116u,122u,189u,190u,210u,213u,220u,268u,294u,307u,308u,311u,312u,315u};
     if(next<88u||next>326u)return 0;
     for(uint32_t i=0;i<sizeof(gates)/sizeof(gates[0]);i++)if((current<gates[i])!=(next<gates[i]))return 0;
     for(uint32_t i=0;i<sizeof(section_gates)/sizeof(section_gates[0]);i++)if((current<section_gates[i])!=(next<section_gates[i]))return 0;
