@@ -132,6 +132,17 @@ typedef struct TxWorld {
     uint32_t starts[TX_MAX_SECTIONS];     /* section byte start */
     uint32_t ends[TX_MAX_SECTIONS];       /* section byte end */
     uint32_t format_len;                  /* byte length of format section */
+    /* Pre-release-88 worlds have no format/section table.  Keep their
+     * original stream layout so reads can use the version-1 codec and an
+     * untouched file can still be exported byte-for-byte. */
+    uint8_t  legacy_wld;
+    uint32_t legacy_tile_start;
+    uint32_t legacy_tile_end;
+    uint32_t legacy_chest_start;
+    uint32_t legacy_sign_start;
+    uint32_t legacy_npc_start;
+    uint32_t legacy_footer_start;
+    uint32_t legacy_npc_names_start;
     uint16_t tile_type_count;
     uint8_t* important;         /* pointer into file[] for tile importance bitmap */
     uint8_t* important_override;/* owned replacement for a patched format bitmap */
@@ -534,5 +545,8 @@ typedef struct TxTileMarker {
     int32_t  radius;
     int32_t  thickness;
 } TxTileMarker;
+
+/* Read-only serializer for pre-release-88 WLD tail sections. */
+int serialize_legacy_section_json(TxWorld *world, int logical_section, TxBuf *out);
 
 #endif /* TERRA_TYPES_H */

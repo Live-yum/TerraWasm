@@ -4,12 +4,14 @@
 
 ## 功能
 
-- **世界解析**：版本 88-326（Terraria 当前源码上限），所有 11 个 section 的只读 JSON 序列化
+- **世界解析**：文件格式版本 1-326（Terraria 当前源码上限）；1-87 的连续旧布局支持读取、预览与原字节保存，88-326 支持分段读取和既有编辑接口
 - **渲染**：RGBA 预览、PNG 缩略图、.map 地图文件生成
 - **编辑**：安全 header 布尔补丁、宝箱/图鉴二进制替换、批量方块更新、生物群系转换、可见性切换、电线移除
 - **像素画映射**：将 RGBA/索引像素映射为 Terraria 方块（TXCI v3 色彩索引）
 - **地图标记**：在 .map 文件中标记指定箱子和方块位置
-- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持现代布局版本 1-326、JSON Pointer 和结构化补丁，并按 Terraria `Player.cs` 的 release gate 对称读写
+- **玩家文件**：读取、编辑并写回 Terraria 加密 `.plr`，支持历史布局版本 1-326、JSON Pointer 和结构化补丁，并按 Terraria `Player.cs` 的 release gate 对称读写
+
+兼容范围、版本边界与验证限制见 [多版本兼容说明](docs/MULTI_VERSION_COMPATIBILITY.md)。
 
 ## 项目结构
 

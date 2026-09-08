@@ -157,6 +157,21 @@ function digest(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+test("header_patch rejects unsupported releases and non-header layout changes atomically", async () => {
+  const M = await TerraWorldWasm();
+  const opened = openBytes(M, TEST_BYTES);
+  try {
+    const before = getSection(M, opened.handle, "format");
+    assert.ok(before.version >= 315 && before.version <= 326);
+    for (const version of [327, 400, 314]) {
+      executeOperation(M, opened.handle, "header_patch", { patch: { version } }, { expectFailure: true });
+      assert.deepEqual(getSection(M, opened.handle, "format"), before);
+    }
+  } finally {
+    closeBytes(M, opened);
+  }
+});
+
 test("header_patch changes only whitelisted booleans and survives save/reopen", async () => {
   const M = await TerraWorldWasm();
   let opened;
@@ -264,6 +279,13 @@ test("header_patch updates editable metadata and format magic through one patch"
     assert.equal(inMemoryFormat.magic, patch.magic);
 
     const saved = saveBytes(M, opened.handle);
+    // Terraria.LoadFooter compares the physical footer with the header.
+    const footer = worldSections(saved).at(-1);
+    const nameBytes = Buffer.from(patch.worldName, "utf8");
+    assert.equal(footer[0], 1);
+    assert.equal(footer[1], nameBytes.length);
+    assert.deepEqual(footer.subarray(2, 2 + nameBytes.length), nameBytes);
+    assert.equal(footer.readInt32LE(2 + nameBytes.length), patch.worldId);
     closeBytes(M, opened);
     opened = null;
     reopened = openBytes(M, saved);

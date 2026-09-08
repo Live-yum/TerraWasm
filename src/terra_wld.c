@@ -2,6 +2,13 @@
 
 #include "terra_types.h"
 #include "terra_reader.h"
+#include "terra_legacy.h"
+#if defined(__clang__) && defined(__EMSCRIPTEN__)
+#define TX_COLD_PARSER __attribute__((minsize))
+#else
+#define TX_COLD_PARSER
+#endif
+extern int serialize_legacy_section_json(TxWorld*,int,TxBuf*);
 /* ==================================================================== * Extern declarations from terra_mem.c * ==================================================================== */extern uint32_t tx_strlen(const char *s);
 extern int tx_streq_c(const char *a,const char *b);
 extern int tx_streq_n(const char *a,uint32_t alen,const char *b);
@@ -185,10 +192,41 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     w->version=rd_u32le(p,len,&off);
-    if (w->version<88u||w->version>326u){
+    if (w->version==0u||w->version>326u){
         tx_set_error("TERRAX_UNSUPPORTED_VERSION","unsupported .wld version");
         return 0;
         }
+    /* Releases 1..87 predate the section table entirely.  The old loader
+     * starts reading the header immediately after the version word; the
+     * legacy header decoder below discovers the tile stream boundary. */
+    if (w->version < 88u) {
+        w->legacy_wld=1u;
+        w->magic[0]=0;
+        w->file_type=2u;
+        w->pointer_count=2u;
+        w->starts[0]=4u;
+        w->ends[0]=w->file_len;
+        w->starts[1]=w->file_len;
+        w->ends[1]=w->file_len;
+        w->format_len=4u;
+        /* v78+ writes UInt16 tile ids. Keep the bitmap wide enough for
+         * historical ids instead of silently treating ids >=256 as plain
+         * tiles during frame decoding. */
+        w->tile_type_count=65535u;
+        w->important_len=(w->tile_type_count+7u)/8u;
+        w->important=(uint8_t*)tx_alloc(w->important_len);
+        if (!w->important) { tx_set_error("TERRAX_WASM_OOM","legacy tile metadata allocation failed"); return 0; }
+        memset(w->important,0,w->important_len);
+        /* Ancient worlds only contain the original tile ids.  This list is
+         * the stable frame-important set used by Terraria's old loader. */
+        { static const uint16_t ids[]={3,4,5,10,11,12,13,14,15,16,17,18,19,20,21,24,26,27,28,29,31,33,34,35,36,42,49,50,55,61,71,72,73,74,77,78,79,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,110,113,114,125,126,128,129,132,133,134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,184,185,186,187,201,207,209,210,212,215,216,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,244,245,246,247};
+          for (uint32_t i=0;i<sizeof(ids)/sizeof(ids[0]);i++) w->important[ids[i]>>3]|=(uint8_t)(1u<<(ids[i]&7u));
+          /* Exact high ids are generated from Terraria.Main.tileFrameImportant
+           * and kept here because release 78+ can persist UInt16 ids. */
+          static const uint16_t high[]={254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,377,378,380,386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,427,428,429,440,441,442,443,444,445,452,453,454,455,456,457,461,462,463,464,465,466,467,468,469,470,471,475,476,480,484,485,486,487,488,489,490,491,493,494,497,499,505,506,509,510,511,518,519,520,521,522,523,524,525,526,527,529,530,531,532,533,538,542,543,544,545,547,548,549,550,551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,642,643,644,645,646,653,654,656,657,658,660,663,664,665,695,696,698,699,700,701,702,703,704,705,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,733,751,752,753};
+          for (uint32_t i=0;i<sizeof(high)/sizeof(high[0]);i++) w->important[high[i]>>3]|=(uint8_t)(1u<<(high[i]&7u)); }
+        return 1;
+    }
     w->magic[0]=0;
     w->file_type=2;
     if (w->version>=135u){
@@ -248,7 +286,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     w->member=rd_u8(p,len,&off); \
     } while(0)
 
-/* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */static int parse_header_layout(TxWorld *w,uint8_t claimable_banners_present){
+/* ==================================================================== * parse_header -- Extract header metadata from raw .wld bytes * ==================================================================== */static TX_COLD_PARSER int parse_header_layout(TxWorld *w,uint8_t claimable_banners_present){
     uint32_t header_offset_base=0u;
     uint32_t off=0u;
     uint32_t len=0u;
@@ -420,7 +458,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     if (w->version>=99u)TX_RD_HEADER_BOOL(savedAngler,"savedAngler");
     if (w->version>=101u)w->anglerQuest=rd_u32le(p,len,&off);
     if (w->version>=104u)TX_RD_HEADER_BOOL(savedStylist,"savedStylist");
-    if (w->version>=140u)TX_RD_HEADER_BOOL(savedTaxCollector,"savedTaxCollector");
+    if (w->version>=129u)TX_RD_HEADER_BOOL(savedTaxCollector,"savedTaxCollector");
     if (w->version>=201u)TX_RD_HEADER_BOOL(savedGolfer,"savedGolfer");
     if (w->version>=107u)w->invasionSizeStart=rd_u32le(p,len,&off);
     if (w->version>=108u)w->cultistDelay=rd_u32le(p,len,&off);
@@ -449,14 +487,12 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     }
     /* fastForwardTime (>=140, but gate starts at >=128) */if (w->version>=128u){
-        if (w->version>=140u)TX_RD_HEADER_BOOL(fastForwardTime,"fastForwardTimeToDawn");
+        TX_RD_HEADER_BOOL(fastForwardTime,"fastForwardTimeToDawn");
         if (w->version>=131u){
             TX_RD_HEADER_BOOL(downedFishron,"downedFishron");
-            if (w->version>=140u){
-                TX_RD_HEADER_BOOL(downedMartians,"downedMartians");
-                TX_RD_HEADER_BOOL(downedLunaticCultist,"downedAncientCultist");
-                TX_RD_HEADER_BOOL(downedMoonlord,"downedMoonlord");
-                }
+            TX_RD_HEADER_BOOL(downedMartians,"downedMartians");
+            TX_RD_HEADER_BOOL(downedLunaticCultist,"downedAncientCultist");
+            TX_RD_HEADER_BOOL(downedMoonlord,"downedMoonlord");
             TX_RD_HEADER_BOOL(downedHalloweenKing,"downedHalloweenKing");
             TX_RD_HEADER_BOOL(downedHalloweenTree,"downedHalloweenTree");
             TX_RD_HEADER_BOOL(downedChristmasIceQueen,"downedChristmasIceQueen");
@@ -500,7 +536,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     /* mushroomBg (>194) */if (w->version>194u)w->mushroomBg=rd_u8(p,len,&off);
     if (w->version>=215u)w->undergroundDesertBg=rd_u8(p,len,&off);
-    if (w->version>=195u){
+    if (w->version>195u){
         w->bgTree2=rd_u8(p,len,&off);
         w->bgTree3=rd_u8(p,len,&off);
         w->bgTree4=rd_u8(p,len,&off);
@@ -609,6 +645,120 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     return 1;
     }
 #undef TX_RD_HEADER_BOOL
+/* Decode the contiguous header used by world versions 1..87.  Defaults match
+ * WorldFile.LoadWorld_Version1_Old_BeforeRelease88 when a field did not yet
+ * exist in that release. */
+int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t);
+static int legacy_skip_string(const uint8_t *p,uint32_t len,uint32_t *off) {
+    int ok=0; uint32_t n=rd_7bit(p,len,off,&ok);
+    return ok && terra_reader_has(*off,n,len) && (terra_reader_take(off,n,len),1);
+}
+static int legacy_take(const uint8_t *p,uint32_t len,uint32_t *off,uint32_t n) {
+    (void)p; return terra_reader_take(off,n,len);
+}
+static int validate_legacy_tail(TxWorld *w,uint32_t off) {
+    const uint8_t *p=w->file; uint32_t len=w->file_len; uint8_t present;
+    uint32_t slots=(w->version<58u)?20u:40u;
+    w->legacy_chest_start=off;
+    for(uint32_t i=0;i<1000u;i++) {
+        if(!legacy_take(p,len,&off,1u)) return 0; present=p[off-1u];
+        if(!present) continue;
+        if(!legacy_take(p,len,&off,8u) || (w->version>=85u&&!legacy_skip_string(p,len,&off))) return 0;
+        for(uint32_t j=0;j<slots;j++) {
+            uint32_t stack;
+            if(w->version<59u) { if(!legacy_take(p,len,&off,1u)) return 0; stack=p[off-1u]; }
+            else { if(!legacy_take(p,len,&off,2u)) return 0; stack=(uint32_t)(p[off-2u]|((uint32_t)p[off-1u]<<8)); }
+            if(stack) { if(w->version>=38u ? !legacy_take(p,len,&off,4u) : !legacy_skip_string(p,len,&off)) return 0; if(w->version>=36u&&!legacy_take(p,len,&off,1u)) return 0; }
+        }
+    }
+    w->legacy_sign_start=off;
+    for(uint32_t i=0;i<1000u;i++) {
+        if(!legacy_take(p,len,&off,1u)) return 0; present=p[off-1u];
+        if(present && (!legacy_skip_string(p,len,&off)||!legacy_take(p,len,&off,8u))) return 0;
+    }
+    w->legacy_npc_start=off;
+    /* Town NPC list: the first byte of each record is its continuation flag. */
+    for(;;) {
+        if(!legacy_take(p,len,&off,1u)) return 0; present=p[off-1u]; if(!present) break;
+        if((w->version>=190u&&!legacy_take(p,len,&off,4u))||(w->version<190u&&!legacy_skip_string(p,len,&off))||
+           (w->version>=83u&&!legacy_skip_string(p,len,&off))||!legacy_take(p,len,&off,17u)) return 0;
+    }
+    w->legacy_npc_names_start=off;
+    if(w->version>=31u&&w->version<=83u) {
+        uint32_t count=9u; if(w->version>=35u)count++; if(w->version>=65u)count+=8u; if(w->version>=79u)count++;
+        for(uint32_t i=0;i<count;i++) if(!legacy_skip_string(p,len,&off)) return 0;
+    }
+    w->legacy_footer_start=off;
+    if(w->version>=7u && (!legacy_take(p,len,&off,1u)||!legacy_skip_string(p,len,&off)||!legacy_take(p,len,&off,4u))) return 0;
+    return off<=len;
+}
+static TX_COLD_PARSER int parse_legacy_header(TxWorld *w) {
+    uint8_t *p; uint32_t len, off=4u;
+    if (!w || !w->file || w->file_len<4u) return 0;
+    p=w->file; len=w->file_len;
+#define L_U8(x) do { if (!terra_reader_has(off,1u,len)) goto truncated; (x)=p[off++]; } while(0)
+#define L_I32(x) do { if (!terra_reader_has(off,4u,len)) goto truncated; (x)=(int32_t)rd_u32le(p,len,&off); } while(0)
+#define L_U32(x) do { if (!terra_reader_has(off,4u,len)) goto truncated; (x)=rd_u32le(p,len,&off); } while(0)
+#define L_F32(x) do { if (!terra_reader_has(off,4u,len)) goto truncated; (x)=rd_f32le(p,len,&off); } while(0)
+#define L_F64(x) do { if (!terra_reader_has(off,8u,len)) goto truncated; (x)=rd_f64le(p,len,&off); } while(0)
+#define L_BOOL(x) do { uint8_t _v; L_U8(_v); (x)=_v?1u:0u; } while(0)
+    rd_string_copy(p,len,&off,w->worldName,TX_MAX_NAME);
+    if (off>len) goto truncated;
+    L_I32(w->worldId); L_I32(w->leftWorld); L_I32(w->rightWorld);
+    L_I32(w->topWorld); L_I32(w->bottomWorld); L_I32(w->maxTilesY); L_I32(w->maxTilesX);
+    if (w->version>=63u) L_U8(w->moonType);
+    if (w->version>=44u) { L_I32(w->treeX[0]); L_I32(w->treeX[1]); L_I32(w->treeX[2]); for(int i=0;i<4;i++) L_I32(w->treeStyle[i]); }
+    if (w->version>=60u) { L_I32(w->caveBackX[0]); L_I32(w->caveBackX[1]); L_I32(w->caveBackX[2]); for(int i=0;i<4;i++) L_I32(w->caveBackStyle[i]); L_I32(w->iceBackStyle); if(w->version>=61u){L_I32(w->jungleBackStyle);L_I32(w->hellBackStyle);} }
+    L_I32(w->spawnTileX); L_I32(w->spawnTileY); L_F64(w->worldSurface); L_F64(w->rockLayer);
+    L_F64(w->gameTime); L_BOOL(w->isDayTime); L_I32(w->moonPhase); L_BOOL(w->isBloodMoon);
+    if (w->version>=70u) L_BOOL(w->isEclipse);
+    L_I32(w->dungeonX); L_I32(w->dungeonY); if(w->version>=56u) L_BOOL(w->isCrimson);
+    L_BOOL(w->downedEye); L_BOOL(w->downedEaterBrain); L_BOOL(w->downedSkeletron);
+    if(w->version>=66u) L_BOOL(w->downedQueenBee);
+    if(w->version>=44u){L_BOOL(w->downedDestroyer);L_BOOL(w->downedTwins);L_BOOL(w->downedSkeletronPrime);L_BOOL(w->downedAnyMech);}
+    if(w->version>=64u){L_BOOL(w->downedPlantera);L_BOOL(w->downedGolem);}
+    if(w->version>=29u){L_BOOL(w->savedGoblin);L_BOOL(w->savedWizard);if(w->version>=34u){L_BOOL(w->savedMech);if(w->version>=80u)L_BOOL(w->savedStylist);}L_BOOL(w->downedGoblins);}
+    if(w->version>=32u) L_BOOL(w->downedClown);
+    if(w->version>=37u) L_BOOL(w->downedFrost);
+    if(w->version>=56u) L_BOOL(w->downedPirates);
+    L_BOOL(w->shadowOrbSmashed); L_BOOL(w->spawnMeteor); L_U8(w->shadowOrbCount);
+    if(w->version>=23u){L_I32(w->altarCount);L_BOOL(w->hardMode);}
+    L_I32(w->invasionDelay);L_I32(w->invasionSize);L_I32(w->invasionType);L_F64(w->invasionX);
+    if(w->version>=113u)L_U8(w->sundialCooldown);
+    if(w->version>=53u){L_BOOL(w->isRaining);L_I32(w->rainTime);L_F32(w->maxRain);}
+    if(w->version>=54u){L_I32(w->oreTierCobalt);L_I32(w->oreTierMythril);L_I32(w->oreTierAdamantite);}
+    if(w->version>=55u){L_U8(w->bgTree);L_U8(w->bgCorruption);L_U8(w->bgJungle);}
+    if(w->version>=60u){L_U8(w->bgSnow);L_U8(w->bgHallow);L_U8(w->bgCrimson);L_U8(w->bgDesert);L_U8(w->bgOcean);L_I32(w->cloudBgActive);}
+    if(w->version>=62u){uint16_t clouds; if(!terra_reader_has(off,2u,len))goto truncated; clouds=rd_u16le(p,len,&off);w->numClouds=clouds;L_F32(w->windSpeedSet);}
+    w->legacy_tile_start=off;
+    if(w->maxTilesX<=0||w->maxTilesY<=0||w->maxTilesX>100000||w->maxTilesY>100000){tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");return 0;}
+    /* Locate the end of the RLE tile stream.  This both prevents later tile
+     * consumers from treating legacy chest bytes as tiles and gives malformed
+     * old files the same bounded-read rejection as modern worlds. */
+    for (int32_t x=0; x<w->maxTilesX; x++) {
+        int32_t y=0;
+        while (y<w->maxTilesY) {
+            TxTile tile;
+            uint32_t before=off;
+            if (!read_tile_at(w,&off,len,&tile) || off<=before) goto truncated_tiles;
+            if (tile.same > (uint16_t)(w->maxTilesY-y-1)) goto truncated_tiles;
+            y += (int32_t)tile.same + 1;
+        }
+    }
+    w->legacy_tile_end=off; w->starts[1]=w->legacy_tile_start; w->ends[1]=off;
+    if (!validate_legacy_tail(w, off)) { tx_set_error("TERRAX_TRUNCATED_LEGACY_TAIL","legacy chest, sign, NPC, or footer data is truncated"); return 0; }
+    return 1;
+truncated:
+    tx_set_error("TERRAX_TRUNCATED_HEADER","legacy header fields exceed file bounds"); return 0;
+truncated_tiles:
+    tx_set_error("TERRAX_TRUNCATED_TILES","legacy tile stream exceeds file bounds"); return 0;
+#undef L_U8
+#undef L_I32
+#undef L_U32
+#undef L_F32
+#undef L_F64
+#undef L_BOOL
+}
 int parse_header(TxWorld *w){
     TxWorld candidate;
 
@@ -617,14 +767,15 @@ int parse_header(TxWorld *w){
         return 0;
     }
 
+    if (w->legacy_wld) return parse_legacy_header(w);
     candidate=*w;
-    if (parse_header_layout(&candidate,1u)) {
+    if (parse_header_layout(&candidate,w->version>=289u)) {
         *w=candidate;
         return 1;
     }
 
     candidate=*w;
-    if (parse_header_layout(&candidate,0u)) {
+    if (parse_header_layout(&candidate,w->version<289u)) {
         *w=candidate;
         return 1;
     }
@@ -635,33 +786,75 @@ int parse_header(TxWorld *w){
     uint32_t len=w->file_len;
     if (*off>=end||*off>=len) return 0;
     memset(t,0,sizeof(TxTile));
-    uint8_t f1=rd_u8(p,len,off);
+    if (w->legacy_wld) {
+        uint8_t v;
+#define OLD_BOOL(out) do { if (*off>=end||*off>=len) return 0; (out)=p[(*off)++]?1u:0u; } while(0)
+        OLD_BOOL(t->active);
+        if (t->active) {
+            if (w->version<=77u) { if (*off>=end) return 0; t->type=p[(*off)++]; }
+            else { if (!terra_reader_has(*off,2u,end)) return 0; t->type=rd_u16le(p,end,off); }
+            if (t->type==127u || t->type==504u) t->active=0;
+            if (w->version<72u && (t->type==35u||t->type==36u||t->type==170u||t->type==171u||t->type==172u)) {
+                if(!terra_reader_has(*off,4u,end)) return 0;
+                t->frame_x=(int16_t)rd_u16le(p,end,off); t->frame_y=(int16_t)rd_u16le(p,end,off);
+            } else if (tile_important(w,t->type)
+                       && !(w->version<28u && t->type==4u)
+                       && !(w->version<40u && t->type==19u)
+                       && !(w->version<195u && t->type==49u)) {
+                if(!terra_reader_has(*off,4u,end)) return 0;
+                t->frame_x=(int16_t)rd_u16le(p,end,off); t->frame_y=(int16_t)rd_u16le(p,end,off);
+                if (t->type==144u) t->frame_y=0;
+            } else { t->frame_x=-1; t->frame_y=-1; }
+            if (w->version>=48u) { OLD_BOOL(v); if(v){if(*off>=end)return 0;t->tile_color=p[(*off)++];} }
+        }
+        if (w->version<=25u) OLD_BOOL(v);
+        OLD_BOOL(v); if(v){if(*off>=end)return 0;t->wall=p[(*off)++];if(w->version>=48u){OLD_BOOL(v);if(v){if(*off>=end)return 0;t->wall_color=p[(*off)++];}}}
+        OLD_BOOL(v); if(v){if(*off>=end)return 0;t->liquid_amount=p[(*off)++];OLD_BOOL(v);t->liquid_type=v?2u:1u;if(w->version>=51u){OLD_BOOL(v);if(v)t->liquid_type=3u;}}
+        if(w->version>=33u) OLD_BOOL(t->wire_red);
+        if(w->version>=43u){OLD_BOOL(t->wire_blue);OLD_BOOL(t->wire_green);}
+        if(w->version>=41u){OLD_BOOL(v);t->brick_style=v?1u:0u;if(w->version>=49u){if(*off>=end)return 0;v=p[(*off)++];if(v)t->brick_style=(uint8_t)((v&7u)+1u);}}
+        if(w->version>=42u){OLD_BOOL(t->actuator);OLD_BOOL(t->inactive);}
+        if(w->version>=25u){if(!terra_reader_has(*off,2u,end))return 0;t->same=(uint16_t)(int16_t)rd_u16le(p,end,off);}
+#undef OLD_BOOL
+        return *off<=end;
+    }
+    if (end>len) end=len;
+#define TILE_U8(value) do { if (!terra_reader_has(*off,1u,end)) return 0; (value)=rd_u8(p,end,off); } while (0)
+#define TILE_U16(value) do { if (!terra_reader_has(*off,2u,end)) return 0; (value)=rd_u16le(p,end,off); } while (0)
+    uint8_t f1;
+    TILE_U8(f1);
     uint8_t f2=0,f3=0,f4=0;
-    if (f1&1u)f2=rd_u8(p,len,off);
-    if (f2&1u)f3=rd_u8(p,len,off);
-    if (f3&1u)f4=rd_u8(p,len,off);
+    if (f1&1u)TILE_U8(f2);
+    if (f2&1u)TILE_U8(f3);
+    if (f3&1u)TILE_U8(f4);
     t->active=(f1>>1)&1u;
     if (t->active){
-        if (f1&32u)t->type=rd_u16le(p,len,off); else t->type=rd_u8(p,len,off);
+        if (f1&32u)TILE_U16(t->type); else TILE_U8(t->type);
         if (tile_important(w,t->type)){
-            t->frame_x=(int16_t)rd_u16le(p,len,off);
-            t->frame_y=(int16_t)rd_u16le(p,len,off);
+            TILE_U16(t->frame_x);
+            TILE_U16(t->frame_y);
+            if (t->type==144u)t->frame_y=0;
             }
+        else {t->frame_x=-1;t->frame_y=-1;}
+        if (f3&8u)TILE_U8(t->tile_color);
         }
-    if (f3&8u)t->tile_color=rd_u8(p,len,off);
-    if (f1&4u){ if (f3&64u)t->wall=rd_u16le(p,len,off); else t->wall=rd_u8(p,len,off); }
-    if (f3&16u)t->wall_color=rd_u8(p,len,off);
+    if (f1&4u){
+        TILE_U8(t->wall);
+        if (f3&16u)TILE_U8(t->wall_color);
+        }
     {
         uint8_t liq=(f1>>3)&3u;
         if (liq){
-            t->liquid_amount=rd_u8(p,len,off);
+            TILE_U8(t->liquid_amount);
             t->liquid_type=(f3&128u)?4u:liq;
             }
         }
+    /* WorldFile stores the wall high byte after paint and liquid payloads. */
+    if (f3&64u){uint8_t high;TILE_U8(high);t->wall|=(uint16_t)((uint16_t)high<<8);}
     {
         uint8_t rle=(f1>>6)&3u;
-        if (rle==1u)t->same=rd_u8(p,len,off);
-        else if (rle)t->same=rd_u16le(p,len,off);
+        if (rle==1u)TILE_U8(t->same);
+        else if (rle){TILE_U16(t->same);if (t->same>32767u)return 0;}
         }
     t->wire_red=(f2>>1)&1u;
     t->wire_blue=(f2>>2)&1u;
@@ -674,6 +867,8 @@ int parse_header(TxWorld *w){
     t->invisible_wall=(f4>>2)&1u;
     t->fullbright_block=(f4>>3)&1u;
     t->fullbright_wall=(f4>>4)&1u;
+#undef TILE_U8
+#undef TILE_U16
     return *off<=end;
     }
 /* ==================================================================== * write_tile -- Serialize a tile back to binary * ==================================================================== */void write_tile(TxWorld *w,TxBuf *b,const TxTile *t,uint32_t same){
@@ -696,8 +891,8 @@ int parse_header(TxWorld *w){
     if (t->brick_style)f2|=(uint8_t)((t->brick_style&7u)<<4);
     if (t->actuator)f3|=2u;
     if (t->inactive)f3|=4u;
-    if (t->tile_color)f3|=8u;
-    if (t->wall_color)f3|=16u;
+    if (t->active&&t->tile_color)f3|=8u;
+    if (t->wall&&t->wall_color)f3|=16u;
     if (t->wire_yellow)f3|=32u;
     if (t->wall>255u)f3|=64u;
     if (t->invisible_block)f4|=2u;
@@ -719,9 +914,10 @@ int parse_header(TxWorld *w){
             }
         }
     if (f3&8u)buf_u8(b,t->tile_color);
-    if (f1&4u){ if (f3&64u)buf_u16le(b,t->wall); else buf_u8(b,(uint8_t)t->wall); }
+    if (f1&4u)buf_u8(b,(uint8_t)t->wall);
     if (f3&16u)buf_u8(b,t->wall_color);
     if (((f1>>3)&3u)!=0u) buf_u8(b,t->liquid_amount);
+    if (f3&64u)buf_u8(b,(uint8_t)(t->wall>>8));
     if (same){ if (same<=255u)buf_u8(b,(uint8_t)same); else buf_u16le(b,same); }
     }
 /* ==================================================================== * Section name/index mapping * ==================================================================== */static const char *section_name_by_index(uint32_t index){
@@ -730,6 +926,21 @@ int parse_header(TxWorld *w){
     ;
     return index<11u?names[index]:"section";
     }
+/* Map the public modern section number to the versioned pointer-table slot. */
+static int tx_actual_section_index(const TxWorld *w, int logical) {
+    int idx = logical;
+    if (logical == 10) {
+        int footer=w->version>=220u?10:w->version>=210u?9:w->version>=189u?8:w->version>=170u?7:w->version>=116u?6:5;
+        return (uint32_t)footer<w->pointer_count?footer:-1;
+    }
+    if (logical == 5 && w->version < 116u) return -1;
+    if (logical == 6 && w->version < 170u) return -1;
+    if (logical == 7 && w->version < 189u) return -1;
+    if (logical == 8 && w->version < 210u) return -1;
+    if (logical == 9 && w->version < 220u) return -1;
+    return (idx >= 0 && (uint32_t)idx < w->pointer_count) ? idx : -1;
+}
+
 int section_index_by_name(const char *name,uint32_t len){
     if (tx_streq_n(name,len,"header"))return 0;
     if (tx_streq_n(name,len,"tiles"))return 1;
@@ -1328,8 +1539,9 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_cstr(b,"\n}\n");
     }
 /* --- chests section --- *//* * Binary format per chest (version >= 294): * i32 x, i32 y, 7bit-string name, i32 maxItems * For each item: u16 stack;  stack != 0: i32 itemType, u8 prefix */void serialize_chests_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->section_overrides[2].active?0u:w->starts[2];
-    uint32_t end=w->section_overrides[2].active?w->section_overrides[2].len:w->ends[2];
+    int section=tx_actual_section_index(w,2);
+    uint32_t off=w->section_overrides[2].active?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=w->section_overrides[2].active?w->section_overrides[2].len:(section<0?0u:w->ends[section]);
     uint8_t *p=w->section_overrides[2].active?w->section_overrides[2].data:w->file;
     uint32_t len=w->section_overrides[2].active?w->section_overrides[2].len:w->file_len;
     buf_u8(b,'[');
@@ -1380,8 +1592,8 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_u8(b,']');
     }
 /* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */void serialize_signs_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[3];
-    uint32_t end=w->ends[3];
+    int section=tx_actual_section_index(w,3); uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     buf_u8(b,'[');
@@ -1406,8 +1618,8 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_u8(b,']');
     }
 /* --- npcs section --- *//* * Binary format: * Loop: i32 npcType;  >= 0: f32 x, f32 y, 7bit-string name, ... * Terminator: npcType < 0 * Then: u32 shimmeredCount, [i32 shimmeredNetId...] */void serialize_npcs_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[4];
-    uint32_t end=w->ends[4];
+    int section=tx_actual_section_index(w,4); uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     /* * NPC section binary format (v318): * [v268+] shimmered_count (u32) + shimmered_count * netId (u32) * Town NPCs loop: hasNPCs (u8) then for each: * [v190+] SpriteId (i32) * DisplayName (vString: varint-len + bytes) * X (f32), Y (f32) * IsHomeless (u8) * HomeX (u32), HomeY (u32) * [v213+] hasVariation (u8) + optional VariationIndex (i32) * [v315+] HomelessDespawn (u8) * Persistent NPCs loop: hasNPCs (u8) then for each: * SpriteId (i32) * X (f32), Y (f32) * Terminator: hasNPCs byte = 0 */uint32_t scan_off=off;
@@ -1427,15 +1639,20 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     while (scan_off<end){
         uint8_t has_npc=rd_u8(p,len,&scan_off);
         if (!has_npc) break;
-        /* SpriteId */if (!terra_reader_has(scan_off,4u,end)) break;
-        rd_skip(p,len,&scan_off,4);
+        /* NPC type: legacy versions store a legacy NPC name string. */
+        if (w->version>=190u) {
+            if (!terra_reader_has(scan_off,4u,end)) break;
+            rd_skip(p,len,&scan_off,4);
+        } else {
+            rd_skip_string_value(p,len,&scan_off);
+        }
         /* DisplayName (vString: varint length + bytes) */rd_skip_string_value(p,len,&scan_off);
         /* X, Y (f32 each) */rd_skip(p,len,&scan_off,8);
         /* IsHomeless (u8) */rd_skip(p,len,&scan_off,1);
         /* HomeX, HomeY (u32 each) */rd_skip(p,len,&scan_off,8);
         /* [v213+] hasVariation + optional */if (w->version>=213u){
             uint8_t has_var=rd_u8(p,len,&scan_off);
-            if (has_var)rd_skip(p,len,&scan_off,4);
+            if (has_var&1u)rd_skip(p,len,&scan_off,4);
             }
         /* [v315+] homelessDespawn */if (w->version>=315u){
             rd_skip(p,len,&scan_off,1);
@@ -1444,11 +1661,18 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     /* Skip the town NPC terminator byte (already read as has_npc=0) *//* scan_off is now at the start of persistent NPCs *//* --- Count and locate persistent NPCs --- */uint32_t persistent_start=scan_off;
     uint32_t persistent_count=0;
-    while (scan_off<end){
+    while (w->version>=140u&&scan_off<end){
         uint8_t has_npc=rd_u8(p,len,&scan_off);
         if (!has_npc) break;
-        /* SpriteId (i32) + X (f32) + Y (f32) = 12 bytes */if (!terra_reader_has(scan_off,12u,end)) break;
-        rd_skip(p,len,&scan_off,12);
+        /* Persistent NPC type follows the same version gate as town NPCs. */
+        if (w->version>=190u) {
+            if (!terra_reader_has(scan_off,12u,end)) break;
+            rd_skip(p,len,&scan_off,12);
+        } else {
+            rd_skip_string_value(p,len,&scan_off);
+            if (!terra_reader_has(scan_off,8u,end)) break;
+            rd_skip(p,len,&scan_off,8);
+        }
         persistent_count++;
         }
     /* === Serialize === *//* Shimmered */buf_cstr(b," { \"shimmeredTownNpcNetIds\":[");
@@ -1469,8 +1693,11 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         /* Read hasNPCs byte */uint8_t has_npc=rd_u8(p,len,&npc_off);
         if (!has_npc) break;
         if (i)buf_u8(b,',');
-        /* SpriteId */int32_t npc_type=rd_i32le(p,len,&npc_off);
-        /* DisplayName (vString) */char npc_name[256];
+        /* NPC type */int32_t npc_type=0;
+        char npc_type_name[256]; npc_type_name[0]=0;
+        if (w->version>=190u) npc_type=rd_i32le(p,len,&npc_off);
+        else rd_string_copy(p,len,&npc_off,npc_type_name,256);
+        /* DisplayName */char npc_name[256];
         rd_string_copy(p,len,&npc_off,npc_name,256);
         /* X, Y as float s */union{
             uint32_t u;
@@ -1486,14 +1713,18 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         uint8_t has_variation=0;
         if (w->version>=213u){
             has_variation=rd_u8(p,len,&npc_off);
-            if (has_variation)variation=rd_i32le(p,len,&npc_off);
+            if (has_variation&1u)variation=rd_i32le(p,len,&npc_off);
             }
         /* [v315+] homelessDespawn */uint8_t homeless_despawn=0;
         if (w->version>=315u){
             homeless_despawn=rd_u8(p,len,&npc_off);
             }
         buf_cstr(b," { \"npcNetId\":");
-        json_i32(b,npc_type);
+        json_i32(b,w->version>=190u?npc_type:tx_legacy_npc_id(npc_type_name));
+        if (w->version<190u) {
+            buf_cstr(b,",\"legacyTypeName\":");
+            json_string(b,npc_type_name);
+        }
         buf_cstr(b,",\"givenName\":");
         json_string(b,npc_name);
         buf_cstr(b,",\"positionX\":");
@@ -1506,7 +1737,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         json_u32(b,home_x);
         buf_cstr(b,",\"homeTileY\":");
         json_u32(b,home_y);
-        if (has_variation){
+        if (has_variation&1u){
             buf_cstr(b,",\"townNpcVariationIndex\":");
             json_i32(b,variation);
             }
@@ -1522,7 +1753,10 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         uint8_t has_npc=rd_u8(p,len,&mob_off);
         if (!has_npc) break;
         if (i)buf_u8(b,',');
-        uint32_t npc_type=rd_i32le(p,len,&mob_off);
+        int32_t npc_type=0;
+        char npc_type_name[256]; npc_type_name[0]=0;
+        if (w->version>=190u) npc_type=rd_i32le(p,len,&mob_off);
+        else rd_string_copy(p,len,&mob_off,npc_type_name,256);
         union{
             uint32_t u;
             float f;
@@ -1531,7 +1765,11 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         mx.u=rd_u32le(p,len,&mob_off);
         my.u=rd_u32le(p,len,&mob_off);
         buf_cstr(b," { \"npcNetId\":");
-        json_i32(b,npc_type);
+        json_i32(b,w->version>=190u?npc_type:tx_legacy_npc_id(npc_type_name));
+        if (w->version<190u) {
+            buf_cstr(b,",\"legacyTypeName\":");
+            json_string(b,npc_type_name);
+        }
         buf_cstr(b,",\"positionX\":");
         json_float(b,(double)mx.f);
         buf_cstr(b,",\"positionY\":");
@@ -1550,13 +1788,23 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_cstr(b,"\n}\n");
     }
 void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[5];
-    uint32_t end=w->ends[5];
+    int section=tx_actual_section_index(w,5); uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     buf_u8(b,'[');
-    uint32_t count=(int16_t)rd_u16le(p,len,&off);
-    if (count<0)count=0;
+    /* v116-v121 contain the legacy dummy section, not TileEntity records. */
+    if (w->version<122u) {
+        uint32_t count=terra_reader_has(off,4u,end)?rd_u32le(p,end,&off):0u;
+        for (uint32_t i=0;i<count && terra_reader_has(off,4u,end);i++) {
+            if (i) buf_u8(b,',');
+            int16_t x=(int16_t)rd_u16le(p,end,&off),y=(int16_t)rd_u16le(p,end,&off);
+            buf_cstr(b,"{\"legacyDummy\":true,\"positionX\":"); json_i32(b,x);
+            buf_cstr(b,",\"positionY\":"); json_i32(b,y); buf_u8(b,'}');
+        }
+        buf_u8(b,']'); return;
+    }
+    uint32_t count=terra_reader_has(off,4u,end)?rd_u32le(p,len,&off):0u;
     for (int32_t i=0;
     i<count&&off<end;
     i++){
@@ -1578,7 +1826,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                 /* TrainingDummy */int16_t npc=(int16_t)rd_u16le(p,len,&off);
                 buf_cstr(b,",\"npc\":");
                 json_i32(b,npc);
-                ;
+                break;
                 }
             case 1:/* ItemFrame */case 4:/* WeaponRack */case 6:/* FoodPlatter */case 8:/* DeadCellsDisplayJar */{
                 int16_t item_id=(int16_t)rd_u16le(p,len,&off);
@@ -1590,7 +1838,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                 json_u32(b,prefix);
                 buf_cstr(b,",\"stack\":");
                 json_u32(b,stack);
-                ;
+                break;
                 }
             case 2:{
                 /* LogicSensor */uint8_t logic_check=rd_u8(p,len,&off);
@@ -1599,7 +1847,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                 json_u32(b,logic_check);
                 buf_cstr(b,",\"on\":");
                 json_bool(b,on);
-                ;
+                break;
                 }
             case 3:{
                 /* DisplayDoll */uint8_t equip_mask=rd_u8(p,len,&off);
@@ -1610,10 +1858,10 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                 json_u32(b,equip_mask);
                 buf_cstr(b,",\"dyeMaskLow\":");
                 json_u32(b,dye_mask);
-                if (w->version>=260u){
+                if (w->version>=307u){
                     pose=rd_u8(p,len,&off);
                     }
-                if (w->version>=262u){
+                if (w->version>=308u){
                     extra_mask=rd_u8(p,len,&off);
                     }
                 buf_cstr(b,",\"pose\":");
@@ -1635,7 +1883,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                             serialize_item_stack_json(b,id,pf,st);
                             }
                         }
-                    if ((extra_mask>>1)&1u){
+                    if ((extra_mask>>1)&1u && w->version!=311u){
                         int16_t id=(int16_t)rd_u16le(p,len,&off);
                         uint8_t pf=rd_u8(p,len,&off);
                         uint16_t st=rd_u16le(p,len,&off);
@@ -1678,7 +1926,14 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                         }
                     }
                 buf_cstr(b,"]");
-                ;
+                if (w->version==311u && (extra_mask&2u)) {
+                    int16_t id=(int16_t)rd_u16le(p,len,&off);
+                    uint8_t pf=rd_u8(p,len,&off);
+                    uint16_t st=rd_u16le(p,len,&off);
+                    buf_cstr(b,",\"equip8\":");
+                    serialize_item_stack_json(b,id,pf,st);
+                }
+                break;
                 }
             case 5:{
                 /* HatRack */uint8_t item_mask=rd_u8(p,len,&off);
@@ -1717,14 +1972,14 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
                         }
                     }
                 buf_cstr(b,"]");
-                ;
+                break;
                 }
             case 7:/* TeleportationPylon *//* No extra data */break;
             case 9:/* KiteAnchor */case 10:/* CritterAnchor */{
                 int16_t item_type=(int16_t)rd_u16le(p,len,&off);
                 buf_cstr(b,",\"itemType\":");
                 json_i32(b,item_type);
-                ;
+                break;
                 }
             }
         buf_cstr(b,"\n}\n");
@@ -1732,13 +1987,12 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     buf_u8(b,']');
     }
 /* --- weighted_pressure_plates section --- */void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[6];
-    uint32_t end=w->ends[6];
+    int section=tx_actual_section_index(w,6); uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     buf_u8(b,'[');
-    uint32_t count=(int16_t)rd_u16le(p,len,&off);
-    if (count<0)count=0;
+    uint32_t count=terra_reader_has(off,4u,end)?rd_u32le(p,len,&off):0u;
     for (int32_t i=0;
     i<count&&off<end;
     i++){
@@ -1754,13 +2008,12 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     buf_u8(b,']');
     }
 /* --- town_manager section --- */void serialize_town_manager_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[7];
-    uint32_t end=w->ends[7];
+    int section=tx_actual_section_index(w,7); uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     buf_u8(b,'[');
-    uint32_t count=(int16_t)rd_u16le(p,len,&off);
-    if (count<0)count=0;
+    uint32_t count=terra_reader_has(off,4u,end)?rd_u32le(p,len,&off):0u;
     for (int32_t i=0;
     i<count&&off<end;
     i++){
@@ -1779,8 +2032,9 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     buf_u8(b,']');
     }
 /* --- bestiary section --- *//* * Binary format: * u32 killCount, [7bit-string name, u32 count...] * u32 sightingCount, [7bit-string name...] * u32 chatCount, [7bit-string name...] */void serialize_bestiary_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->section_overrides[8].active?0u:w->starts[8];
-    uint32_t end=w->section_overrides[8].active?w->section_overrides[8].len:w->ends[8];
+    int section=tx_actual_section_index(w,8);
+    uint32_t off=w->section_overrides[8].active?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=w->section_overrides[8].active?w->section_overrides[8].len:(section<0?0u:w->ends[section]);
     uint8_t *p=w->section_overrides[8].active?w->section_overrides[8].data:w->file;
     uint32_t len=w->section_overrides[8].active?w->section_overrides[8].len:w->file_len;
     buf_cstr(b," { \"kills\":[");
@@ -1827,52 +2081,77 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_cstr(b,"]\n}\n");
     }
-/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */void serialize_creative_powers_json(TxWorld *w,TxBuf *b){
-    uint32_t off=w->starts[9];
-    uint32_t end=w->ends[9];
-    uint8_t *p=w->file;
-    uint32_t len=w->file_len;
-    buf_u8(b,'[');
+/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */int serialize_creative_powers_json(TxWorld *w,TxBuf *b){
+    int section=tx_actual_section_index(w,9);
+    uint32_t off=section<0?0u:w->starts[section];
+    uint32_t end=section<0?0u:w->ends[section];
+    const uint8_t *p=w->file;
     int first=1;
-    if (terra_reader_has(off,2u,end)){
-        uint16_t power_id=rd_u16le(p,len,&off);
+    buf_u8(b,'[');
+    if (end>w->file_len) goto truncated;
+    if (off==end) { buf_u8(b,']'); return 1; }
+    while (terra_reader_has(off,1u,end)) {
+        if (!rd_u8(p,end,&off)) { buf_u8(b,']'); return 1; }
+        if (!terra_reader_has(off,2u,end)) goto truncated;
+        uint16_t power_id=rd_u16le(p,end,&off);
         if (!first) buf_u8(b,',');
         first=0;
-        buf_cstr(b," { \"powerId\":");
-        json_u32(b,power_id);
-        switch (power_id){
-            case 0:/* TimeSetFrozen */case 9:/* RainSetFrozen */case 10:/* WindSetFrozen */case 13:/* BiomeSpreadSetFrozen */{
-                uint8_t val=rd_u8(p,len,&off);
-                buf_cstr(b,",\"enabled\":");
-                json_bool(b,val);
-                ;
-                }
-            case 8:/* TimeSetSpeed */case 12:/* SetDifficulty */{
-                union{
-                    uint32_t u;
-                    float f;
-                    }
-                v;
-                v.u=rd_u32le(p,len,&off);
-                buf_cstr(b,",\"sliderValue\":");
-                json_float(b,(double)v.f);
-                ;
-                }
-            default:/* Unknown power; skip remaining bytes */off=end;
-            ;
-            }
-        buf_cstr(b,"\n}\n");
+        buf_cstr(b," { \"powerId\":"); json_u32(b,power_id);
+        switch (power_id) {
+            case 0: case 9: case 10: case 13:
+                if (!terra_reader_has(off,1u,end)) goto truncated;
+                buf_cstr(b,",\"enabled\":"); json_bool(b,rd_u8(p,end,&off));
+                break;
+            case 8: case 12:
+                if (!terra_reader_has(off,4u,end)) goto truncated;
+                buf_cstr(b,",\"sliderValue\":"); json_float(b,rd_f32le(p,end,&off));
+                break;
+            default:
+                tx_set_error("TERRAX_UNSUPPORTED_CREATIVE_POWER","unknown creative power payload");
+                return 0;
         }
-    buf_u8(b,']');
+        buf_cstr(b,"\n}\n");
+    }
+truncated:
+    tx_set_error("TERRAX_TRUNCATED_CREATIVE_POWERS","creative power payload or terminator is truncated");
+    return 0;
     }
 /* --- footer section --- */void serialize_footer_json(TxWorld *w,TxBuf *b){
-    buf_cstr(b," { \"valid\":true,\"worldName\":");
-    json_string(b,w->worldName);
-    buf_cstr(b,",\"worldId\":");
-    json_i32(b,w->worldId);
+    int section=tx_actual_section_index(w,10);
+    uint8_t overridden=section>=0 && w->section_overrides[section].active;
+    uint32_t off=overridden?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=overridden?w->section_overrides[section].len:(section<0?0u:w->ends[section]);
+    uint8_t *p=overridden?w->section_overrides[section].data:w->file;
+    uint32_t len=overridden?end:w->file_len;
+    uint8_t valid=0; char name[TX_MAX_NAME]={0}; int32_t id=0;
+    if (p && end<=len && terra_reader_has(off,1u,end) && rd_u8(p,end,&off)) {
+        int ok=0; uint32_t name_start=off;
+        uint32_t size=rd_7bit(p,end,&off,&ok);
+        if (ok && terra_reader_has(off,size,end)) {
+            off+=size;
+            if (terra_reader_has(off,4u,end)) {
+                id=rd_i32le(p,end,&off);
+                rd_string_copy(p,end,&name_start,name,TX_MAX_NAME);
+                valid=1;
+            }
+        }
+    }
+    buf_cstr(b," { \"valid\":"); json_bool(b,valid);
+    buf_cstr(b,",\"worldName\":"); json_string(b,valid?name:"");
+    buf_cstr(b,",\"worldId\":"); json_i32(b,valid?id:0);
     buf_cstr(b,"\n}\n");
     }
 /* ==================================================================== * Unified section serializer -- dispatch by section index * ==================================================================== */int serialize_section_json(TxWorld *w,int idx,TxBuf *b){
+    if (w->legacy_wld && idx>=2 && idx<=10) return serialize_legacy_section_json(w,idx,b);
+    /* API section names use the latest layout; old worlds omit sections. */
+    if (idx>=2 && idx<=10) {
+        int actual=tx_actual_section_index(w,idx);
+        if (actual<0) {
+            /* Public section reads remain shape-stable on old worlds. */
+            if (idx==8) { buf_cstr(b,"{\"kills\":[],\"sightings\":[],\"chats\":[]}"); return 1; }
+            buf_u8(b,'['); buf_u8(b,']'); return 1;
+        }
+    }
     switch (idx){
         case -2:serialize_format_json(w,b);
         return 1;
@@ -1892,8 +2171,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         return 1;
         case 8:serialize_bestiary_json(w,b);
         return 1;
-        case 9:serialize_creative_powers_json(w,b);
-        return 1;
+        case 9:return serialize_creative_powers_json(w,b);
         case 10:serialize_footer_json(w,b);
         return 1;
         default:/* Tiles section (idx=1) or unknown: return section range info */if (idx>=0&&(uint32_t)idx<w->pointer_count){

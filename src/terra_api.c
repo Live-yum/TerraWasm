@@ -482,6 +482,14 @@ static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
         tx_set_error("TERRAX_STATE_ERROR", "world has no file data");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
+    if (world->legacy_wld) {
+        if (world->format_dirty || world->section_overrides[0].active ||
+            world->section_overrides[1].active || world->pixel_art_maps) {
+            tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds cannot be saved with modern binary edits");
+            return TERRAX_WORLD_STATUS_NOT_SUPPORTED;
+        }
+        return TERRAX_WORLD_STATUS_OK;
+    }
 
     /* If pixel art is queued but tile section not yet overridden, rebuild it now */
     if (world->pixel_art_maps && world->pixel_art_map_count > 0 &&
@@ -514,6 +522,8 @@ static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
 }
 
 static int tx_world_has_overrides(TxWorld* world) {
+    /* Legacy section views are for reading; export retains the contiguous source. */
+    if (world->legacy_wld) return 0;
     if (world->format_dirty) return 1;
     for (uint32_t i = 0; i < TX_MAX_SECTION_OVERRIDES; i++) {
         if (world->section_overrides[i].active) return 1;

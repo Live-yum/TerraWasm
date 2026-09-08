@@ -40,6 +40,8 @@ set(COMMON_SOURCES
     "${SRC_DIR}/terra_mem.c"
 )
 set(WLD_SOURCES
+    "${SRC_DIR}/terra_legacy_npc.c"
+    "${SRC_DIR}/terra_wld_legacy.c"
     "${SRC_DIR}/terra_commands.c"
     "${SRC_DIR}/terra_task.c"
     "${SRC_DIR}/terra_json.c"
@@ -152,6 +154,8 @@ if(EMSCRIPTEN)
     if(TERRAWASM_ENABLE_WLD)
         set_source_files_properties(
             "${SRC_DIR}/terra_mutators.c"
+            "${SRC_DIR}/terra_wld_legacy.c"
+            "${SRC_DIR}/terra_legacy_npc.c"
             PROPERTIES COMPILE_OPTIONS "-Oz"
         )
     endif()
@@ -345,6 +349,9 @@ else()
             add_terra_contract(terra_zlib_bridge_contract tests/zlib_bridge_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_json_parser_contract tests/json_parser_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_string_section_guard_contract tests/string_section_guard_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_wld_guard_task_versions_contract tests/wld_guard_task_versions_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_wld_tile_versions_contract tests/wld_tile_versions_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_wld_sections_versions_contract tests/wld_sections_versions_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
 
             if(TERRAWASM_FUZZ_SMOKE)

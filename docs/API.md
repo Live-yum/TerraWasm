@@ -205,7 +205,7 @@ terrax_world_status terra_world_open(
 
 **行为：**
 1. 读取文件到 bump allocator
-2. 解析 format section（版本、magic、指针表）
+2. 解析文件格式：88-326 读取 magic/指针表；1-87 按连续旧布局定位 header、瓦片和尾部
 3. 解析 header section（世界名、尺寸、种子等）
 4. 分配 `TxWorld` 结构体
 
@@ -579,7 +579,7 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 #### `header_patch`
 
-通过一个 `patch` 对象统一修改当前 WLD 的完整 header/format 可编码模型，不再按页面用途拆分字段类别。header 可写字段以当前版本 `terra_section_get_json("header")` 返回值为准，包括标量、布尔值、固定数组、动态字符串/数字数组、出生点列表和 `manifestJson`；派生的 `creationTimeDate`、`lastPlayedDate` 不单独写入。format 支持 `version`、`magic`、`type`、`revision`、`favoriteFlags`、`tileTypeCount` 和 `tileFrameImportantBitmap`；`pointerCount`、`positions` 由保存器重新计算。跨越 header 布局门槛的版本变更会被拒绝，修改 `tileTypeCount` 时必须同时提供等长位图。
+通过一个 `patch` 对象统一修改当前 WLD 的完整 header/format 可编码模型，不再按页面用途拆分字段类别。header 可写字段以当前版本 `terra_section_get_json("header")` 返回值为准，包括标量、布尔值、固定数组、动态字符串/数字数组、出生点列表和 `manifestJson`；派生的 `creationTimeDate`、`lastPlayedDate` 不单独写入。format 支持 `version`、`magic`、`type`、`revision`、`favoriteFlags`、`tileTypeCount` 和 `tileFrameImportantBitmap`；`pointerCount`、`positions` 由保存器重新计算。跨越 header 或非 header section 布局门槛的版本变更会被拒绝，修改 `tileTypeCount` 时必须同时提供等长位图。
 
 `magic` 只能是 `relogic` 或 `xindong`，`uniqueId` 必须是标准 UUID，64 位整数可传 JSON 整数或十进制字符串，动态数组的 count 必须与数组长度一致，出生点必须位于目标世界边界内。未知字段、当前版本不存在的字段、重复字段和空 patch 都会原子拒绝。调用方可以只提交所需字段；页面层是否开放尺寸、种子和版本编辑不影响 WASM 接口能力。
 
@@ -916,3 +916,8 @@ main();
   ...
 }
 ```
+
+
+### 历史 WLD 兼容范围
+
+WLD 文件格式 1-87 支持同步与任务式打开、header/宝箱/告示牌/NPC 读取、瓦片预览和原字节保存；旧格式不支持现代编辑编码器，编辑请求返回不支持错误。没有出现的可选 section 返回空集合（图鉴保持对象结构）。88-326 沿用分段模型。这里的数字是文件头 release 值，不是游戏展示版本号。详见 [多版本兼容说明](MULTI_VERSION_COMPATIBILITY.md)。

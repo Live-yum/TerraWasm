@@ -506,6 +506,10 @@ static int parse_biome_mode(const char* request, int jlen) {
 
 int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                                TxBuf* response) {
+    if (w->legacy_wld) {
+        tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
+        return -1;
+    }
     extern int json_find_key(const char* json, int jlen, const char* key);
     extern int json_array_count(const char* json, int jlen, int pos);
     extern int json_array_element(const char* json, int jlen, int pos, int index);

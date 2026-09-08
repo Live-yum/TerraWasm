@@ -306,6 +306,8 @@ static int validate_npc_strings(TxWorld* world) {
     const uint8_t* data;
     uint32_t length;
     uint32_t offset;
+    uint8_t has_npc;
+    uint8_t town_terminated = 0;
 
     if (world->pointer_count <= 4u) return 1;
     if (!guard_section_view(world, 4u, &data, &offset, &length)) {
@@ -324,10 +326,10 @@ static int validate_npc_strings(TxWorld* world) {
     }
 
     while (offset < length) {
-        uint8_t has_npc;
         if (!guard_read_u8(data, length, &offset, &has_npc)) break;
-        if (!has_npc) return 1;
-        if (!terra_reader_take(&offset, 4u, length)
+        if (!has_npc) { town_terminated = 1; break; }
+        if ((world->version >= 190u && !terra_reader_take(&offset, 4u, length))
+                || (world->version < 190u && !guard_skip_string(data, length, &offset))
                 || !guard_skip_string(data, length, &offset)
                 || !terra_reader_take(&offset, 17u, length)) {
             tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC name or fixed fields exceed section bounds");
@@ -336,7 +338,7 @@ static int validate_npc_strings(TxWorld* world) {
         if (world->version >= 213u) {
             uint8_t has_variation;
             if (!guard_read_u8(data, length, &offset, &has_variation)
-                    || (has_variation && !terra_reader_take(&offset, 4u, length))) {
+                    || ((has_variation & 1u) && !terra_reader_take(&offset, 4u, length))) {
                 tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC variation is truncated");
                 return 0;
             }
@@ -347,7 +349,23 @@ static int validate_npc_strings(TxWorld* world) {
         }
     }
 
-    tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC list has no terminator");
+    if (!town_terminated) {
+        tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC list has no terminator");
+        return 0;
+    }
+    /* Persistent NPCs were added in v140. */
+    if (world->version < 140u) return 1;
+    while (offset < length) {
+        if (!guard_read_u8(data, length, &offset, &has_npc)) break;
+        if (!has_npc) return 1;
+        if ((world->version >= 190u && !terra_reader_take(&offset, 4u, length))
+                || (world->version < 190u && !guard_skip_string(data, length, &offset))
+                || !terra_reader_take(&offset, 8u, length)) {
+            tx_set_error("TERRAX_TRUNCATED_NPCS", "persistent NPC record exceeds section bounds");
+            return 0;
+        }
+    }
+    tx_set_error("TERRAX_TRUNCATED_NPCS", "persistent NPC list has no terminator");
     return 0;
 }
 
@@ -357,7 +375,8 @@ static int validate_bestiary_strings(TxWorld* world) {
     uint32_t offset;
     uint32_t count;
 
-    if (world->pointer_count <= 8u) return 1;
+    /* Bestiary is not serialized before world version 210. */
+    if (world->version < 210u || world->pointer_count <= 8u) return 1;
     if (!guard_section_view(world, 8u, &data, &offset, &length)) {
         tx_set_error("TERRAX_TRUNCATED_BESTIARY", "bestiary section bounds are invalid");
         return 0;

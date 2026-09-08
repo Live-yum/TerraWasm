@@ -109,6 +109,47 @@ static void rejects_truncated_npc_name(void) {
     assert(!terra_validate_string_sections(&world));
 }
 
+static void accepts_legacy_npc_string_type_without_persistent_section(void) {
+    /* v139 stores both NPC type and given name as 7-bit strings and has no
+     * persistent NPC list at all. */
+    uint8_t valid[] = {
+        1u, 5u, 'G', 'u', 'i', 'd', 'e',
+        3u, 'B', 'o', 'b',
+        0u, 0u, 32u, 65u, 0u, 0u, 0u, 0u,
+        0u,
+        10u, 0u, 0u, 0u, 20u, 0u, 0u, 0u,
+        0u
+    };
+    TxWorld world = make_world(valid, (uint32_t)sizeof(valid), 5u, 139u);
+    set_section(&world, 2u, 0u, 0u);
+    set_section(&world, 3u, 0u, 0u);
+    set_section(&world, 4u, 0u, (uint32_t)sizeof(valid));
+    assert(terra_validate_string_sections(&world));
+}
+
+static void rejects_truncated_persistent_npc_for_v140(void) {
+    /* v140 introduces the second NPC loop; a lone active marker must be
+     * rejected instead of being mistaken for the footer. */
+    uint8_t invalid[] = {
+        0u, /* town terminator */
+        1u, /* persistent active, but missing type and position */
+    };
+    TxWorld world = make_world(invalid, (uint32_t)sizeof(invalid), 5u, 140u);
+    set_section(&world, 2u, 0u, 0u);
+    set_section(&world, 3u, 0u, 0u);
+    set_section(&world, 4u, 0u, (uint32_t)sizeof(invalid));
+    assert(!terra_validate_string_sections(&world));
+}
+
+static void rejects_legacy_npc_without_town_terminator(void) {
+    uint8_t invalid[] = { 1u,5u,'G','u','i','d','e',3u,'B','o','b',
+        0u,0u,32u,65u,0u,0u,0u,0u,0u,10u,0u,0u,0u,20u,0u,0u,0u };
+    TxWorld world = make_world(invalid, (uint32_t)sizeof(invalid), 5u, 139u);
+    set_section(&world, 2u, 0u, 0u); set_section(&world, 3u, 0u, 0u);
+    set_section(&world, 4u, 0u, (uint32_t)sizeof(invalid));
+    assert(!terra_validate_string_sections(&world));
+}
+
 static void rejects_truncated_bestiary_name(void) {
     uint8_t invalid[] = {
         0u, 0u,
@@ -135,6 +176,9 @@ int main(void) {
     rejects_truncated_sign_text();
     accepts_sign_text_before_coordinates();
     rejects_truncated_npc_name();
+    accepts_legacy_npc_string_type_without_persistent_section();
+    rejects_truncated_persistent_npc_for_v140();
+    rejects_legacy_npc_without_town_terminator();
     rejects_truncated_bestiary_name();
     return 0;
 }

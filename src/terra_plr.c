@@ -48,7 +48,7 @@ extern void tx_set_error(const char *code, const char *message);
 #define PLR_TEMPORARY_SLOTS 4u
 #define PLR_LOADOUTS 3u
 #define PLR_MAX_SPAWN_POINTS 200u
-#define PLR_MAX_SACRIFICES 4096u
+#define PLR_MAX_SACRIFICES 16384u
 #define PLR_MAX_PENDING_REFUNDS 4096u
 #define PLR_MAX_DIALOGUES 4096u
 #define PLR_MAX_FILE_BYTES (64u * 1024u * 1024u)
@@ -2162,6 +2162,10 @@ static PlrJsonValue *plr_parse_plain(
     }
     int64_t play_time = plr_version_has_play_time(version) ? plr_read_i64(&reader) : 0;
     int32_t hair = plr_read_i32(&reader);
+    /* Terraria clears hair ids outside the historical catalog while loading
+     * a player file.  Preserve that release behavior instead of exposing an
+     * invalid id to callers. */
+    if (hair >= 228) hair = 0;
     uint8_t hair_dye = plr_version_has_hair_dye(version) ? plr_read_u8(&reader) : 0u;
     uint8_t team = plr_version_has_team(version) ? plr_read_u8(&reader) : 0u;
     if (!reader.ok ||
@@ -2193,6 +2197,10 @@ static PlrJsonValue *plr_parse_plain(
     if (plr_version_has_skin_variant(version)) skin_variant = plr_read_u8(&reader);
     else if (plr_version_has_gender_bool(version)) skin_variant = plr_read_u8(&reader) ? 0u : 4u;
     else skin_variant = (hair == 5 || hair == 6 || hair == 9 || hair == 11) ? 4u : 0u;
+    /* Player.Deserialize remaps the obsolete female variant id 7 to 9 for
+     * releases before 161.  Keep this normalization so old files expose the
+     * same semantic variant as Terraria and round-trip without stale ids. */
+    if (version < 161 && skin_variant == 7u) skin_variant = 9u;
     if (!reader.ok ||
         !plr_json_object_put_u64(root, "hideMisc", hide_misc) ||
         !plr_json_object_put_u64(root, "skinVariant", skin_variant)) {
@@ -2203,6 +2211,11 @@ static PlrJsonValue *plr_parse_plain(
     int32_t stat_life_max = plr_read_i32(&reader);
     int32_t stat_mana = plr_read_i32(&reader);
     int32_t stat_mana_max = plr_read_i32(&reader);
+    /* Match Player.Deserialize's safety clamps for values persisted by
+     * older clients with smaller stat limits. */
+    if (stat_life_max > 500) stat_life_max = 500;
+    if (stat_mana_max > 200) stat_mana_max = 200;
+    if (stat_mana > 400) stat_mana = 400;
     int extra_accessory = plr_version_has_extra_accessory(version) ? (plr_read_u8(&reader) != 0u) : 0;
     int unlocked_torches = 0, using_torches = 0, artisan_bread = 0;
     int upgrades[6] = {0, 0, 0, 0, 0, 0};
@@ -2353,7 +2366,10 @@ static PlrJsonValue *plr_parse_plain(
         plr_make_default_i32_array(PLR_BUILDER_STATUS_SLOTS);
     int32_t bartender = plr_version_has_bartender(version) ? plr_read_i32(&reader) : 0;
     int dead = plr_version_has_death_metadata(version) ? (plr_read_u8(&reader) != 0u) : 0;
-    PlrJsonValue *respawn = dead ? plr_json_i64(plr_read_i32(&reader)) : plr_json_null();
+    int32_t respawn_timer = dead ? plr_read_i32(&reader) : 0;
+    if (respawn_timer < 0) respawn_timer = 0;
+    if (respawn_timer > 60000) respawn_timer = 60000;
+    PlrJsonValue *respawn = dead ? plr_json_i64(respawn_timer) : plr_json_null();
     int64_t last_save = plr_version_has_last_save(version) ? plr_read_i64(&reader) : 0;
     int32_t golfer = plr_version_has_golfer_score(version) ? plr_read_i32(&reader) : 0;
     if (!hide_info || !dpad || !builder || !respawn || !reader.ok ||
@@ -2435,6 +2451,10 @@ static PlrJsonValue *plr_parse_plain(
     uint8_t voice_variant = plr_version_has_voice_variant(version) ? plr_read_u8(&reader) :
         (plr_skin_variant_is_male(skin_variant) ? 1u : 2u);
     float voice_pitch = plr_version_has_voice_pitch(version) ? plr_read_f32(&reader) : 0.0f;
+    /* LoadPlayer_LastMinuteFixes constrains persisted voice ids to the four
+     * variants understood by the current player model. */
+    if (voice_variant < 1u) voice_variant = 1u;
+    if (voice_variant > 4u) voice_variant = 4u;
     if (!temporary || !powers || !loadouts || !reader.ok ||
         !plr_root_take(root, "temporarySlots", &temporary) ||
         !plr_root_take(root, "creativePowers", &powers) ||

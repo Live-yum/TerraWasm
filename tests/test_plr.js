@@ -383,6 +383,68 @@ function encryptPlr(plain) {
   return Buffer.concat([cipher.update(plain), cipher.final()]);
 }
 
+function historicalBinaryFixture(version) {
+  const chunks = [];
+  const u8 = (value) => chunks.push(Buffer.from([value & 0xff]));
+  const i32 = (value) => { const b = Buffer.alloc(4); b.writeInt32LE(value); chunks.push(b); };
+  const str = (value) => { const b = Buffer.from(value, "utf8"); let n = b.length; while (n >= 0x80) { u8((n & 0x7f) | 0x80); n >>>= 7; } u8(n); chunks.push(b); };
+  const color = () => { u8(1); u8(2); u8(3); };
+  const itemName = (name, stack, prefix, withStack = true) => { str(name); if (withStack) i32(stack); if (version >= 36) u8(prefix); };
+  const numericItem = (type, stack, prefix) => { i32(type); i32(stack); u8(prefix); };
+  const numericTypePrefix = (type, prefix) => { i32(type); u8(prefix); };
+  i32(version); str(`legacy-v${version}`);
+  if (version >= 10) u8(2);
+  if (version >= 138) { const b = Buffer.alloc(8); b.writeBigInt64LE(123n); chunks.push(b); }
+  i32(6);
+  if (version >= 82) u8(4);
+  if (version >= 283) u8(5);
+  if (version >= 83) u8(0x01);
+  if (version >= 124) u8(0x02);
+  if (version >= 119) u8(3);
+  if (version >= 107) u8(4); else if (version >= 18) u8(0);
+  i32(100); i32(500); i32(100); i32(200);
+  if (version >= 125) u8(1);
+  if (version >= 229) { u8(1); u8(1); if (version >= 256) u8(1); if (version >= 324) u8(0); if (version >= 260) for (let i = 0; i < 6; i++) u8(i === 0 ? 1 : 0); }
+  if (version >= 182) u8(1);
+  if (version >= 128) i32(77);
+  if (version >= 254) { i32(7); i32(8); }
+  for (let i = 0; i < 7; i++) color();
+  if (version < 38) {
+    for (let i = 0; i < 8; i++) itemName(i === 0 ? "Copper Pickaxe" : "", i ? 0 : 1, i === 0 ? 2 : 0, false);
+    if (version >= 6) for (let i = 0; i < 3; i++) itemName(i === 0 ? "Helmet" : "", i ? 0 : 1, i === 0 ? 3 : 0, false);
+    const inventory = version >= 15 ? 48 : 44;
+    for (let i = 0; i < inventory; i++) itemName(i === 0 ? "Torch" : "", i === 0 ? 37 : 0, i === 0 ? 1 : 0);
+    for (let i = 0; i < 20; i++) itemName(i === 0 ? "Chest" : "", i === 0 ? 4 : 0, 0);
+    if (version >= 20) for (let i = 0; i < 20; i++) itemName("", 0, 0);
+  } else {
+    const armor = version < 81 ? 11 : version < 124 ? 16 : 20;
+    const dyes = version < 47 ? 0 : version < 81 ? 3 : version < 124 ? 8 : 10;
+    for (let i = 0; i < armor; i++) numericTypePrefix(i === 0 ? 1 : 0, i === 0 ? 2 : 0);
+    for (let i = 0; i < dyes; i++) numericTypePrefix(i === 0 ? 2 : 0, 0);
+    const inventory = version >= 58 ? 58 : 48;
+    for (let i = 0; i < inventory; i++) numericItem(i === 0 ? 3 : 0, i === 0 ? 37 : 0, i === 0 ? 1 : 0);
+    if (version >= 117) for (let i = 0; i < 5; i++) { if (version < 136 && i === 1) continue; numericTypePrefix(i === 0 ? 4 : 0, 0); numericTypePrefix(0, 0); }
+    const bank = version >= 58 ? 40 : 20;
+    for (let i = 0; i < bank; i++) numericItem(i === 0 ? 5 : 0, i === 0 ? 4 : 0, 0);
+    for (let i = 0; i < bank; i++) numericItem(0, 0, 0);
+  }
+  const buffs = version < 11 ? 0 : version < 74 ? 10 : version < 252 ? 22 : 44;
+  for (let i = 0; i < buffs; i++) { i32(i === 0 ? 8 : 0); i32(i === 0 ? 60 : 0); }
+  i32(-1);
+  if (version >= 16) u8(1);
+  if (version >= 115) for (let i = 0; i < 13; i++) u8(i === 0 ? 1 : 0);
+  if (version >= 98) i32(9);
+  if (version >= 162) for (let i = 0; i < 4; i++) i32(i);
+  if (version >= 164) for (let i = 0; i < (version < 167 ? 8 : version < 197 ? 10 : version < 230 ? 11 : 12); i++) i32(0);
+  if (version >= 181) i32(10);
+  if (version >= 200) u8(0);
+  if (version >= 202) { const b = Buffer.alloc(8); b.writeBigInt64LE(456n); chunks.push(b); }
+  if (version >= 206) i32(12);
+  return encryptPlr(Buffer.concat(chunks));
+}
+
+function legacyV1Fixture() { return historicalBinaryFixture(1); }
+
 function lastError(module) {
   assert.equal(typeof module._terra_info_get_last_error_json, "function",
     "structured last-error ABI must be exported by the selected feature set");
@@ -501,6 +563,132 @@ test("PLR historical source gates keep old layouts aligned", async () => {
       if (handle) module._terra_player_close(handle);
     }
     assert.equal(module._tx_heap_used(), baseline, `gate release ${version} leaked`);
+  }
+});
+
+test("PLR applies Player.Deserialize load compatibility normalizations", async () => {
+  const module = await TerraWorldWasm();
+  const model = historicalModel(160);
+  model.skinVariant = 7;
+  model.hair = 228;
+  model.statLifeMax = 501;
+  model.statManaMax = 201;
+  model.statMana = 401;
+  let handle = 0;
+  let reopened = 0;
+  try {
+    handle = openJson(module, model);
+    reopened = openBuffer(module, encode(module, handle));
+    assert.equal(getField(module, reopened, "/skinVariant"), 9);
+    assert.equal(getField(module, reopened, "/hair"), 0);
+    assert.equal(getField(module, reopened, "/statLifeMax"), 500);
+    assert.equal(getField(module, reopened, "/statManaMax"), 200);
+    assert.equal(getField(module, reopened, "/statMana"), 400);
+  } finally {
+    if (reopened) module._terra_player_close(reopened);
+    if (handle) module._terra_player_close(handle);
+  }
+  const deathModel = historicalModel(200);
+  deathModel.dead = true;
+  deathModel.respawnTimer = 70000;
+  let deathHandle = 0;
+  let deathReopened = 0;
+  try {
+    deathHandle = openJson(module, deathModel);
+    deathReopened = openBuffer(module, encode(module, deathHandle));
+    assert.equal(getField(module, deathReopened, "/respawnTimer"), 60000);
+  } finally {
+    if (deathReopened) module._terra_player_close(deathReopened);
+    if (deathHandle) module._terra_player_close(deathHandle);
+  }
+  const modern = historicalModel(280);
+  modern.voiceVariant = 9;
+  let modernHandle = 0;
+  let modernReopened = 0;
+  try {
+    modernHandle = openJson(module, modern);
+    modernReopened = openBuffer(module, encode(module, modernHandle));
+    assert.equal(getField(module, modernReopened, "/voiceVariant"), 4);
+  } finally {
+    if (modernReopened) module._terra_player_close(modernReopened);
+    if (modernHandle) module._terra_player_close(modernHandle);
+  }
+});
+
+test("PLR preserves research records beyond the old 4096-item limit", async () => {
+  const module = await TerraWorldWasm();
+  const model = historicalModel(300);
+  model.creativeItemSacrifices = Array.from({ length: 4097 }, (_, index) => ({
+    persistentId: `ResearchItem${index}`,
+    amount: index + 1,
+  }));
+  let handle = 0;
+  let reopened = 0;
+  try {
+    handle = openJson(module, model);
+    reopened = openBuffer(module, encode(module, handle));
+    const records = getField(module, reopened, "/creativeItemSacrifices");
+    assert.equal(records.length, 4097);
+    assert.deepEqual(records[4096], {
+      persistentId: "ResearchItem4096",
+      amount: 4097,
+    });
+  } finally {
+    if (reopened) module._terra_player_close(reopened);
+    if (handle) module._terra_player_close(handle);
+  }
+});
+
+test("PLR opens an independently encoded release 1 legacy-name fixture", async () => {
+  const module = await TerraWorldWasm();
+  const source = legacyV1Fixture();
+  let handle = 0;
+  try {
+    handle = openBuffer(module, source);
+    assert.equal(getField(module, handle, "/version"), 1);
+    assert.equal(getField(module, handle, "/name"), "legacy-v1");
+    assert.equal(getField(module, handle, "/armor/0/legacyName"), "Copper Pickaxe");
+    assert.equal(getField(module, handle, "/inventory/0/legacyName"), "Torch");
+    assert.equal(getField(module, handle, "/inventory/50/legacyName"), "");
+    assert.equal(getField(module, handle, "/inventory/0/stack"), 37);
+    assert.equal(getField(module, handle, "/piggyBank/0/legacyName"), "Chest");
+    assert.equal(getField(module, handle, "/piggyBank/0/stack"), 4);
+    assert.equal(getField(module, handle, "/safe/0/stack"), 0);
+    const clean = encode(module, handle);
+    assert.deepEqual(clean, source, "clean legacy save changed encrypted bytes");
+  } finally {
+    if (handle) module._terra_player_close(handle);
+  }
+});
+
+test("PLR opens independent item layout boundary fixtures", async () => {
+  const module = await TerraWorldWasm();
+  for (const version of [37, 38, 58, 59]) {
+    const source = historicalBinaryFixture(version);
+    let handle = 0;
+    let reopened = 0;
+    try {
+      handle = openBuffer(module, source);
+      assert.equal(getField(module, handle, "/version"), version);
+      assert.equal(getField(module, handle, "/inventory/0/stack"), 37);
+      assert.equal(getField(module, handle, "/piggyBank/0/stack"), 4);
+      assert.equal(getField(module, handle, "/buffs/0/buffTime"), 60);
+      assert.equal(getField(module, handle, "/spawnPoints").length, 0);
+      if (version === 37) {
+        assert.equal(getField(module, handle, "/inventory/0/legacyName"), "Torch");
+        assert.equal(getField(module, handle, "/armor/0/prefix"), 2);
+      } else {
+        assert.equal(getField(module, handle, "/inventory/0/itemType"), 3);
+        assert.equal(getField(module, handle, "/armor/0/itemType"), 1);
+      }
+      assert.deepEqual(encode(module, handle), source);
+      assert.equal(setField(module, handle, "/name", `edited-${version}`), 0);
+      reopened = openBuffer(module, encode(module, handle));
+      assert.equal(getField(module, reopened, "/name"), `edited-${version}`);
+    } finally {
+      if (reopened) module._terra_player_close(reopened);
+      if (handle) module._terra_player_close(handle);
+    }
   }
 });
 

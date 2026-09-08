@@ -226,6 +226,15 @@ int tx_wld_guard_task_begin(TxWorld* world, TxWldGuardTask* task) {
         return 0;
     }
     *task = (TxWldGuardTask){0};
+    /* Version 1 worlds have one contiguous stream. Their decoder validates
+     * section boundaries while walking it; there is no section table to use. */
+    if (world->legacy_wld) {
+        if (!terra_parse_header_unchecked(world)) return 0;
+        task->stage = TX_GUARD_STAGE_DONE;
+        task->initialized = 1u;
+        task->finished = 1u;
+        return 1;
+    }
     if (!task_validate_header_prefix(world)) return 0;
     if (!terra_parse_header_unchecked(world)) return 0;
     if (!task_validate_header_late_strings(world)) return 0;
@@ -380,11 +389,30 @@ static int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
         return 0;
     }
     if (!has_npc) {
+        if (world->version >= 140u && task->sub_index == 0u) {
+            task->sub_index = 1u; /* The second loop stores persistent NPCs. */
+            task->index = 0u;
+            return 1;
+        }
         task->stage = TX_GUARD_STAGE_BESTIARY_KILLS_INIT;
         return 1;
     }
-    if (!terra_reader_take(&task->offset, 4u, task->length)
-            || !task_guard_skip_string(task->data, task->length, &task->offset)
+    int type_ok = world->version >= 190u
+        ? terra_reader_take(&task->offset, 4u, task->length)
+        : task_guard_skip_string(task->data, task->length, &task->offset);
+    if (!type_ok) {
+        tx_set_error("TERRAX_TRUNCATED_NPCS", "NPC type exceeds section bounds");
+        return 0;
+    }
+    if (task->sub_index != 0u) {
+        if (!terra_reader_take(&task->offset, 8u, task->length)) {
+            tx_set_error("TERRAX_TRUNCATED_NPCS", "persistent NPC position is truncated");
+            return 0;
+        }
+        task->index++;
+        return 1;
+    }
+    if (!task_guard_skip_string(task->data, task->length, &task->offset)
             || !terra_reader_take(&task->offset, 17u, task->length)) {
         tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC name or fixed fields exceed section bounds");
         return 0;
@@ -392,7 +420,7 @@ static int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
     if (world->version >= 213u) {
         uint8_t has_variation;
         if (!task_guard_read_u8(task->data, task->length, &task->offset, &has_variation)
-                || (has_variation && !terra_reader_take(&task->offset, 4u, task->length))) {
+                || ((has_variation & 1u) && !terra_reader_take(&task->offset, 4u, task->length))) {
             tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC variation is truncated");
             return 0;
         }
@@ -407,7 +435,7 @@ static int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
 
 static int task_guard_init_bestiary(TxWorld* world, TxWldGuardTask* task) {
     task_guard_reset_section(task);
-    if (world->pointer_count <= 8u) {
+    if (world->version < 210u || world->pointer_count <= 8u) {
         task->stage = TX_GUARD_STAGE_DONE;
         return 1;
     }

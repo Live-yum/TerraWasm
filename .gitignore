@@ -1,5 +1,6 @@
 /build/
 /build-native*/
+/build-plr-*/
 /build_log.txt
 /cmake_log.txt
 /.claude/settings.local.json
