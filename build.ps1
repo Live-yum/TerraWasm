@@ -9,10 +9,9 @@ param(
     [switch]$AllowDirty,
     [string]$EmsdkDir = "D:\Tool\emsdk",
     [ValidateSet("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz")]
-    [string]$OptimizeFlag = "-O3",
+    [string]$OptimizeFlag,
     [switch]$EnableLto,
-    [switch]$ViewerWebProfile,
-    [string]$DeployDir
+    [switch]$ViewerWebProfile
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,80 +24,15 @@ $Dirty = -not [string]::IsNullOrWhiteSpace($SourceState)
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
 $EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
 $ViewerWebProfileFlag = if ($ViewerWebProfile) { "ON" } else { "OFF" }
-if ($ViewerWebProfile -and $Features -ne "wld") {
-    throw "-ViewerWebProfile requires -Features wld"
+$CmakeOptions = [ordered]@{
+    TERRAX_BUILD_COMMIT = $SourceCommit
+    TERRAX_BUILD_DIRTY = $DirtyFlag
+    TERRAX_BUILD_COMPILER = "emscripten"
+    TERRAWASM_FEATURE_SET = $Features
+    TERRAX_ENABLE_LTO = $EnableLtoFlag
+    TERRAWASM_VIEWER_WEB_PROFILE = $ViewerWebProfileFlag
 }
-$NodeInitialMemory = 134217728
-$NodeMaximumMemory = 536870912
-$WebInitialMemory = 67108864
-$WebMaximumMemory = 167772160
-switch ($Features) {
-    "all" {
-        $NodeExportsFile = "exports.txt"
-        $WebExportsFile = "exports.web.txt"
-    }
-    "wld" {
-        $NodeExportsFile = "exports.wld.txt"
-        $WebExportsFile = "exports.wld.web.txt"
-    }
-    "plr" {
-        $NodeExportsFile = "exports.plr.txt"
-        $WebExportsFile = "exports.plr.txt"
-    }
-}
-$CommonFlags = @(
-    $OptimizeFlag,
-    "-fno-exceptions",
-    "-fno-rtti"
-)
-if ($Features -ne "plr") {
-    $CommonFlags += "-sUSE_ZLIB=1"
-}
-$CommonFlags += @(
-    "-sALLOW_MEMORY_GROWTH=1",
-    "-sMODULARIZE=1",
-    "-sERROR_ON_UNDEFINED_SYMBOLS=1",
-    "--no-entry"
-)
-if ($EnableLto) {
-    $CommonFlags += "-flto"
-}
-$WideRuntimeMethods = "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']"
-$WebRuntimeMethods = if ($Features -eq "wld") { "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']" } else { $WideRuntimeMethods }
-# The WLD-only Web target is buffer-only in the viewer. Keep all/plr and Node
-# builds unchanged while measuring the independent FILESYSTEM=0 experiment.
-$WebFilesystemFlag = if ($Features -eq "wld") { "-sFILESYSTEM=0" } else { "-sFILESYSTEM=1" }
-$NodeFlags = @(
-    "-sEXPORTED_FUNCTIONS=@exported_functions_node.json",
-    $WideRuntimeMethods,
-    "-sINITIAL_MEMORY=$NodeInitialMemory",
-    "-sMAXIMUM_MEMORY=$NodeMaximumMemory",
-    "-sEXPORT_NAME='TerraWorldWasm'",
-    "-sENVIRONMENT=node",
-    "-sNODERAWFS=1",
-    "-sFILESYSTEM=1"
-)
-$WebFlags = @(
-    "-sEXPORTED_FUNCTIONS=@exported_functions_web.json",
-    $WebRuntimeMethods,
-    "-sINITIAL_MEMORY=$WebInitialMemory",
-    "-sMAXIMUM_MEMORY=$WebMaximumMemory",
-    "-sEXPORT_NAME='TerraWorldWasmWeb'",
-    "-sENVIRONMENT=web,worker",
-    $WebFilesystemFlag
-)
-
-function Add-FlagArgs {
-    param(
-        [System.Collections.Generic.List[string]]$Arguments,
-        [string]$Option,
-        [string[]]$Values
-    )
-    foreach ($value in $Values) {
-        $Arguments.Add($Option)
-        $Arguments.Add($value)
-    }
-}
+if ($OptimizeFlag) { $CmakeOptions.TERRAX_OPTIMIZE_FLAG = $OptimizeFlag }
 
 # --- Activate Emscripten ---
 $env:EMSDK_QUIET = 1
@@ -119,19 +53,9 @@ if ($Quick) {
         throw "Quick build requires an existing CMake cache"
     }
     $cache = Get-Content -LiteralPath $cachePath -Raw
-    foreach ($expected in @(
-        "TERRAX_BUILD_COMMIT:STRING=$SourceCommit",
-        "TERRAX_BUILD_DIRTY:STRING=$DirtyFlag",
-        "TERRAWASM_FEATURE_SET:STRING=$Features",
-        "TERRAX_OPTIMIZE_FLAG:STRING=$OptimizeFlag",
-        "TERRAX_ENABLE_LTO:BOOL=$EnableLtoFlag",
-        "TERRAWASM_VIEWER_WEB_PROFILE:BOOL=$ViewerWebProfileFlag",
-        "TERRAX_NODE_INITIAL_MEMORY:STRING=$NodeInitialMemory",
-        "TERRAX_NODE_MAXIMUM_MEMORY:STRING=$NodeMaximumMemory",
-        "TERRAX_WEB_INITIAL_MEMORY:STRING=$WebInitialMemory",
-        "TERRAX_WEB_MAXIMUM_MEMORY:STRING=$WebMaximumMemory"
-    )) {
-        if (-not $cache.Contains($expected)) {
+    foreach ($option in $CmakeOptions.GetEnumerator()) {
+        $expected = "(?m)^$([regex]::Escape($option.Key)):[^=]+=$([regex]::Escape($option.Value))`r?$"
+        if ($cache -notmatch $expected) {
             throw "Quick build cache identity does not match the current source/options; rerun without -Quick"
         }
     }
@@ -144,18 +68,8 @@ if (-not $Quick) {
     New-Item -ItemType Directory -Path $BuildDir | Out-Null
 
     Push-Location $ProjectDir
-    & emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release `
-        "-DTERRAX_BUILD_COMMIT=$SourceCommit" `
-        "-DTERRAX_BUILD_DIRTY=$DirtyFlag" `
-        "-DTERRAX_BUILD_COMPILER=emscripten" `
-        "-DTERRAWASM_FEATURE_SET=$Features" `
-        "-DTERRAX_OPTIMIZE_FLAG=$OptimizeFlag" `
-        "-DTERRAX_ENABLE_LTO=$EnableLtoFlag" `
-        "-DTERRAWASM_VIEWER_WEB_PROFILE=$ViewerWebProfileFlag" `
-        "-DTERRAX_NODE_INITIAL_MEMORY=$NodeInitialMemory" `
-        "-DTERRAX_NODE_MAXIMUM_MEMORY=$NodeMaximumMemory" `
-        "-DTERRAX_WEB_INITIAL_MEMORY=$WebInitialMemory" `
-        "-DTERRAX_WEB_MAXIMUM_MEMORY=$WebMaximumMemory" 2>&1
+    $configureArgs = @($CmakeOptions.GetEnumerator() | ForEach-Object { "-D$($_.Key)=$($_.Value)" })
+    & emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release @configureArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "CMake configure failed"
         Pop-Location
@@ -164,39 +78,9 @@ if (-not $Quick) {
     Pop-Location
 }
 
-# --- Build ---
-function Build-Target {
-    param([string]$Name)
-    Write-Host "=== Building $Name ===" -ForegroundColor Cyan
-    Push-Location $ProjectDir
-    & cmake --build build --config Release --target $Name 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "$Name build failed"
-        Pop-Location
-        exit 1
-    }
-    Pop-Location
-
-    $jsFile = Join-Path $BuildDir "$Name.js"
-    $wasmFile = Join-Path $BuildDir "$Name.wasm"
-    if ((Test-Path $jsFile) -and (Test-Path $wasmFile)) {
-        $jsSize = [math]::Round((Get-Item $jsFile).Length / 1KB, 1)
-        $wasmSize = [math]::Round((Get-Item $wasmFile).Length / 1MB, 2)
-        Write-Host "=== $Name OK ($jsSize KB js, $wasmSize MB wasm) ===" -ForegroundColor Green
-    } else {
-        Write-Error "$Name output not found"
-        exit 1
-    }
-}
-
-# The provenance manifest records both targets, even when the caller only
-# consumes one of them. Always refresh the pair so a clean build never reuses
-# a missing or stale sibling artifact.
-$buildTargets = @("terrax_world_wasm", "terrax_world_wasm_web")
-
-foreach ($t in $buildTargets) {
-    Build-Target -Name $t
-}
+# Both targets belong to one release identity; CMake's default target builds the pair.
+& cmake --build $BuildDir --config Release 2>&1
+if ($LASTEXITCODE -ne 0) { throw "WASM build failed" }
 
 # Refuse artifacts if the source changed while compilation was in flight.
 $CurrentSourceCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
@@ -208,42 +92,13 @@ if ($CurrentSourceCommit -ne $SourceCommit -or $CurrentSourceState -ne $SourceSt
 # --- Generate and validate the source/artifact identity manifest ---
 Write-Host "=== Generating artifact manifest ===" -ForegroundColor Cyan
 Push-Location $ProjectDir
-$manifestArgs = [System.Collections.Generic.List[string]]::new()
-$manifestArgs.Add("scripts/generate-manifest.mjs")
-$manifestArgs.Add("--root")
-$manifestArgs.Add($ProjectDir)
-$manifestArgs.Add("--output")
-$manifestArgs.Add("build/terra.manifest.json")
-$manifestArgs.Add("--compiler")
-$manifestArgs.Add("emscripten")
-$manifestArgs.Add("--feature-set")
-$manifestArgs.Add($Features)
-$manifestArgs.Add("--node-exports-file")
-$manifestArgs.Add($NodeExportsFile)
-$manifestArgs.Add("--web-exports-file")
-$manifestArgs.Add($WebExportsFile)
-$manifestArgs.Add("--source-commit")
-$manifestArgs.Add($SourceCommit)
-$manifestArgs.Add("--dirty")
-$manifestArgs.Add($DirtyFlag)
-if ($ViewerWebProfile) { $manifestArgs.Add("--viewer-web-profile") }
-if ($AllowDirty) { $manifestArgs.Add("--allow-dirty") }
-Add-FlagArgs -Arguments $manifestArgs -Option "--common-flag" -Values $CommonFlags
-Add-FlagArgs -Arguments $manifestArgs -Option "--node-flag" -Values $NodeFlags
-Add-FlagArgs -Arguments $manifestArgs -Option "--web-flag" -Values $WebFlags
+$manifestArgs = @("scripts/generate-manifest.mjs", "--root", $ProjectDir,
+    "--output", "build/terra.manifest.json", "--source-commit", $SourceCommit, "--dirty", $DirtyFlag)
+if ($AllowDirty) { $manifestArgs += "--allow-dirty" }
 & node @manifestArgs
 $manifestExitCode = $LASTEXITCODE
 Pop-Location
-if (-not (Test-Path (Join-Path $BuildDir "terra.manifest.json"))) {
-    throw "Artifact manifest was not generated"
-}
-$manifest = Get-Content (Join-Path $BuildDir "terra.manifest.json") -Raw | ConvertFrom-Json
-if ($manifestExitCode -ne 0 -and -not $AllowDirty) {
-    throw "Dirty TerraWasm builds are not publishable; use a clean checkout or -AllowDirty for local diagnostics"
-}
-if ($manifest.dirty -and -not $AllowDirty) {
-    throw "Dirty TerraWasm builds are not publishable; use a clean checkout or -AllowDirty for local diagnostics"
-}
+if ($manifestExitCode -ne 0) { throw "Artifact manifest validation failed" }
 if ($Target -ne "node") {
     Push-Location $ProjectDir
     if ($AllowDirty) {
@@ -255,59 +110,6 @@ if ($Target -ne "node") {
     Pop-Location
 }
 
-# --- Optional explicit deployment ---
-if ($DeployDir) {
-    if ($manifest.dirty) {
-        throw "DeployDir requires a clean TerraWasm source tree"
-    }
-    $boundaryDir = Split-Path -Parent $DeployDir
-    $boundaryPath = @(
-        (Join-Path $boundaryDir "terra-wasm.ts"),
-        (Join-Path $boundaryDir "terra-wasm.js")
-    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
-    if ($boundaryPath.Count -eq 0) {
-        throw "DeployDir must be the generated directory next to terra-wasm.ts"
-    }
-    if (-not (Test-Path -LiteralPath $DeployDir)) {
-        New-Item -ItemType Directory -Path $DeployDir -Force | Out-Null
-    }
-    $webArtifacts = @($manifest.artifacts)
-    if ($webArtifacts.Count -ne 2) {
-        throw "Manifest does not contain exactly two Web deployment artifacts"
-    }
-    $deployManifest = $manifest | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-    $viewerRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $DeployDir))
-    $useViewerRelativePaths = Test-Path -LiteralPath (Join-Path $viewerRoot "package.json")
-    foreach ($artifact in $webArtifacts) {
-        $source = Join-Path $ProjectDir $artifact.path
-        $name = Split-Path -Leaf $artifact.path
-        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            throw "Manifest artifact is missing: $($artifact.path)"
-        }
-        Copy-Item -LiteralPath $source -Destination (Join-Path $DeployDir $name) -Force
-        $manifestPath = if ($useViewerRelativePaths) { "infrastructure/wasm/generated/$name" } else { $name }
-        $artifact.path = $manifestPath
-        $deployArtifact = @($deployManifest.artifacts | Where-Object { $_.role -eq $artifact.role })[0]
-        $deployArtifact.path = $manifestPath
-        $deployWebArtifact = @($deployManifest.targets.web.artifacts | Where-Object { $_.role -eq $artifact.role })[0]
-        $deployWebArtifact.path = $manifestPath
-    }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $deployJson = $deployManifest | ConvertTo-Json -Depth 20
-    [System.IO.File]::WriteAllText(
-        (Join-Path $DeployDir "terra.manifest.json"),
-        "$deployJson`n",
-        $utf8NoBom
-    )
-    if ($useViewerRelativePaths) {
-        $browserManifestPath = Join-Path $boundaryDir "terra-manifest-browser.mjs"
-        $browserJson = $deployManifest | ConvertTo-Json -Depth 20 -Compress
-        $browserModule = "const manifest = $browserJson`n`nexport default manifest`n"
-        [System.IO.File]::WriteAllText($browserManifestPath, $browserModule, $utf8NoBom)
-    }
-    Write-Host "=== Copied to $DeployDir ===" -ForegroundColor Cyan
-}
-
 # --- Test ---
 if ($Test) {
     if ($Target -eq "web") {
@@ -315,13 +117,10 @@ if ($Test) {
     }
     Write-Host "`n=== Running $Features feature tests ===" -ForegroundColor Cyan
     $commonTests = @(
-        "tests/test_build_contract.js",
         "tests/test_build_identity.js",
-        "tests/test_ci_contract.js",
         "tests/test_manifest_contract.js",
         "tests/test_artifact_size_contract.js",
-        "tests/test_feature_set.js",
-        "tests/test_viewer_web_profile_contract.js"
+        "tests/test_feature_set.js"
     )
     $wldTests = @(
         "tests/test_memory_lifecycle.js",

@@ -77,7 +77,7 @@ TerraWasm/
 .\build.ps1 -Target all -Features plr
 ```
 
-构建后先检查 `build/terra.manifest.json` 的 `sourceCommit`、`dirty`、导出列表、内存预算和 SHA-256，再由明确的发布步骤复制 Web 产物。`build.ps1` 默认不会修改其他仓库；只有显式传入 `-DeployDir` 才会部署，而且要求干净工作树。当前不要用 runner 自动覆盖 `PlayerWebsite/wasm/`。
+构建后先检查 `build/terra.manifest.json` 的 `sourceCommit`、`dirty`、导出列表、内存预算和 SHA-256，再由明确的发布步骤复制 Web 产物。`build.ps1` 只构建产物，不修改其他仓库；同步由消费端已有的同步入口负责。当前不要用 runner 自动覆盖 `PlayerWebsite/wasm/`。
 
 ### GitHub Actions runner
 
@@ -100,8 +100,8 @@ python scripts/build_txci.py
 
 ```powershell
 .\build.ps1                          # 编译 node + web 两个目标
-.\build.ps1 -Target node             # 仅编译 Node.js 目标
-.\build.ps1 -Target web              # 仅编译 Web 目标
+.\build.ps1 -Target node             # 使用 Node 校验入口（仍生成成对产物）
+.\build.ps1 -Target web              # 使用 Web 体积门禁（仍生成成对产物）
 .\build.ps1 -Quick                   # 跳过 CMake configure（增量编译）
 .\build.ps1 -Test                    # 编译后运行测试
 .\build.ps1 -Features wld             # 仅编译 WLD 能力（不含 PLR）
@@ -109,22 +109,28 @@ python scripts/build_txci.py
 .\build.ps1 -Features all             # 默认：编译 WLD + PLR
 ```
 
-`-Target` 选择 Node/Web 宿主产物，`-Features` 独立选择业务能力集合。直接使用 CMake 时传入
+`-Target` 选择校验入口；构建始终生成相同源码身份的 Node/Web 成对产物，避免复用陈旧的另一目标。`-Features` 独立选择业务能力集合。直接使用 CMake 时传入
 `-DTERRAWASM_FEATURE_SET=all|wld|plr`；默认 `all` 保持原有完整 ABI。
 
 viewer-app 部署可额外使用 `-ViewerWebProfile`（仅允许与 `-Features wld` 组合）。该开关只给 Web/Mini Program target 定义 `TERRAWASM_VIEWER_WEB_PROFILE=1`，并在 build identity 中标记 viewer 专用产物；viewer 未使用的旧 WLD operation 已从所有构建中永久移除，同一次构建的 Node target 仍保持完整 WLD ABI。
 
 产出：
-- `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标，128 MiB 初始内存，512 MiB 最大内存）
-- `build/terrax_world_wasm_web.js` + `.wasm`（Web/MiniProgram 目标，64 MiB 初始内存，160 MiB 最大内存）
+- `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标）
+- `build/terrax_world_wasm_web.js` + `.wasm`（Web/MiniProgram 目标）
 
 内存参数以 `CMakeLists.txt` 中的 `TERRAX_*_INITIAL_MEMORY` / `TERRAX_*_MAXIMUM_MEMORY` 为配置真值；实际发布产物再由 `build/terra.manifest.json` 记录并由 CI 校验。README 仅用于说明，不应作为独立的内存配置来源。
 
 `.plr` 文档使用独立的 persistent 分配域；调用 `tx_reset_heap` 或回收 WLD transient/native 根不会使打开的玩家句柄失效。调用方仍须在完成后关闭每个 `terra_plr_*`/`terra_player_*` 句柄。
 
-编译完成后会在 `build/terra.manifest.json` 写入 ABI、源码 commit、dirty 状态、Node/Web 导出集合与导出哈希、公共与目标专属构建 flags、内存预算，以及每个交付产物的 byte size 和 SHA-256。构建不会自动修改其他仓库。
+编译完成后，manifest 生成器实际加载 Node/Web 模块，从 `_terra_build_info_json` 读取 ABI、源码身份、能力、flags 和内存；导出列表读取 CMake 已生成的 `build/exported_functions_{node,web}.json` 并逐项核对运行时函数，再计算文件大小和 SHA-256。Node/Web 身份不一致、陈旧产物或缺失导出会阻止生成。发布 schema v1 及 Web 顶层别名保持不变。
 
-只有明确传入 `-DeployDir` 才会部署 Web manifest 白名单中的 wrapper 和 `.wasm` 两个文件；脏工作树默认拒绝部署。`-AllowDirty` 仅用于本地诊断，不能产生可发布部署。
+旧 `-DeployDir` 已移除；不要在生产者重新维护 viewer 的路径和浏览器 manifest 投影。在 viewer-app 执行其已有同步命令：
+
+```powershell
+node scripts/sync-terrawasm-wld.mjs --artifact-dir ../TerraWasm/build --source-commit <TerraWasm-commit>
+```
+
+同步会核对文件摘要、实际实例化 Web 模块并校验编译身份，然后生成消费端 manifest。`-AllowDirty` 仅用于本地诊断，不能产生可发布部署。
 
 发布默认仍使用 `-O3`。如需比较更激进的体积优化配置，可在不改源码的前提下执行：
 

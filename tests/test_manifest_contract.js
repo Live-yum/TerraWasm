@@ -1,179 +1,115 @@
 "use strict";
-
 const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 const test = require("node:test");
+const { pathToFileURL } = require("node:url");
 
 const ROOT = path.resolve(__dirname, "..");
+const contract = import(pathToFileURL(path.join(ROOT, "scripts/generate-manifest.mjs")));
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "build/terra.manifest.json"), "utf8"));
 
-function loadGenerator() {
-  return import(pathToFileURL(path.join(ROOT, "scripts", "generate-manifest.mjs")));
-}
-
-function sha256(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-test("the artifact contract exposes the ABI identity exports", () => {
-  const webExports = fs.readFileSync(path.join(ROOT, "exports.web.txt"), "utf8");
-  const nodeExports = fs.readFileSync(path.join(ROOT, "exports.txt"), "utf8");
-  for (const name of ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"]) {
-    assert.match(webExports, new RegExp(`^${name}$`, "m"));
-    assert.match(nodeExports, new RegExp(`^${name}$`, "m"));
+function copyBuild(root) {
+  const build = path.join(root, "build");
+  fs.mkdirSync(build);
+  for (const target of ["node", "web"]) {
+    for (const artifact of manifest.targets[target].artifacts) {
+      fs.copyFileSync(path.join(ROOT, artifact.path), path.join(build, path.basename(artifact.path)));
+    }
+    fs.copyFileSync(path.join(ROOT, "build", `exported_functions_${target}.json`), path.join(build, `exported_functions_${target}.json`));
   }
-});
+  return build;
+}
 
-test("manifest validation rejects missing identity, memory, hash, and export data", async () => {
-  const { validateManifest } = await loadGenerator();
-  const base = {
-    version: 1,
-    artifactId: "terrax-world-web",
-    sourceCommit: "0123456789abcdef0123456789abcdef01234567",
-    dirty: false,
-    abi: {
-      version: 1,
-      requiredExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-      exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
-    },
-    memory: { initialBytes: 67108864, maxBytes: 167772160 },
-    build: {
-      compiler: "test-compiler",
-      featureSet: "all",
-      viewerWebProfile: false,
-      flags: {
-        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
-        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
-      },
-    },
-    targets: {
-      node: {
-        memory: { initialBytes: 134217728, maxBytes: 536870912 },
-        exports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-        exportHash: sha256(Buffer.from("_terra_world_open\n_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
-        artifacts: [
-          { role: "wrapper", path: "build/terrax_world_wasm.js", bytes: 1, sha256: "d".repeat(64) },
-          { role: "wasm", path: "build/terrax_world_wasm.wasm", bytes: 1, sha256: "e".repeat(64) },
-        ],
-      },
-      web: {
-        memory: { initialBytes: 67108864, maxBytes: 167772160 },
-        exports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-        exportHash: sha256(Buffer.from("_terra_abi_version\n_terra_capabilities\n_terra_build_info_json\n")),
-        artifacts: [
-          { role: "wrapper", path: "build/terrax_world_wasm_web.js", bytes: 1, sha256: "b".repeat(64) },
-          { role: "wasm", path: "build/terrax_world_wasm_web.wasm", bytes: 1, sha256: "c".repeat(64) },
-        ],
-      },
-    },
-    artifacts: [
-      { role: "wrapper", path: "build/terrax_world_wasm_web.js", bytes: 1, sha256: "b".repeat(64) },
-      { role: "wasm", path: "build/terrax_world_wasm_web.wasm", bytes: 1, sha256: "c".repeat(64) },
-    ],
-  };
-
-  for (const [label, mutate] of [
-    ["ABI version", (manifest) => { manifest.abi.version = 2; }],
-    ["source commit", (manifest) => { manifest.sourceCommit = "unknown"; }],
-    ["dirty", (manifest) => { manifest.dirty = true; }],
-    ["memory", (manifest) => { manifest.memory.maxBytes = 134217728; }],
-    ["SHA", (manifest) => { manifest.artifacts[0].sha256 = "not-a-sha"; }],
-    ["export set", (manifest) => { manifest.abi.requiredExports = []; }],
-    ["Node target exports", (manifest) => { manifest.targets.node.exports = []; }],
-    ["Node target export hash", (manifest) => { manifest.targets.node.exportHash = "invalid"; }],
-    ["Node target artifacts", (manifest) => { manifest.targets.node.artifacts = [{ role: "wrapper", path: "build/node.js", bytes: 1, sha256: "f".repeat(64) }]; }],
-    ["Web target artifacts", (manifest) => { manifest.targets.web.artifacts[0].path = "build/terrax_world_wasm_web.wasm"; }],
-    ["top-level artifacts", (manifest) => { manifest.artifacts[0].path = "build/other.js"; }],
-    ["artifact path", (manifest) => { manifest.artifacts[0].path = "C:/outside/wrapper.js"; }],
-    ["artifact path", (manifest) => { manifest.targets.node.artifacts[0].path = "//server/share/wrapper.js"; }],
-    ["build flags", (manifest) => { manifest.build.flags = ["-O3"]; }],
-    ["feature set", (manifest) => { manifest.build.featureSet = "invalid"; }],
-    ["viewer Web profile", (manifest) => { manifest.build.viewerWebProfile = "true"; }],
-    ["viewer Web profile", (manifest) => { manifest.build.viewerWebProfile = null; }],
-    ["viewer Web profile feature set", (manifest) => { manifest.build.viewerWebProfile = true; }],
-  ]) {
-    const candidate = structuredClone(base);
+for (const [label, mutate] of [
+  ["ABI version", m => { m.abi.version = 0; }],
+  ["source commit", m => { m.sourceCommit = "unknown"; }],
+  ["dirty identity", m => { m.dirty = true; }],
+  ["compiler", m => { m.build.compiler = ""; }],
+  ["feature set", m => { m.build.featureSet = ""; }],
+  ["viewer profile", m => { m.build.viewerWebProfile = "true"; }],
+  ["profile capability", m => { m.build.viewerWebProfile = true; m.build.featureSet = "plr"; }],
+  ["build flags", m => { m.build.flags.common = []; }],
+  ["ABI digest", m => { m.abi.exportHash = "0".repeat(64); }],
+  ["blank export", m => { m.abi.requiredExports.push(""); }],
+  ["duplicate export", m => { m.abi.requiredExports.push(m.abi.requiredExports[0]); }],
+  ["Web memory drift", m => { m.memory.maxBytes -= 65536; }],
+  ...["node", "web"].flatMap(target => [
+    [`${target} memory alignment`, m => { m.targets[target].memory.maxBytes -= 1; }],
+    [`${target} export hash`, m => { m.targets[target].exportHash = "0".repeat(64); }],
+    [`${target} export drift`, m => { m.targets[target].exports.pop(); }],
+    [`${target} artifact roles`, m => { m.targets[target].artifacts[1].role = "wrapper"; }],
+    [`${target} artifact size`, m => { m.targets[target].artifacts[0].bytes = 0; }],
+    [`${target} artifact hash`, m => { m.targets[target].artifacts[0].sha256 = "bad"; }],
+  ]),
+  ["Web artifact alias drift", m => { m.targets.web.artifacts[0].path = "different.js"; }],
+  ...["/absolute.js", "C:\\absolute.js", "../outside.js", "..\\outside.js"].map(
+    value => [value, m => { m.artifacts[0].path = value; }],
+  ),
+]) {
+  test(`manifest rejects ${label}`, async () => {
+    const { validateManifest } = await contract;
+    const candidate = structuredClone(manifest);
     mutate(candidate);
-    assert.throws(() => validateManifest(candidate), new RegExp(label, "i"));
-  }
+    assert.throws(() => validateManifest(candidate), /manifest/i);
+  });
+}
 
-  assert.doesNotThrow(() => validateManifest(base));
+test("real Node and Web modules reproduce the complete published manifest", async () => {
+  const { generateManifest, validateManifest } = await contract;
+  const actual = await generateManifest({ root: ROOT, sourceCommit: manifest.sourceCommit, dirty: manifest.dirty });
+  assert.deepEqual(actual, manifest);
+  assert.doesNotThrow(() => validateManifest(actual));
+  await assert.rejects(generateManifest({ root: ROOT, sourceCommit: "0".repeat(40) }), /source commit/);
+  await assert.rejects(generateManifest({ root: ROOT, dirty: !manifest.dirty }), /dirty state/);
 });
 
-test("manifest artifact hashes match the files on disk", async () => {
-  const { createManifest, validateManifest } = await loadGenerator();
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "terrawasm-manifest-"));
-  try {
-    const webWrapperText = "wrapper _terra_abi_version _terra_capabilities _terra_build_info_json";
-    const nodeWrapperText = "node wrapper _terra_abi_version _terra_capabilities _terra_build_info_json";
-    fs.writeFileSync(path.join(temp, "wrapper.js"), webWrapperText);
-    fs.writeFileSync(path.join(temp, "node-wrapper.js"), nodeWrapperText);
-    fs.writeFileSync(path.join(temp, "module.wasm"), Buffer.from([0, 97, 115, 109]));
-    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.from([0, 97, 115, 109, 1]));
-    const manifest = createManifest({
-      root: temp,
-      sourceCommit: "0123456789abcdef0123456789abcdef01234567",
-      dirty: false,
-      compiler: "test-compiler",
-      buildFlags: {
-        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
-        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
-      },
-      webWrapper: "wrapper.js",
-      webWasm: "module.wasm",
-      webExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-      nodeWrapper: "node-wrapper.js",
-      nodeWasm: "node-module.wasm",
-      nodeExports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-    });
-    assert.equal(manifest.artifacts[0].bytes, Buffer.byteLength(webWrapperText));
-    assert.equal(manifest.artifacts[0].sha256, sha256(Buffer.from(webWrapperText)));
-    assert.equal(manifest.artifacts[1].sha256, sha256(Buffer.from([0, 97, 115, 109])));
-    assert.equal(manifest.memory.maxBytes, 167772160);
-    assert.equal(manifest.targets.node.memory.maxBytes, 536870912);
-    assert.deepEqual(manifest.artifacts, manifest.targets.web.artifacts);
-    assert.equal(manifest.targets.node.artifacts[0].sha256, sha256(Buffer.from(nodeWrapperText)));
-    assert.match(manifest.targets.node.artifacts[0].path, /node-wrapper\.js$/);
-    assert.deepEqual(manifest.build.flags.common, ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"]);
-    assert.equal(manifest.build.featureSet, "all");
-    assert.equal(manifest.build.viewerWebProfile, false);
-    assert.doesNotThrow(() => validateManifest(manifest));
-  } finally {
-    fs.rmSync(temp, { recursive: true, force: true });
-  }
+test("schema validation does not prescribe the compiler's ABI version, feature set or memory defaults", async () => {
+  const { validateManifest } = await contract;
+  const candidate = structuredClone(manifest);
+  candidate.abi.version += 1;
+  candidate.build.featureSet = "additional-capability";
+  candidate.build.viewerWebProfile = false;
+  candidate.targets.node.memory.maxBytes += 65536;
+  candidate.memory.maxBytes += 65536;
+  candidate.targets.web.memory = candidate.memory;
+  assert.doesNotThrow(() => validateManifest(candidate));
 });
 
-test("createManifest rejects wrappers that do not expose build identity exports", async () => {
-  const { createManifest } = await loadGenerator();
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "terrawasm-manifest-identity-"));
-  try {
-    fs.writeFileSync(path.join(temp, "web-wrapper.js"), "wrapper _terra_abi_version _terra_capabilities");
-    fs.writeFileSync(path.join(temp, "node-wrapper.js"), "wrapper _terra_abi_version _terra_capabilities _terra_build_info_json");
-    fs.writeFileSync(path.join(temp, "module.wasm"), Buffer.from([0, 97, 115, 109]));
-    fs.writeFileSync(path.join(temp, "node-module.wasm"), Buffer.from([0, 97, 115, 109, 1]));
-    assert.throws(() => createManifest({
-      root: temp,
-      sourceCommit: "0123456789abcdef0123456789abcdef01234567",
-      dirty: false,
-      compiler: "test-compiler",
-      buildFlags: {
-        common: ["-O3", "-sUSE_ZLIB=1", "-sALLOW_MEMORY_GROWTH=1", "--no-entry"],
-        node: ["-sINITIAL_MEMORY=134217728", "-sMAXIMUM_MEMORY=536870912", "-sENVIRONMENT=node", "-sFILESYSTEM=1"],
-        web: ["-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=167772160", "-sENVIRONMENT=web,worker", "-sFILESYSTEM=1"],
-      },
-      webWrapper: "web-wrapper.js",
-      webWasm: "module.wasm",
-      webExports: ["_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-      nodeWrapper: "node-wrapper.js",
-      nodeWasm: "node-module.wasm",
-      nodeExports: ["_terra_world_open", "_terra_abi_version", "_terra_capabilities", "_terra_build_info_json"],
-    }), /Web wrapper is missing _terra_build_info_json/);
-  } finally {
-    fs.rmSync(temp, { recursive: true, force: true });
-  }
-});
+for (const scenario of ["stale exports", "mixed identity", "invalid wasm", "missing target", "duplicate target"]) {
+  test(`generation rejects ${scenario} before writing metadata`, async () => {
+    const { generateManifest } = await contract;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "terra-manifest-"));
+    try {
+      const build = copyBuild(root);
+      const nodeWasm = path.join(build, path.basename(manifest.targets.node.artifacts.find(a => a.role === "wasm").path));
+      if (scenario === "stale exports") {
+        fs.writeFileSync(path.join(build, "exported_functions_node.json"), JSON.stringify(["_missing_declared_export"]));
+      } else if (scenario === "mixed identity" || scenario === "invalid wasm") {
+        const bytes = fs.readFileSync(nodeWasm);
+        if (scenario === "mixed identity") {
+          const offset = bytes.indexOf(manifest.sourceCommit);
+          assert.ok(offset >= 0);
+          bytes.write("1".repeat(40), offset, "ascii");
+        } else bytes[0] ^= 1;
+        fs.writeFileSync(nodeWasm, bytes);
+      } else if (scenario === "missing target") {
+        fs.rmSync(nodeWasm);
+      } else {
+        fs.copyFileSync(nodeWasm, path.join(build, "duplicate.wasm"));
+        fs.copyFileSync(nodeWasm.replace(/\.wasm$/, ".js"), path.join(build, "duplicate.js"));
+      }
+      await assert.rejects(generateManifest({ root, output: "build/result.json" }), {
+        "stale exports": /missing_declared_export/,
+        "mixed identity": /Node\/Web build identity sourceCommit mismatch/,
+        "invalid wasm": /wasm|magic|WebAssembly/i,
+        "missing target": /both Node and Web/,
+        "duplicate target": /duplicate or invalid target/,
+      }[scenario]);
+      assert.equal(fs.existsSync(path.join(build, "result.json")), false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

@@ -109,28 +109,6 @@ if(TERRAX_WEB_INITIAL_MEMORY GREATER TERRAX_WEB_MAXIMUM_MEMORY)
     message(FATAL_ERROR "TERRAX_WEB_INITIAL_MEMORY cannot exceed TERRAX_WEB_MAXIMUM_MEMORY")
 endif()
 
-function(json_escape out_var value)
-    string(REPLACE "\\" "\\\\" escaped "${value}")
-    string(REPLACE "\"" "\\\"" escaped "${escaped}")
-    set(${out_var} "${escaped}" PARENT_SCOPE)
-endfunction()
-
-function(list_to_json out_var)
-    set(result "[")
-    set(first_item TRUE)
-    foreach(item IN LISTS ARGN)
-        json_escape(escaped "${item}")
-        if(first_item)
-            set(first_item FALSE)
-        else()
-            string(APPEND result ",")
-        endif()
-        string(APPEND result "\"${escaped}\"")
-    endforeach()
-    string(APPEND result "]")
-    set(${out_var} "${result}" PARENT_SCOPE)
-endfunction()
-
 function(configure_terra_identity target target_name initial_memory maximum_memory common_flags_text target_flags_text)
     target_compile_definitions(${target} PRIVATE
         TERRAX_BUILD_COMMIT="${TERRAX_BUILD_COMMIT}"
@@ -216,12 +194,7 @@ if(EMSCRIPTEN)
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
     )
-    set(COMMON_MANIFEST_FLAGS
-        "${TERRAX_OPTIMIZE_FLAG}"
-        -fno-exceptions
-        -fno-rtti
-        ${COMMON_LINK_OPTIONS}
-    )
+    set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
     if(TERRAX_ENABLE_LTO)
         list(APPEND COMMON_COMPILE_OPTIONS -flto)
         list(APPEND COMMON_LINK_OPTIONS -flto)
