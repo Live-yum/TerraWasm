@@ -383,6 +383,44 @@ function encryptPlr(plain) {
   return Buffer.concat([cipher.update(plain), cipher.final()]);
 }
 
+test("regional PLR preserves real xindong metadata, supports switching, and rejects corrupt framing", async () => {
+  for (const factory of [TerraWorldWasm, TerraWorldWasmWeb]) {
+    const module = await factory(factory === TerraWorldWasmWeb ? {
+      wasmBinary: fs.readFileSync(path.join(__dirname, '..', 'build', 'terrax_world_wasm_web.wasm')),
+    } : {});
+    const bytes = fs.readFileSync(path.join(__dirname, 'files', '灼眼半夏.plr'));
+    let handle = openBuffer(module, bytes);
+    try {
+      assert.equal(getField(module, handle, '/version'), 280);
+      assert.equal(getField(module, handle, '/name'), '灼眼半夏');
+      assert.deepEqual(encode(module, handle), bytes, 'clean save preserves original zero-filled framing');
+      assert.equal(setField(module, handle, '/name', '灼眼半夏测试'), 0);
+      const encoded = encode(module, handle);
+      assert.equal(decryptPlr(encoded).subarray(4, 12).toString('hex'), Buffer.from('xindong\x03').toString('hex'));
+      const reopened = openBuffer(module, encoded);
+      try { assert.equal(getField(module, reopened, '/name'), '灼眼半夏测试'); }
+      finally { module._terra_player_close(reopened); }
+      for (const magic of ['relogic', 'xindong']) {
+        const exact = Buffer.from(magic + '\x03').readBigUInt64LE();
+        // This legacy JSON client rounds uint64 Numbers; repair must retain the selected identity.
+        assert.equal(setField(module, handle, '/metadata/magicAndType', Number(exact)), 0);
+        assert.equal(decryptPlr(encode(module, handle)).subarray(4, 11).toString(), magic);
+      }
+      for (const invalid of [0, 1, Number(1n << 56n), Number.MAX_SAFE_INTEGER])
+        assert.notEqual(setField(module, handle, '/metadata/magicAndType', invalid), 0);
+      const damaged = Buffer.from(bytes); damaged[damaged.length - 1] = 1;
+      assert.throws(() => openBuffer(module, damaged));
+      assert.throws(() => openBuffer(module, bytes.subarray(0, bytes.length - 1)));
+      const wrong = decryptPlr(encode(module, handle)); wrong.write('invalid', 4);
+      assert.throws(() => openBuffer(module, encryptPlr(wrong)));
+      wrong.write('xindong', 4); wrong[11] = 2;
+      assert.throws(() => openBuffer(module, encryptPlr(wrong)));
+      wrong[11] = 3; wrong.write('relogic', 4);
+      assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(16)])), 'padding exception is regional only');
+    } finally { module._terra_player_close(handle); }
+  }
+});
+
 function historicalBinaryFixture(version) {
   const chunks = [];
   const u8 = (value) => chunks.push(Buffer.from([value & 0xff]));

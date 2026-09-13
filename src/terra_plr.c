@@ -60,6 +60,9 @@ extern void tx_set_error(const char *code, const char *message);
 
 /* "relogic" in the low 56 bits, as used by Terraria FileMetadata. */
 #define PLR_METADATA_MAGIC_LOW_56 UINT64_C(27981915666277746)
+#define PLR_XINDONG_MAGIC_LOW_56 UINT64_C(29113347306580344)
+#define PLR_XINDONG_MAGIC_AND_TYPE \
+    (PLR_XINDONG_MAGIC_LOW_56 | ((uint64_t)PLR_PLAYER_FILE_TYPE << 56u))
 #define PLR_DEFAULT_MAGIC_AND_TYPE \
     (PLR_METADATA_MAGIC_LOW_56 | ((uint64_t)PLR_PLAYER_FILE_TYPE << 56u))
 
@@ -2125,8 +2128,9 @@ static PlrJsonValue *plr_parse_plain(
         uint64_t magic_and_type = plr_read_u64(&reader);
         uint32_t revision = plr_read_u32(&reader);
         uint64_t favorite_flags = plr_read_u64(&reader);
-        if (!reader.ok || (magic_and_type & UINT64_C(0x00ffffffffffffff)) !=
-            PLR_METADATA_MAGIC_LOW_56 ||
+        if (!reader.ok || ((magic_and_type & UINT64_C(0x00ffffffffffffff)) !=
+            PLR_METADATA_MAGIC_LOW_56 && (magic_and_type & UINT64_C(0x00ffffffffffffff)) !=
+            PLR_XINDONG_MAGIC_LOW_56) ||
             ((magic_and_type >> 56u) & 0xffu) != PLR_PLAYER_FILE_TYPE) {
             plr_json_free(root); return NULL;
         }
@@ -2448,7 +2452,11 @@ static PlrJsonValue *plr_parse_plain(
             }
         }
     }
-    uint8_t voice_variant = plr_version_has_voice_variant(version) ? plr_read_u8(&reader) :
+    /* The real xindong v280 layout predates the desktop voice byte. Accept
+     * its exact end-of-payload here, not a general truncated-tail fallback. */
+    int omit_voice_variant = version == 280 && reader.ok && reader.offset == reader.length &&
+        plr_memory_equal(plain + 4u, "xindong", 7u);
+    uint8_t voice_variant = plr_version_has_voice_variant(version) && !omit_voice_variant ? plr_read_u8(&reader) :
         (plr_skin_variant_is_male(skin_variant) ? 1u : 2u);
     float voice_pitch = plr_version_has_voice_pitch(version) ? plr_read_f32(&reader) : 0.0f;
     /* LoadPlayer_LastMinuteFixes constrains persisted voice ids to the four
@@ -2482,6 +2490,7 @@ static PlrJsonValue *plr_parse_plain(
         !plr_root_take(root, "oneTimeDialoguesSeen", &dialogues) ||
         !plr_json_object_put_u64(layout, "builderAccStatusCount", builder_count) ||
         !plr_json_object_put_bool(layout, "includesDeathMetadata", plr_version_has_death_metadata(version)) ||
+        (omit_voice_variant && !plr_json_object_put_bool(layout, "omitVoiceVariant", 1)) ||
         !plr_root_take(root, "tailLayout", &layout)) {
         plr_json_free(pending); plr_json_free(dialogues); plr_json_free(layout);
         plr_json_free(root); return NULL;
@@ -2540,19 +2549,23 @@ static int plr_value_u64(const PlrJsonValue *value, uint64_t *out) {
     return 0;
 }
 
-/* JavaScript Numbers cannot carry Terraria's 56-bit metadata payload without
- * rounding. TerraR normalizes this invariant when JSON crosses its API; do
- * the same in-place before validating an editable model. Binary input has
- * already passed the strict on-disk magic/type check in plr_parse_plain. */
+/* Preserve exact signatures. Only repair the two known IEEE-754 rounded
+ * values from legacy JSON clients; arbitrary magic/type values remain invalid.
+ * Binary input must pass the strict on-disk check without rounding repair. */
 static void plr_normalize_metadata_magic(PlrJsonValue *root) {
     if (!root || root->type != PLR_JSON_OBJECT) return;
     PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata || metadata->type == PLR_JSON_NULL) return;
     PlrJsonValue *magic = plr_json_object_get(metadata, "magicAndType");
-    uint64_t ignored = 0u;
-    if (!plr_value_u64(magic, &ignored)) return;
+    uint64_t value = 0u;
+    if (!plr_value_u64(magic, &value)) return;
+    if (value == (uint64_t)(double)PLR_DEFAULT_MAGIC_AND_TYPE ||
+        value == UINT64_C(244154697780061570)) /* JSON.stringify's shortest decimal */
+        value = PLR_DEFAULT_MAGIC_AND_TYPE;
+    else if (value == (uint64_t)(double)PLR_XINDONG_MAGIC_AND_TYPE)
+        value = PLR_XINDONG_MAGIC_AND_TYPE;
     magic->as.number.kind = PLR_NUMBER_U64;
-    magic->as.number.u64 = PLR_DEFAULT_MAGIC_AND_TYPE;
+    magic->as.number.u64 = value;
     magic->as.number.i64 = 0;
     magic->as.number.floating = 0.0;
 }
@@ -2746,8 +2759,12 @@ static int plr_validate_model(const PlrJsonValue *root) {
     if (metadata->type != PLR_JSON_NULL) {
         if (metadata->type != PLR_JSON_OBJECT)
             return plr_model_error("PLR metadata is not an object");
-        if (!plr_required_u64(metadata, "magicAndType"))
-            return plr_model_error("PLR metadata magicAndType is invalid");
+        uint64_t magic_and_type = 0u;
+        if (!plr_required_u64(metadata, "magicAndType") ||
+            !plr_value_u64(plr_json_object_get(metadata, "magicAndType"), &magic_and_type) ||
+            (magic_and_type != PLR_DEFAULT_MAGIC_AND_TYPE &&
+             magic_and_type != PLR_XINDONG_MAGIC_AND_TYPE))
+            return plr_model_error("PLR metadata must use relogic or xindong with player file type 3");
         if (!plr_required_u32(metadata, "revision"))
             return plr_model_error("PLR metadata revision is invalid");
         if (!plr_value_u64(plr_json_object_get(metadata, "favoriteFlags"), NULL))
@@ -2812,6 +2829,8 @@ static int plr_validate_model(const PlrJsonValue *root) {
     if (!layout || layout->type != PLR_JSON_OBJECT ||
         !plr_required_u32(layout, "builderAccStatusCount") ||
         !plr_required_bool(layout, "includesDeathMetadata") ||
+        (plr_json_object_get(layout, "omitVoiceVariant") &&
+         !plr_required_bool(layout, "omitVoiceVariant")) ||
         !plr_value_u32(plr_json_object_get(layout, "builderAccStatusCount"), &builder_count) ||
         builder_count > 64u)
         return plr_model_error("PLR tail layout is invalid");
@@ -3359,7 +3378,14 @@ static uint8_t *plr_encode_plain(
         plr_writer_loadouts(&writer, root, plr_version_has_equipment_favorites(version));
     }
     if (!plr_field_u8(root, "voiceVariant", &u8)) writer.ok = 0;
-    if (plr_version_has_voice_variant(version)) plr_writer_u8(&writer, u8);
+    int omit_voice_variant = 0;
+    const PlrJsonValue *layout = plr_json_object_get(root, "tailLayout");
+    (void)plr_field_bool(layout, "omitVoiceVariant", &omit_voice_variant);
+    uint64_t metadata_magic = 0u;
+    (void)plr_field_u64(plr_json_object_get(root, "metadata"), "magicAndType", &metadata_magic);
+    if (plr_version_has_voice_variant(version) &&
+        !(version == 280 && metadata_magic == PLR_XINDONG_MAGIC_AND_TYPE && omit_voice_variant))
+        plr_writer_u8(&writer, u8);
     float voice_pitch = 0.0f;
     if (!plr_field_float(root, "voicePitchOffset", &voice_pitch)) writer.ok = 0;
     if (plr_version_has_voice_pitch(version)) plr_writer_f32(&writer, voice_pitch);
@@ -3636,6 +3662,24 @@ static terrax_world_status plr_open_from_encrypted(
     memcpy(original, buffer, buffer_length);
     uint32_t plain_length = 0u;
     uint8_t *plain = plr_decrypt(buffer, buffer_length, &plain_length);
+    if (!plain && !g_plr_oom && (buffer_length & 15u) == 0u) {
+        /* Some xindong saves contain unused zero-filled capacity after the
+         * encrypted payload. Never trim partial blocks or nonzero data, and
+         * require the regional signature plus the full parser below. */
+        static const uint8_t zero_block[16] = {0};
+        uint32_t payload_length = buffer_length;
+        while (payload_length > 16u &&
+               plr_memory_equal(buffer + payload_length - 16u, zero_block, 16u))
+            payload_length -= 16u;
+        if (payload_length < buffer_length) {
+            plain = plr_decrypt(buffer, payload_length, &plain_length);
+            if (plain && (plain_length < 12u ||
+                !plr_memory_equal(plain + 4u, "xindong", 7u) || plain[11] != PLR_PLAYER_FILE_TYPE)) {
+                free(plain);
+                plain = NULL;
+            }
+        }
+    }
     if (!plain) {
         free(original);
         return plr_parse_error();

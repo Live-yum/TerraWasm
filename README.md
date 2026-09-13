@@ -195,6 +195,8 @@ tx_free(json_ptr);
 terra_plr_close(handle);
 ```
 
+PLR 的 `metadata.magicAndType` 支持 `relogic` 和 `xindong`，文件类型必须为 3；编辑保存保留原标识，也可显式切换。JSON 客户端应保留精确的 uint64 十进制数字，兼容层只修复已知的 JavaScript 浮点舍入值，不接受任意魔数。真实 `xindong` v280 样本另有两项兼容：标准解密失败时允许移除加密数据末尾的完整全零块（仍须验证签名、PKCS#7 和完整布局）；缺失桌面版末尾声音字节时，通过 `tailLayout.omitVoiceVariant` 保留该区域布局。切换为 `relogic` 或转换到其他版本后使用目标标准布局；这不是国服专属游戏内容转换。
+
 `terra_plr_get_json`/`terra_plr_get` 的 `required_size` 是 `uint32_t*`，并包含 JSON 结尾的 NUL；`terra_plr_save_to_buffer`/`terra_plr_encode` 同样支持 NULL/0 size probe。结构化补丁通过 `terra_plr_apply_patch_json` 提供 `fields`、`items`、`buffs` 和 `loadoutSlots`，批量 JSON Pointer 编辑通过 `terra_plr_set_many` 原子提交。
 
 ### 像素画映射
