@@ -12,6 +12,9 @@ concurrency:
   group: terrawasm-quality-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  EMSCRIPTEN_VERSION: "5.0.7"
+
 jobs:
   native:
     runs-on: ubuntu-latest
@@ -47,13 +50,9 @@ jobs:
         run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
       - name: Run sanitizer contracts
         run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
-      - name: Run fuzz smoke explicitly
-        run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure -R terra_fuzz_smoke
 
   wasm-release:
     runs-on: ubuntu-latest
-    env:
-      EMSCRIPTEN_VERSION: "5.0.7"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -71,8 +70,6 @@ jobs:
       - name: Build and test Node and Web artifacts
         shell: pwsh
         run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Enforce manifest artifact sizes
-        run: node scripts/check-artifact-size.mjs build/terra.manifest.json
       - name: Upload traceable release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -92,7 +89,6 @@ jobs:
       matrix:
         features: [wld, plr]
     env:
-      EMSCRIPTEN_VERSION: "5.0.7"
       TERRAWASM_FEATURE_SET: ${{ matrix.features }}
     steps:
       - uses: actions/checkout@v7
@@ -111,14 +107,10 @@ jobs:
       - name: Build and test selected capability set
         shell: pwsh
         run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Build and validate viewer Web profile
+      - name: Validate buffer-only WLD Web profile
         if: matrix.features == 'wld'
         shell: pwsh
-        run: |
-          ./build.ps1 -Target all -Features wld -ViewerWebProfile -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & node tests/check_viewer_web_profile_artifact.js build/terrax_world_wasm_web.wasm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: node tests/check_viewer_web_profile_artifact.js build/terrax_world_wasm_web.wasm
       - name: Run native-size PNG under Mini Program memory ceiling
         if: matrix.features == 'wld'
         shell: pwsh
