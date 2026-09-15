@@ -5,16 +5,12 @@ include(CTest)
 option(TERRAWASM_NATIVE_TESTS "Build the host-native ABI smoke test" OFF)
 option(TERRAWASM_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for native targets" OFF)
 option(TERRAWASM_FUZZ_SMOKE "Build bounded-reader fuzz smoke harnesses with native tests" ON)
-option(TERRAWASM_VIEWER_WEB_PROFILE "Mark the WLD Web target as the viewer profile" OFF)
 
 set(TERRAWASM_FEATURE_SET "all" CACHE STRING "Compiled capability set: all, wld, or plr")
 set_property(CACHE TERRAWASM_FEATURE_SET PROPERTY STRINGS all wld plr)
 string(TOLOWER "${TERRAWASM_FEATURE_SET}" TERRAWASM_FEATURE_SET)
 if(NOT TERRAWASM_FEATURE_SET MATCHES "^(all|wld|plr)$")
     message(FATAL_ERROR "TERRAWASM_FEATURE_SET must be one of: all, wld, plr")
-endif()
-if(TERRAWASM_VIEWER_WEB_PROFILE AND NOT TERRAWASM_FEATURE_SET STREQUAL "wld")
-    message(FATAL_ERROR "TERRAWASM_VIEWER_WEB_PROFILE requires TERRAWASM_FEATURE_SET=wld")
 endif()
 set(TERRAWASM_ENABLE_WLD OFF)
 set(TERRAWASM_ENABLE_PLR OFF)
@@ -109,28 +105,6 @@ if(TERRAX_WEB_INITIAL_MEMORY GREATER TERRAX_WEB_MAXIMUM_MEMORY)
     message(FATAL_ERROR "TERRAX_WEB_INITIAL_MEMORY cannot exceed TERRAX_WEB_MAXIMUM_MEMORY")
 endif()
 
-function(json_escape out_var value)
-    string(REPLACE "\\" "\\\\" escaped "${value}")
-    string(REPLACE "\"" "\\\"" escaped "${escaped}")
-    set(${out_var} "${escaped}" PARENT_SCOPE)
-endfunction()
-
-function(list_to_json out_var)
-    set(result "[")
-    set(first_item TRUE)
-    foreach(item IN LISTS ARGN)
-        json_escape(escaped "${item}")
-        if(first_item)
-            set(first_item FALSE)
-        else()
-            string(APPEND result ",")
-        endif()
-        string(APPEND result "\"${escaped}\"")
-    endforeach()
-    string(APPEND result "]")
-    set(${out_var} "${result}" PARENT_SCOPE)
-endfunction()
-
 function(configure_terra_identity target target_name initial_memory maximum_memory common_flags_text target_flags_text)
     target_compile_definitions(${target} PRIVATE
         TERRAX_BUILD_COMMIT="${TERRAX_BUILD_COMMIT}"
@@ -216,12 +190,7 @@ if(EMSCRIPTEN)
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "--no-entry"
     )
-    set(COMMON_MANIFEST_FLAGS
-        "${TERRAX_OPTIMIZE_FLAG}"
-        -fno-exceptions
-        -fno-rtti
-        ${COMMON_LINK_OPTIONS}
-    )
+    set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
     if(TERRAX_ENABLE_LTO)
         list(APPEND COMMON_COMPILE_OPTIONS -flto)
         list(APPEND COMMON_LINK_OPTIONS -flto)
@@ -294,7 +263,8 @@ if(EMSCRIPTEN)
         ${TERRAX_WEB_INITIAL_MEMORY} ${TERRAX_WEB_MAXIMUM_MEMORY}
         "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}"
     )
-    if(TERRAWASM_VIEWER_WEB_PROFILE)
+    # WLD Web is already the buffer-only viewer profile; no second build switch.
+    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
         target_compile_definitions(terrax_world_wasm_web PRIVATE TERRAWASM_VIEWER_WEB_PROFILE=1)
     endif()
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
