@@ -454,7 +454,7 @@ typedef struct TxPixelMap {
     uint16_t wall_type;         /* wall type (0 = no wall) */
     uint8_t  tile_color;        /* paint ID for tile */
     uint8_t  wall_color;        /* paint ID for wall */
-    uint8_t  active_mode;       /* 0=empty, 1=tile, 2=wall, 3=skip/no-op */
+    uint8_t  active_mode;       /* 0=empty, 1=tile, 2=wall, 3=skip/no-op, 4=tile+wall */
     uint8_t  block_inactive;    /* set inactive flag */
 } TxPixelMap;
 

@@ -76,12 +76,17 @@ static void apply_map_to_tile(const TxPixelMap* map, TxTile* t) {
         }
         return;
     }
-    if (map->tile_type) {
+    /* Combined mode also accepts tile ID 0 (dirt); empty tile uses mode 0/2. */
+    if (map->active_mode == 4u || map->tile_type) {
         t->active = 1;
         t->type = map->tile_type;
         t->tile_color = map->tile_color;
         if (map->block_inactive <= 1u)
             t->inactive = map->block_inactive;
+    }
+    if (map->active_mode == 4u) {
+        t->wall = map->wall_type;
+        t->wall_color = map->wall_color;
     }
 }
 
@@ -642,6 +647,7 @@ int apply_pixel_art_at(TxWorld* w, uint32_t x, uint32_t y, TxTile* t) {
  *   - active_mode=0 → empty block (clear tile+wall)
  *   - active_mode=1 → tile placement
  *   - active_mode=2 → wall placement
+ *   - active_mode=4 → tile + wall placement (tile ID 0 is valid, wall 0 clears)
  *   Pass 0/NULL to skip overrides (pure TXCI lookup).
  *
  * Returns 0 on success, -1 on error.
