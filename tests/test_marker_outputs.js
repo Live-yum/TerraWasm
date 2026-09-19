@@ -67,11 +67,11 @@ function allocCString(M, value) {
   return ptr;
 }
 
-function openWorld(M) {
-  const inputPtr = mustAlloc(M, TEST_BYTES.length, "world input");
+function openWorld(M, bytes = TEST_BYTES) {
+  const inputPtr = mustAlloc(M, bytes.length, "world input");
   const handlePtr = mustAlloc(M, 4, "world handle");
-  M.HEAPU8.set(TEST_BYTES, inputPtr);
-  const status = M._terra_world_open_from_buffer(inputPtr, TEST_BYTES.length, handlePtr);
+  M.HEAPU8.set(bytes, inputPtr);
+  const status = M._terra_world_open_from_buffer(inputPtr, bytes.length, handlePtr);
   assert.equal(status, 0);
   return { handle: readU32(M, handlePtr), inputPtr, handlePtr };
 }
@@ -1099,4 +1099,125 @@ test("next operation and close reclaim unconsumed map output", async () => {
     M._tx_free(sizePtr);
   }
   assert.equal(M._tx_native_heap_used() >>> 0, baseline);
+});
+
+// Independent RLE fixture: two diagonal/bridged veins, adjacent different ore,
+// all frames of multi-tile objects, and both sword styles.
+function makeEntityWorld(customCells) {
+  const { makeSectionedWorld } = require('./helpers/sectioned-world');
+  const base = makeSectionedWorld(128, { worldName: 'entity-fixture' });
+  const header = Buffer.from(base.subarray(base.readUInt32LE(6)));
+  const afterName = 1 + Buffer.byteLength('entity-fixture');
+  const width = 128, height = 300;
+  header.writeInt32LE(height, afterName + 20);
+  header.writeInt32LE(width, afterName + 24);
+  const cells = new Map();
+  const put = (x,y,type,fx=0,fy=0) => cells.set(`${x},${y}`, {type,fx,fy});
+  // The lower branch joins a prior component late; union must retire only once.
+  for (const [x,y] of [[10,20],[11,21],[10,24],[11,23],[12,22],[30,30],[31,31]]) put(x,y,8);
+  put(12,21,7);
+  const object = (x,y,type,w,h,fx=0,fy=0) => {
+    for(let dx=0;dx<w;dx++) for(let dy=0;dy<h;dy++) put(x+dx,y+dy,type,fx+18*dx,fy+18*dy);
+  };
+  object(50,40,12,2,2); object(60,60,236,2,2,72);
+  object(70,80,187,3,2,918); object(80,80,187,3,2,864);
+  object(90,100,186,3,2,810);
+  object(30,120,31,2,2); object(40,120,31,2,2,36);
+  object(50,140,26,3,2); object(60,140,26,3,2,54);
+  if (customCells) { cells.clear(); for (const [key,value] of customCells) cells.set(key,value); }
+  const important = Buffer.alloc(88);
+  for(const type of [12,236,187,186,31,26]) important[type>>3] |= 1 << (type&7);
+  const data=[];
+  for(let x=0;x<width;x++) for(let y=0;y<height;) {
+    const tile=cells.get(`${x},${y}`);
+    let run=1;
+    while(y+run<height && JSON.stringify(cells.get(`${x},${y+run}`))===JSON.stringify(tile)) run++;
+    const rle=run>256?128:run>1?64:0;
+    data.push(rle | (tile ? 2 | (tile.type>255?32:0) : 0));
+    if(tile) {
+      data.push(tile.type&255); if(tile.type>255) data.push(tile.type>>8);
+      if(important[tile.type>>3] & (1<<(tile.type&7))) data.push(tile.fx&255,tile.fx>>8,tile.fy&255,tile.fy>>8);
+    }
+    if(rle) data.push((run-1)&255); if(rle===128) data.push((run-1)>>8);
+    y+=run;
+  }
+  const format=Buffer.alloc(4+2+7*4+2+important.length);
+  format.writeUInt32LE(128); format.writeUInt16LE(7,4);
+  const tileStart=format.length+header.length, tileEnd=tileStart+data.length;
+  for(let i=0;i<7;i++) format.writeUInt32LE(i===0?format.length:i===1?tileStart:tileEnd,6+i*4);
+  format.writeUInt16LE(700,34); important.copy(format,36);
+  return Buffer.concat([format,header,Buffer.from(data)]);
+}
+
+test('entity points share PNG/MAP anchors, deduplicate frames, and merge diagonal veins', async () => {
+  const M=await loadModule(); M._tx_reset_heap();
+  const opened=openWorld(M,makeEntityWorld());
+  const selectors=[
+    {tile_type:8,locate:2}, {tile_type:7,locate:2},
+    {tile_type:12,locate:1,frame_x:0,frame_y:0},
+    {tile_type:236,locate:1,frame_x:0,frame_y:0,frame_x_mod:36,frame_y_mod:36},
+    {tile_type:187,locate:1,frame_x:918,frame_y:0},
+    {tile_type:186,locate:1,frame_x:810,frame_y:0},
+    {tile_type:31,locate:1,frame_x:0,frame_y:0},
+    {tile_type:31,locate:1,frame_x:36,frame_y:0},
+    {tile_type:26,locate:1,frame_x:0,frame_y:0},
+    {tile_type:26,locate:1,frame_x:54,frame_y:0},
+  ].map(row=>({...row,radius:4,line_width:1,color:'#FF00FFFF'}));
+  try {
+    for(const max_w of [0,64,128]) {
+      const result=executeOperation(M,opened.handle,'mark_tiles_and_chests_preview',{tile_markers:selectors,max_w});
+      assert.equal(result.status,0,result.status ? JSON.stringify(readLastErrorJson(M)) : undefined);
+      assert.equal(JSON.parse(result.value).matched_tile_count,11);
+      const png=getThumbnailPng(M,opened.handle).png;
+      if(max_w===0) {
+        const image=decodePngRgb(png);
+        assert.deepEqual(Array.from(pixelAt(image,14,20).slice(0,3)),[255,0,255], 'vein uses a configured radius ring');
+        assert.deepEqual(Array.from(pixelAt(image,54,40).slice(0,3)),[255,0,255], 'object uses one top-left frame');
+      }
+    }
+    installMarkerColorIndex(M,opened.handle);
+    let result=executeOperation(M,opened.handle,'mark_tiles_and_chests_map',{tile_markers:selectors});
+    assert.equal(result.status,0,result.status ? JSON.stringify(readLastErrorJson(M)) : undefined);
+    assert.equal(JSON.parse(result.value).matched_tile_count,11);
+    const first=getMapBytes(M,opened.handle).map;
+    result=executeOperation(M,opened.handle,'mark_tiles_and_chests_map',{tile_markers:selectors.map(row=>({...row,radius:9,color:'#00FFFFFF'}))});
+    assert.equal(result.status,0);
+    assert.notDeepEqual(getMapBytes(M,opened.handle).map,first,'MAP responds to entity radius/color');
+    result=executeOperation(M,opened.handle,'mark_tiles_and_chests_preview',{tile_markers:[{tile_type:8,locate:2},{tile_type:8,locate:2}]});
+    assert.notEqual(result.status,0,'duplicate cluster selectors cannot overflow frontier arrays');
+  } finally { closeWorld(M,opened); }
+});
+
+
+test('streaming veins match an independent eight-neighbour flood fill and release scratch memory', async () => {
+  const M=await loadModule(); M._tx_reset_heap();
+  let seed=12345;
+  const random=()=>{ seed=(Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; };
+  for(let trial=0;trial<20;trial++) {
+    const cells=new Map();
+    for(let x=0;x<24;x++) for(let y=0;y<40;y++) {
+      if(random()<trial/24) cells.set(`${x},${y}`,{type:random()<.7?8:7,fx:0,fy:0});
+    }
+    const visited=new Set(); let expected=0;
+    for(const [key,tile] of cells) {
+      if(visited.has(key)) continue;
+      expected++; const pending=[key]; visited.add(key);
+      while(pending.length) {
+        const [x,y]=pending.pop().split(',').map(Number);
+        for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++) {
+          const neighbour=`${x+dx},${y+dy}`;
+          if(!visited.has(neighbour) && cells.get(neighbour)?.type===tile.type) {visited.add(neighbour);pending.push(neighbour);}
+        }
+      }
+    }
+    const baseline=M._tx_native_heap_used()>>>0;
+    const opened=openWorld(M,makeEntityWorld(cells));
+    try {
+      const result=executeOperation(M,opened.handle,'mark_tiles_and_chests_preview',{max_w:64,tile_markers:[{tile_type:8,locate:2},{tile_type:7,locate:2}]});
+      assert.equal(result.status,0);
+      assert.equal(JSON.parse(result.value).matched_tile_count,expected,`trial ${trial}`);
+      getThumbnailPng(M,opened.handle);
+    } finally {closeWorld(M,opened);}
+    assert.equal(M._tx_native_heap_used()>>>0,baseline, 'all location buffers released');
+  }
 });

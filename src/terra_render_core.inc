@@ -1293,9 +1293,36 @@ static const MapMarkerEntry* find_marker_by_id(const MapMarkerEntry* markers,
                                                uint32_t marker_count,
                                                int32_t id) {
   for (uint32_t i = 0u; i < marker_count; i++) {
-    if (markers[i].id == id) return &markers[i];
+    if (!markers[i].locate && markers[i].id == id) return &markers[i];
   }
   return NULL;
+}
+
+static void draw_entity_points_rows(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph,
+                                    uint32_t row_start, uint32_t row_count,
+                                    const MapMarkerEntry* markers, const TxBuf* points) {
+  if (!points) return;
+  const TxMarkerPoint* entries = (const TxMarkerPoint*)points->data;
+  for (uint32_t i = 0; i < points->len / sizeof(TxMarkerPoint); i++) {
+    const TxMarkerPoint* point = &entries[i];
+    draw_marker_ring_rows(rgba, pw, ph, row_start, row_count,
+        w->maxTilesX, w->maxTilesY, point->x, point->y, &markers[point->marker_index]);
+  }
+}
+
+static void draw_entity_points_rgb(TxWorld* w, uint8_t* rgb, uint32_t pw, uint32_t ph,
+                                   const MapMarkerEntry* markers, const TxBuf* points) {
+  if (!points) return;
+  const TxMarkerPoint* entries = (const TxMarkerPoint*)points->data;
+  for (uint32_t i = 0; i < points->len / sizeof(TxMarkerPoint); i++) {
+    const TxMarkerPoint* point = &entries[i];
+    const MapMarkerEntry* marker = &markers[point->marker_index];
+    draw_marker_ring_at_rgb(rgb, pw, ph,
+        clamp_preview_coord(point->x, w->maxTilesX, pw),
+        clamp_preview_coord(point->y, w->maxTilesY, ph),
+        scale_marker_measure(marker->radius, w->maxTilesX, w->maxTilesY, pw, ph),
+        scale_marker_measure(marker->line_width, w->maxTilesX, w->maxTilesY, pw, ph), marker->rgba);
+  }
 }
 
 static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rgba,
@@ -1388,6 +1415,9 @@ static uint32_t draw_matching_tile_markers_preview_rows(TxWorld* w, uint8_t* rgb
                                                         uint32_t tile_marker_count,
                                                         uint32_t count_matches) {
   if (!w || !rgba || tile_marker_count == 0u) return 0u;
+  uint32_t legacy = 0u;
+  for (uint32_t i = 0; i < tile_marker_count; i++) legacy |= !tile_markers[i].locate;
+  if (!legacy) return 0u;
 
   {
     uint8_t* saved_file = w->file;
@@ -1546,6 +1576,9 @@ static uint32_t draw_matching_tile_markers_rgb(
     TxWorld* w, uint8_t* rgb, uint32_t preview_w, uint32_t preview_h,
     const MapMarkerEntry* tile_markers, uint32_t tile_marker_count) {
   if (!w || !rgb || tile_marker_count == 0u) return 0u;
+  uint32_t legacy = 0u;
+  for (uint32_t i = 0; i < tile_marker_count; i++) legacy |= !tile_markers[i].locate;
+  if (!legacy) return 0u;
 
   {
     uint8_t* saved_file = w->file;
@@ -1697,6 +1730,7 @@ static int encode_marked_preview_png_stream(
     TxWorld* w, uint32_t pw, uint32_t ph, uint32_t stride,
     const MapMarkerEntry* chest_markers, uint32_t chest_count,
     const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    const TxBuf* entity_points,
     uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
   uint32_t strip_rows = ph < MARKED_PREVIEW_STRIP_ROWS ? ph : MARKED_PREVIEW_STRIP_ROWS;
   uint64_t rgba_cap64 = (uint64_t)stride * strip_rows;
@@ -1736,7 +1770,7 @@ static int encode_marked_preview_png_stream(
   png_deflate_init(&stream, &out);
 
   *matched_chest_count = 0u;
-  *matched_tile_count = 0u;
+  *matched_tile_count = entity_points ? entity_points->len / sizeof(TxMarkerPoint) : 0u;
   for (uint32_t row_start = 0u; row_start < ph; row_start += strip_rows) {
     uint32_t rows = ph - row_start;
     if (rows > strip_rows) rows = strip_rows;
@@ -1752,9 +1786,10 @@ static int encode_marked_preview_png_stream(
       uint32_t matched = draw_matching_tile_markers_preview_rows(
           w, rgba, pw, ph, row_start, rows,
           tile_markers, tile_count, row_start == 0u);
-      if (row_start == 0u) *matched_tile_count = matched;
+      if (row_start == 0u) *matched_tile_count += matched;
     }
 
+    draw_entity_points_rows(w, rgba, pw, ph, row_start, rows, tile_markers, entity_points);
     {
       uint32_t raw_len = 0u;
       for (uint32_t local_row = 0u; local_row < rows; local_row++) {
@@ -1809,6 +1844,7 @@ static int encode_full_preview_rgb_png(
     TxWorld* w, uint32_t pw, uint32_t ph,
     const MapMarkerEntry* chest_markers, uint32_t chest_count,
     const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    const TxBuf* entity_points,
     uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
   uint64_t rgb_len64 = (uint64_t)pw * ph * 3u;
   uint32_t stride = pw * 3u;
@@ -1852,7 +1888,8 @@ static int encode_full_preview_rgb_png(
     uint32_t matched_tiles = draw_matching_tile_markers_rgb(
         w, rgb, pw, ph, tile_markers, tile_count);
     if (matched_chest_count) *matched_chest_count = matched_chests;
-    if (matched_tile_count) *matched_tile_count = matched_tiles;
+    if (matched_tile_count) *matched_tile_count = matched_tiles + (entity_points ? entity_points->len / sizeof(TxMarkerPoint) : 0u);
+    draw_entity_points_rgb(w, rgb, pw, ph, tile_markers, entity_points);
   }
 
   buf_init(&out, 1024u);
@@ -1945,12 +1982,12 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
 
   if (max_w == 0u && max_h == 0u) {
     return encode_full_preview_rgb_png(
-        w, pw, ph, chest_markers, chest_count, tile_markers, tile_count,
+        w, pw, ph, chest_markers, chest_count, tile_markers, tile_count, NULL,
         matched_chest_count, matched_tile_count);
   }
 
   return encode_marked_preview_png_stream(
       w, pw, ph, stride,
-      chest_markers, chest_count, tile_markers, tile_count,
+      chest_markers, chest_count, tile_markers, tile_count, NULL,
       matched_chest_count, matched_tile_count);
 }

@@ -14,7 +14,18 @@ typedef struct MapMarkerEntry {
     uint8_t radius;
     uint8_t line_width;
     uint8_t reserved[2];
+    /* 0: legacy tile paint; 1: frame anchor; 2: eight-connected vein. */
+    int32_t locate;
+    int32_t frame_x, frame_y, frame_x_mod, frame_y_mod;
 } MapMarkerEntry;
+
+typedef struct TxMarkerPoint {
+    int32_t x, y;
+    uint32_t marker_index;
+} TxMarkerPoint;
+
+int tx_locate_tile_markers(TxWorld* world, const MapMarkerEntry* markers,
+                          uint32_t count, TxBuf* points);
 
 int32_t txw_set_marker_color_index(
     uint32_t handle,

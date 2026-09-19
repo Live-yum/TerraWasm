@@ -333,6 +333,22 @@ const req = JSON.stringify({
 // 调用: terra_op_execute_json(world, "mark_tiles_and_chests_map", req)
 ```
 
+### 实体物块定位标记
+
+`mark_tiles_and_chests_preview` 和 `mark_tiles_and_chests_map` 的 `tile_markers` 支持可选定位模式，颜色、半径和线宽沿用宝箱标记规则：
+
+```js
+{ tile_type: 12, locate: 1, frame_x: 0, frame_y: 0, radius: 30, line_width: 3, color: "#FF3B30FF" }
+{ tile_type: 8, locate: 2, radius: 20, line_width: 2, color: "#FFD700FF" }
+```
+
+- `locate: 0`（默认）保持逐格着色；`1` 按帧挑选物件代表格；`2` 将同种物块八方向相连的一片合并为一个定位点。
+- `frame_x` / `frame_y` 默认 `-1`，表示不筛选；非负值用于精确匹配。可选 `frame_x_mod` / `frame_y_mod` 先对帧坐标取模再匹配，适用于同一物件的多种样式。
+- 同次请求中，`locate: 2` 的 `tile_type` 必须唯一。每片矿脉选择按列扫描遇到的第一个实际矿石格；两种矿石互不合并。
+- 定位直接读取 RLE 方块流，保留相邻列的连通状态，不展开全世界方块数组。PNG 与 MAP 共用定位算法；`matched_tile_count` 统计定位点数量（混用旧模式时加上旧模式匹配格数）。
+
+验证：`node --test tests/test_marker_outputs.js`，包含多格物件、帧样式、斜角/合流矿脉、随机矿区与独立遍历对照、PNG/MAP 样式及内存回收。
+
 ## 设计原则
 
 - **纯 C17**：无 C++ 运行时、无 libc 依赖（手写 memset/memcpy/strlen）

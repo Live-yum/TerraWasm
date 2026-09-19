@@ -1050,7 +1050,7 @@ static int collect_matching_chest_points(
 static const MapMarkerEntry* find_tile_marker(const MapMarkerEntry* markers, uint32_t count,
                                               uint16_t tile_type) {
     for (uint32_t i = 0; i < count; i++) {
-        if (markers[i].id == (int32_t)tile_type)
+        if (!markers[i].locate && markers[i].id == (int32_t)tile_type)
             return &markers[i];
     }
     return NULL;
@@ -1433,6 +1433,8 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     uint32_t tile_matches = 0u;
     MapChestPoint* chest_points = NULL;
     uint32_t chest_point_count = 0u;
+    TxBuf entity_points = { 0 };
+    uint32_t original_chest_count = 0u, entity_count = 0u;
     TxBuf header = { 0 };
     TxBuf staged = { 0 };
     uint8_t* output = NULL;
@@ -1451,6 +1453,37 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     }
     if (!map_layout(w, &width, &height, &cpr, &cpc, &chunk_count, &strip_bytes)) return -1;
     if (!collect_matching_chest_points(w, request, width, height, &chest_points, &chest_point_count)) goto cleanup;
+    original_chest_count = chest_point_count;
+    if (!tx_locate_tile_markers(w, request->tile_markers, request->tile_marker_count, &entity_points)) goto cleanup;
+    entity_count = entity_points.len / sizeof(TxMarkerPoint);
+    if (entity_count) {
+        uint64_t bytes = ((uint64_t)chest_point_count + entity_count) * sizeof(MapChestPoint);
+        if (bytes > UINT32_MAX) {
+            tx_set_error("TERRAX_WASM_OOM", "entity point list exceeds WASM limits");
+            goto cleanup;
+        }
+        MapChestPoint* combined = (MapChestPoint*)tx_alloc((uint32_t)bytes);
+        if (!combined) {
+            tx_set_error("TERRAX_WASM_OOM", "entity map points allocation failed");
+            goto cleanup;
+        }
+        if (chest_point_count) memcpy(combined, chest_points, chest_point_count * sizeof(MapChestPoint));
+        if (chest_points) tx_internal_free(chest_points);
+        chest_points = combined;
+        const TxMarkerPoint* points = (const TxMarkerPoint*)entity_points.data;
+        for (uint32_t i = 0; i < entity_count; i++) {
+            const MapMarkerEntry* marker = &request->tile_markers[points[i].marker_index];
+            MapChestPoint* point = &chest_points[chest_point_count++];
+            memset(point, 0, sizeof(*point));
+            point->x = points[i].x; point->y = points[i].y; point->item_id = -1;
+            point->radius = marker->radius; point->line_width = marker->line_width;
+            point->reserved[0] = 1u;
+            memcpy(point->rgba, marker->rgba, 4u);
+        }
+        tx_internal_free(entity_points.data);
+        entity_points.data = NULL;
+    }
+
 
     if ((uint64_t)chunk_count * sizeof(uint32_t) > UINT32_MAX) {
         tx_set_error("TERRAX_BAD_DIMENSIONS", "map chunk tables exceed WASM limits");
@@ -1589,11 +1622,12 @@ finalized:
     tx_last_width = width;
     tx_last_height = height;
     if (result >= 0) {
-        if (matched_chest_count) *matched_chest_count = chest_point_count;
-        if (matched_tile_count) *matched_tile_count = tile_matches;
+        if (matched_chest_count) *matched_chest_count = original_chest_count;
+        if (matched_tile_count) *matched_tile_count = tile_matches + entity_count;
     }
 
 cleanup:
+    if (entity_points.data) tx_internal_free(entity_points.data);
     if (header.data) tx_internal_free(header.data);
     if (staged.data) tx_internal_free(staged.data);
     if (chunk_sizes) tx_internal_free(chunk_sizes);

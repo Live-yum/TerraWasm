@@ -7,6 +7,7 @@
  */
 #include "terra_types.h"
 #include "terra_map.h"
+#include <string.h>
 
 /* External declarations */
 extern uint8_t* tx_alloc(uint32_t size);
@@ -185,6 +186,31 @@ static int parse_marker_size_field(const char* request, int jlen, int elem,
     return 1;
 }
 
+static int parse_entity_selector(const char* request, int len, MapMarkerEntry* markers, int index) {
+    const char* fields[] = {"locate", "frame_x", "frame_y", "frame_x_mod", "frame_y_mod"};
+    int32_t* values[] = {&markers[index].locate, &markers[index].frame_x, &markers[index].frame_y,
+                         &markers[index].frame_x_mod, &markers[index].frame_y_mod};
+    for (int f = 0; f < 5; f++) {
+        int pos = json_find_key(request, len, fields[f]);
+        if (pos >= 0 && (!json_extract_int(request, len, pos, values[f]) ||
+            *values[f] < (f == 1 || f == 2 ? -1 : 0) || *values[f] > (f == 0 ? 2 : 32767))) {
+            tx_set_error("TERRAX_VALIDATION_ERROR", "invalid entity marker selector");
+            return 0;
+        }
+    }
+    if (markers[index].locate && (markers[index].id < 0 || markers[index].id > 65535)) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "tile_type is out of range");
+        return 0;
+    }
+    for (int j = 0; j < index; j++) {
+        if (markers[index].locate == 2 && markers[j].locate == 2 && markers[j].id == markers[index].id) {
+            tx_set_error("TERRAX_VALIDATION_ERROR", "duplicate vein tile_type");
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int parse_marker_array(const char* request, int jlen,
                               const char* array_key, const char* id_key,
                               MapMarkerEntry** out_markers, uint32_t* out_count) {
@@ -216,6 +242,8 @@ static int parse_marker_array(const char* request, int jlen,
     }
 
     for (int i = 0; i < count; i++) {
+        memset(&markers[i], 0, sizeof(markers[i]));
+        markers[i].frame_x = markers[i].frame_y = -1;
         int elem = json_array_element(request, jlen, array_pos, i);
         if (elem < 0) {
             tx_internal_free(markers);
@@ -266,6 +294,12 @@ static int parse_marker_array(const char* request, int jlen,
         markers[i].rgba[3] = rgba[3];
         markers[i].reserved[0] = 0u;
         markers[i].reserved[1] = 0u;
+        if (strcmp(id_key, "tile_type") == 0) {
+            if (!parse_entity_selector(request + elem, elem_len, markers, i)) {
+                tx_internal_free(markers);
+                return 0;
+            }
+        }
     }
 
     *out_markers = markers;

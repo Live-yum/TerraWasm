@@ -235,6 +235,7 @@ static int encode_cached_scaled_preview_png(
     TxWorld* w, uint32_t pw, uint32_t ph, uint32_t stride,
     const MapMarkerEntry* chest_markers, uint32_t chest_count,
     const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    const TxBuf* entity_points,
     uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
   uint32_t strip_rows = ph < MARKED_PREVIEW_STRIP_ROWS ? ph : MARKED_PREVIEW_STRIP_ROWS;
   uint64_t rgba_cap64 = (uint64_t)stride * ph;
@@ -277,6 +278,9 @@ static int encode_cached_scaled_preview_png(
         w, rgba, pw, ph, tile_markers, tile_count);
     if (matched_tile_count) *matched_tile_count = matched;
   }
+
+  draw_entity_points_rows(w, rgba, pw, ph, 0u, ph, tile_markers, entity_points);
+  if (matched_tile_count && entity_points) *matched_tile_count += entity_points->len / sizeof(TxMarkerPoint);
 
   buf_init(&out, 1024u);
   if (!out.ok || !begin_streamed_png(
@@ -345,9 +349,10 @@ static int encode_cached_scaled_preview_png(
   return set_result_buf(&out);
 }
 
-int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h,
+static int32_t render_located_preview(TxWorld* w, uint32_t max_w, uint32_t max_h,
                                       const MapMarkerEntry* chest_markers, uint32_t chest_count,
                                       const MapMarkerEntry* tile_markers, uint32_t tile_count,
+                                      const TxBuf* entity_points,
                                       uint32_t* matched_chest_count,
                                       uint32_t* matched_tile_count) {
   uint32_t pw = 0u;
@@ -363,7 +368,7 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
   /* Native-size previews already have a dedicated single-scan RGB path. */
   if (max_w == 0u && max_h == 0u) {
     return encode_full_preview_rgb_png(
-        w, pw, ph, chest_markers, chest_count, tile_markers, tile_count,
+        w, pw, ph, chest_markers, chest_count, tile_markers, tile_count, entity_points,
         matched_chest_count, matched_tile_count);
   }
 
@@ -373,7 +378,7 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
       (uint64_t)stride * ph <= SCALED_PREVIEW_CACHE_BUDGET) {
     int cached = encode_cached_scaled_preview_png(
         w, pw, ph, stride,
-        chest_markers, chest_count, tile_markers, tile_count,
+        chest_markers, chest_count, tile_markers, tile_count, entity_points,
         matched_chest_count, matched_tile_count);
     if (cached != SCALED_PREVIEW_CACHE_UNAVAILABLE) return cached;
     tx_clear_error();
@@ -381,6 +386,18 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
 
   return encode_marked_preview_png_stream(
       w, pw, ph, stride,
-      chest_markers, chest_count, tile_markers, tile_count,
+      chest_markers, chest_count, tile_markers, tile_count, entity_points,
       matched_chest_count, matched_tile_count);
+}
+
+int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h,
+    const MapMarkerEntry* chest_markers, uint32_t chest_count,
+    const MapMarkerEntry* tile_markers, uint32_t tile_count,
+    uint32_t* matched_chest_count, uint32_t* matched_tile_count) {
+  TxBuf points = {0};
+  if (!tx_locate_tile_markers(w, tile_markers, tile_count, &points)) return -1;
+  int32_t result = render_located_preview(w, max_w, max_h, chest_markers, chest_count,
+      tile_markers, tile_count, &points, matched_chest_count, matched_tile_count);
+  if (points.data) tx_internal_free(points.data);
+  return result;
 }
