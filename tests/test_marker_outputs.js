@@ -1221,3 +1221,73 @@ test('streaming veins match an independent eight-neighbour flood fill and releas
     assert.equal(M._tx_native_heap_used()>>>0,baseline, 'all location buffers released');
   }
 });
+
+function decodeMapCells(bytes) {
+  assert.equal(bytes.readUInt32LE(0), 33083);
+  let offset = 24, nameLength = 0, shift = 0, byte;
+  do { byte = bytes[offset++]; nameLength |= (byte & 127) << shift; shift += 7; } while (byte & 128);
+  offset += nameLength + 4;
+  const height = bytes.readUInt32LE(offset), width = bytes.readUInt32LE(offset + 4);
+  offset += 8;
+  const tileCount = bytes.readUInt16LE(offset), wallCount = bytes.readUInt16LE(offset + 2);
+  offset += 12;
+  let typeCounts = 0;
+  for (const count of [tileCount, wallCount]) {
+    for (let i = 0; i < count; i++) typeCounts += (bytes[offset + (i >> 3)] >> (i & 7)) & 1;
+    offset += Math.ceil(count / 8);
+  }
+  offset += typeCounts;
+  const cells = new Uint32Array(width * height);
+  for (let cy = 0; cy < Math.ceil(height / 64); cy++) for (let cx = 0; cx < Math.ceil(width / 64); cx++) {
+    const length = bytes.readUInt32LE(offset); offset += 4;
+    const chunk = zlib.inflateSync(bytes.subarray(offset, offset + length)); offset += length;
+    assert.equal(chunk.length, 4096 * 4);
+    for (let y = 0; y < 64 && cy * 64 + y < height; y++) for (let x = 0; x < 64 && cx * 64 + x < width; x++) {
+      cells[(cy * 64 + y) * width + cx * 64 + x] = chunk.readUInt32LE((y * 64 + x) * 4);
+    }
+  }
+  assert.equal(offset, bytes.length);
+  return (x, y) => cells[y * width + x];
+}
+
+test('entity PNG and MAP use icon pixels, retain rings, and invalidate locations after replacement', async () => {
+  const M = await loadModule(); M._tx_reset_heap();
+  const baseline = M._tx_heap_used();
+  const opened = openWorld(M, makeEntityWorld());
+  const marker = {tile_type:12,locate:1,frame_x:0,frame_y:0,icon_id:1000000,radius:12,line_width:2,color:'#FF00FFFF'};
+  const run = (name, request) => {
+    const result = executeOperation(M, opened.handle, name, request);
+    assert.equal(result.status, 0);
+    return JSON.parse(result.value);
+  };
+  try {
+    installSolidMarkerIcon(M, opened.handle, marker.icon_id, [0, 255, 0, 255]);
+    for (const max_w of [0,64,128]) {
+      assert.equal(run('mark_tiles_and_chests_preview', {tile_markers:[marker],max_w}).matched_tile_count, 1);
+      const png = getThumbnailPng(M, opened.handle).png;
+      const image = max_w === 0 ? decodePngRgb(png) : decodePngRgba(png);
+      assert.deepEqual(Array.from(pixelAt(image, Math.floor(50*image.width/128), Math.floor(40*image.height/300)).slice(0,3)), [0,255,0]);
+      if (max_w === 0) assert.deepEqual(Array.from(pixelAt(image,62,40).slice(0,3)), [255,0,255]);
+      M._tx_reclaim_transients();
+    }
+    installMarkerColorIndex(M, opened.handle);
+    run('mark_tiles_and_chests_map', {tile_markers:[marker]});
+    const withIcon = getMapBytes(M, opened.handle).map;
+    const iconCells = decodeMapCells(withIcon);
+    M._txw_clear_icon_atlas(opened.handle);
+    run('mark_tiles_and_chests_map', {tile_markers:[marker]});
+    const plainCells = decodeMapCells(getMapBytes(M, opened.handle).map);
+    assert.notEqual(iconCells(50,40), plainCells(50,40), 'icon center must overwrite the actual map tile');
+    assert.equal(iconCells(62,40), plainCells(62,40), 'circle remains unchanged');
+    assert.equal(iconCells(80,40), plainCells(80,40), 'outside stays unchanged');
+    run('mark_tiles_and_chests_map', {tile_markers:[{...marker,color:'#00FF00FF'}]});
+    const greenCells = decodeMapCells(getMapBytes(M, opened.handle).map);
+    assert.equal(iconCells(50,40), greenCells(62,40), 'green image pixel uses the green palette map tile');
+    run('batch_update_tiles', {rules:[{where:{is_active:true,type:12},patch:{type:1}}]});
+    assert.equal(run('mark_tiles_and_chests_preview', {tile_markers:[marker],max_w:64}).matched_tile_count, 0);
+    getThumbnailPng(M, opened.handle);
+    assert.equal(run('mark_tiles_and_chests_map', {tile_markers:[marker]}).matched_tile_count, 0);
+    getMapBytes(M, opened.handle);
+  } finally { closeWorld(M, opened); }
+  assert.equal(M._tx_heap_used(), baseline, 'retained locations and atlas must be released on close');
+});

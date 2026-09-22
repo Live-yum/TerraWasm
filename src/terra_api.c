@@ -467,6 +467,7 @@ terrax_world_status terra_world_close(
 
     uint32_t allocation_mark = world->allocation_mark;
     if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
+    if (world->entity_marker_cache.data) tx_internal_free(world->entity_marker_cache.data);
     txw_clear_marker_color_index(world);
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();

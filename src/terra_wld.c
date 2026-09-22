@@ -960,6 +960,11 @@ int section_index_by_name(const char *name,uint32_t len){
         tx_set_error("TERRAX_SECTION_SET_NOT_SUPPORTED","section index out of range");
         return 0;
         }
+    if (idx == 1 && w->entity_marker_cache.data) {
+        tx_internal_free(w->entity_marker_cache.data);
+        memset(&w->entity_marker_cache, 0, sizeof(w->entity_marker_cache));
+        w->entity_marker_key_bytes = 0u;
+    }
     if (w->section_overrides[idx].active&&w->section_overrides[idx].data&&
         w->section_overrides[idx].data!=data)
         tx_internal_free(w->section_overrides[idx].data);

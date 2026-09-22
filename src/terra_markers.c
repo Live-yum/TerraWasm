@@ -7,6 +7,7 @@ extern void buf_init(TxBuf*, uint32_t);
 extern void buf_bytes(TxBuf*, const void*, uint32_t);
 extern int read_tile_at(TxWorld*, uint32_t*, uint32_t, TxTile*);
 extern void tx_set_error(const char*, const char*);
+extern uint32_t tx_mark(void);
 
 typedef struct MarkerRun { uint32_t start, end, label; } MarkerRun;
 typedef struct MarkerNode { uint32_t parent, marker; int32_t x, y; } MarkerNode;
@@ -32,7 +33,7 @@ static int append_marker_point(TxBuf* points, int32_t x, int32_t y, uint32_t mar
 /* WLD is column-major RLE. Components are joined against the previous column
  * (including diagonal contacts), then retired as soon as they leave the frontier.
  * Memory is O(world height + resulting points), never a full tile grid. */
-int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
+static int scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
                           uint32_t count, TxBuf* points) {
     uint32_t enabled = 0u, clustered = 0u;
     memset(points, 0, sizeof(*points));
@@ -46,12 +47,25 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
     MarkerRun *prev = NULL, *curr = NULL;
     MarkerNode *nodes = NULL, *next = NULL;
     uint32_t* remap = NULL;
+    uint16_t* by_type = NULL;
+    uint16_t next_marker[256];
+    uint32_t type_count = 0u;
     uint32_t prev_count = 0u, node_count = 0u;
     uint8_t* saved_file = w->file;
     uint32_t saved_len = w->file_len, off = w->starts[1], end = w->ends[1];
     int ok = 0;
     buf_init(points, 1024u);
     if (!points->ok) goto cleanup;
+    for (uint32_t m = 0; m < count; m++)
+        if (markers[m].locate && (uint32_t)markers[m].id >= type_count) type_count = (uint32_t)markers[m].id + 1u;
+    by_type = (uint16_t*)tx_alloc(type_count * sizeof(uint16_t));
+    if (!by_type) goto cleanup;
+    memset(by_type, 0xff, type_count * sizeof(uint16_t));
+    for (uint32_t m = count; m-- > 0u;) {
+        if (!markers[m].locate) continue;
+        next_marker[m] = by_type[markers[m].id];
+        by_type[markers[m].id] = (uint16_t)m;
+    }
     if (clustered) {
         prev = (MarkerRun*)tx_alloc(height * sizeof(MarkerRun));
         curr = (MarkerRun*)tx_alloc(height * sizeof(MarkerRun));
@@ -75,7 +89,8 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
                 goto cleanup;
             }
             uint32_t run = (uint32_t)tile.same + 1u;
-            for (uint32_t m = 0; tile.active && m < count; m++) {
+            for (uint32_t m = tile.active && tile.type < type_count ? by_type[tile.type] : UINT16_MAX;
+                 m != UINT16_MAX; m = next_marker[m]) {
                 const MapMarkerEntry* marker = &markers[m];
                 if (!marker->locate || marker->id != tile.type ||
                     !marker_frame_matches(tile.frame_x, marker->frame_x, marker->frame_x_mod) ||
@@ -141,10 +156,47 @@ cleanup:
     if (nodes) tx_internal_free(nodes);
     if (next) tx_internal_free(next);
     if (remap) tx_internal_free(remap);
+    if (by_type) tx_internal_free(by_type);
     if (!ok) {
         if (points->data) tx_internal_free(points->data);
         memset(points, 0, sizeof(*points));
         tx_set_error("TERRAX_ENTITY_LOCATION_FAILED", "entity stream is invalid or location memory exhausted");
     }
     return ok;
+}
+
+int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
+                          uint32_t count, TxBuf* points) {
+    uint32_t key_bytes = count * sizeof(MapMarkerEntry);
+    TxBuf* cache = &w->entity_marker_cache;
+    memset(points, 0, sizeof(*points));
+    if (!count) return 1;
+    if (cache->data && w->entity_marker_key_bytes == key_bytes &&
+        memcmp(cache->data, markers, key_bytes) == 0) {
+        buf_init(points, cache->len - key_bytes);
+        buf_bytes(points, cache->data + key_bytes, cache->len - key_bytes);
+        if (points->ok) return 1;
+        if (points->data) tx_internal_free(points->data);
+        memset(points, 0, sizeof(*points));
+        tx_set_error("TERRAX_WASM_OOM", "entity point cache copy failed");
+        return 0;
+    }
+    if (cache->data) tx_internal_free(cache->data);
+    memset(cache, 0, sizeof(*cache));
+    w->entity_marker_key_bytes = 0u;
+    if (!scan_tile_markers(w, markers, count, points)) return 0;
+    /* ponytail: bound retained points to 2 MiB; larger selections rescan.
+     * Tile overrides and world close invalidate this cache. */
+    if (points->len <= 2u * 1024u * 1024u - key_bytes) {
+        cache->data = tx_alloc(key_bytes + points->len);
+        if (cache->data) {
+            memcpy(cache->data, markers, key_bytes);
+            if (points->len) memcpy(cache->data + key_bytes, points->data, points->len);
+            cache->len = cache->cap = key_bytes + points->len;
+            cache->ok = 1;
+            w->entity_marker_key_bytes = key_bytes;
+            w->heap_mark = tx_mark();
+        }
+    }
+    return 1;
 }

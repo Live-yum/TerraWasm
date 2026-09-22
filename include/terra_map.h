@@ -9,6 +9,7 @@
 
 typedef struct MapMarkerEntry {
     int32_t id;
+    int32_t icon_id; /* -1 when no entity image was supplied */
     uint32_t map_value; /* legacy fallback; marker RGB is resolved at MAP render time */
     uint8_t rgba[4];
     uint8_t radius;

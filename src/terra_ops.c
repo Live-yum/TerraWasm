@@ -243,6 +243,7 @@ static int parse_marker_array(const char* request, int jlen,
 
     for (int i = 0; i < count; i++) {
         memset(&markers[i], 0, sizeof(markers[i]));
+        markers[i].icon_id = -1;
         markers[i].frame_x = markers[i].frame_y = -1;
         int elem = json_array_element(request, jlen, array_pos, i);
         if (elem < 0) {
@@ -287,6 +288,13 @@ static int parse_marker_array(const char* request, int jlen,
             return 0;
         }
         markers[i].id = id;
+        int icon_pos = json_find_key(request + elem, elem_len, "icon_id");
+        if (icon_pos >= 0 && (!json_extract_int(request + elem, elem_len, icon_pos, &markers[i].icon_id) ||
+            markers[i].icon_id < 0)) {
+            tx_internal_free(markers);
+            tx_set_error("TERRAX_VALIDATION_ERROR", "icon_id must be a non-negative integer");
+            return 0;
+        }
         markers[i].map_value = map_value;
         markers[i].rgba[0] = rgba[0];
         markers[i].rgba[1] = rgba[1];

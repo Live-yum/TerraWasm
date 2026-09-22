@@ -402,6 +402,8 @@ typedef struct TxWorld {
 
     /* Marker item thumbnails owned by the active world session. */
     TxIconAtlas icon_atlas;
+    TxBuf entity_marker_cache; /* selector bytes followed by compact points */
+    uint32_t entity_marker_key_bytes;
 
     /* Optional TXCI palette used when marker colors are written to MAP. */
     TxciIndex marker_color_index;

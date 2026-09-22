@@ -390,14 +390,8 @@ static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32
  * ==================================================================== */
 
 static uint32_t adler32_bytes(const uint8_t* data, uint32_t length) {
-  uint32_t a = 1u, b = 0u;
-  for (uint32_t i = 0; i < length; i++) {
-    a += data[i];
-    if (a >= 65521u) a -= 65521u;
-    b += a;
-    if (b >= 65521u) b %= 65521u;
-  }
-  return ((b << 16) | a) & 0xffffffffu;
+  extern unsigned long adler32(unsigned long, const uint8_t*, unsigned int);
+  return (uint32_t)adler32(1u, data, length);
 }
 
 /* ====================================================================
@@ -1307,6 +1301,9 @@ static void draw_entity_points_rows(TxWorld* w, uint8_t* rgba, uint32_t pw, uint
     const TxMarkerPoint* point = &entries[i];
     draw_marker_ring_rows(rgba, pw, ph, row_start, row_count,
         w->maxTilesX, w->maxTilesY, point->x, point->y, &markers[point->marker_index]);
+    draw_marker_icon_rows(w, rgba, pw, ph, row_start, row_count,
+        w->maxTilesX, w->maxTilesY, point->x, point->y,
+        markers[point->marker_index].icon_id, &markers[point->marker_index]);
   }
 }
 
@@ -1322,6 +1319,8 @@ static void draw_entity_points_rgb(TxWorld* w, uint8_t* rgb, uint32_t pw, uint32
         clamp_preview_coord(point->y, w->maxTilesY, ph),
         scale_marker_measure(marker->radius, w->maxTilesX, w->maxTilesY, pw, ph),
         scale_marker_measure(marker->line_width, w->maxTilesX, w->maxTilesY, pw, ph), marker->rgba);
+    draw_marker_icon_rgb(w, rgb, pw, ph, w->maxTilesX, w->maxTilesY,
+        point->x, point->y, marker->icon_id, marker);
   }
 }
 
@@ -1654,12 +1653,10 @@ typedef struct TxPngDeflateStream {
 
 static void png_deflate_adler_update(TxPngDeflateStream* stream,
                                      const uint8_t* data, uint32_t len) {
-  for (uint32_t i = 0u; i < len; i++) {
-    stream->adler_a += data[i];
-    if (stream->adler_a >= 65521u) stream->adler_a -= 65521u;
-    stream->adler_b += stream->adler_a;
-    if (stream->adler_b >= 65521u) stream->adler_b %= 65521u;
-  }
+  extern unsigned long adler32(unsigned long, const uint8_t*, unsigned int);
+  uint32_t checksum = (uint32_t)adler32((stream->adler_b << 16u) | stream->adler_a, data, len);
+  stream->adler_a = checksum & 65535u;
+  stream->adler_b = checksum >> 16u;
 }
 
 static void png_deflate_init(TxPngDeflateStream* stream, TxBuf* out) {
