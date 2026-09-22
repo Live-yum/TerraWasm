@@ -114,6 +114,7 @@ static const uint32_t HALLOW_WALLS_COUNT = sizeof(HALLOW_WALLS)/sizeof(HALLOW_WA
 static void init_tile_rule(TxTileRule* rule) {
     memset(rule, 0, sizeof(TxTileRule));
     rule->is_active = -1;
+    rule->has_wall = -1;
     rule->type = -1;
     rule->wall = -1;
     rule->liquid_amount = -1;
@@ -182,6 +183,7 @@ static int generate_biome_rules(int mode, TxTileRule* out_rules, int out_size) {
 
 static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
     if (rule->is_active >= 0 && (int32_t)t->active != rule->is_active) return 0;
+    if (rule->has_wall >= 0 && (t->wall != 0) != rule->has_wall) return 0;
     if (rule->type >= 0 && (int32_t)t->type != rule->type) return 0;
     if (rule->wall >= 0 && (int32_t)t->wall != rule->wall) return 0;
     if (rule->liquid_amount >= 0 && (int32_t)t->liquid_amount != rule->liquid_amount) return 0;
@@ -598,6 +600,17 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                 TRY_MATCH_BOOL(fullbright_block, "fullbright_block")
                 TRY_MATCH_BOOL(fullbright_wall, "fullbright_wall")
                 #undef TRY_MATCH_BOOL
+                wp = json_find_key(request + where_pos, where_len, "has_wall");
+                if (wp >= 0) {
+                    if (json_extract_bool(request, jlen, wp + where_pos, &bv)) iv = bv;
+                    else if (!json_extract_int(request, jlen, wp + where_pos, &iv)) iv = -1;
+                    if (iv < 0 || iv > 1) {
+                        tx_internal_free(rules);
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "has_wall must be boolean or 0/1");
+                        return -1;
+                    }
+                    rules[r].has_wall = iv;
+                }
             }
             int patch_pos = json_find_key(request + elem_pos, elem_len, "patch");
             if (patch_pos >= 0) {

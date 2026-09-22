@@ -1126,18 +1126,25 @@ function makeEntityWorld(customCells) {
   object(50,140,26,3,2); object(60,140,26,3,2,54);
   if (customCells) { cells.clear(); for (const [key,value] of customCells) cells.set(key,value); }
   const important = Buffer.alloc(88);
-  for(const type of [12,236,187,186,31,26]) important[type>>3] |= 1 << (type&7);
+  for(const type of [12,236,187,186,31,26,21,467,441,468]) important[type>>3] |= 1 << (type&7);
   const data=[];
   for(let x=0;x<width;x++) for(let y=0;y<height;) {
     const tile=cells.get(`${x},${y}`);
     let run=1;
     while(y+run<height && JSON.stringify(cells.get(`${x},${y+run}`))===JSON.stringify(tile)) run++;
     const rle=run>256?128:run>1?64:0;
-    data.push(rle | (tile ? 2 | (tile.type>255?32:0) : 0));
-    if(tile) {
+    const active = tile?.type !== undefined;
+    const f4 = (tile?.invisible_block ? 2 : 0) | (tile?.invisible_wall ? 4 : 0);
+    const f3 = (f4 ? 1 : 0) | (tile?.color ? 8 : 0) | (tile?.wallColor ? 16 : 0);
+    data.push(rle | (active ? 2 | (tile.type>255?32:0) : 0) | (tile?.wall ? 4 : 0) | (f3 ? 1 : 0));
+    if(f3) data.push(1, f3);
+    if(f4) data.push(f4);
+    if(active) {
       data.push(tile.type&255); if(tile.type>255) data.push(tile.type>>8);
       if(important[tile.type>>3] & (1<<(tile.type&7))) data.push(tile.fx&255,tile.fx>>8,tile.fy&255,tile.fy>>8);
+      if(tile.color) data.push(tile.color);
     }
+    if(tile?.wall) { data.push(tile.wall); if(tile.wallColor) data.push(tile.wallColor); }
     if(rle) data.push((run-1)&255); if(rle===128) data.push((run-1)>>8);
     y+=run;
   }
@@ -1346,4 +1353,50 @@ test('entity PNG and MAP use icon pixels, retain rings, and invalidate locations
     getMapBytes(M, opened.handle);
   } finally { closeWorld(M, opened); }
   assert.equal(M._tx_heap_used(), baseline, 'retained locations and atlas must be released on close');
+});
+
+test('transparent presets preserve every chest frame and color and never coat absent surfaces', async () => {
+  const presets=[
+    {id:'transparent-chests',rules:[21,467,441,468].map(type=>({where:{is_active:1,type},patch:{invisible_block:1}}))},
+    {id:'transparent-world',rules:[{where:{is_active:1},patch:{invisible_block:1}},{where:{has_wall:1},patch:{invisible_wall:1}}]},
+  ];
+  const cells=new Map();
+  for (const [i,type] of [21,467,441,468].entries()) for(let dx=0;dx<2;dx++) for(let dy=0;dy<2;dy++)
+    cells.set(`${10+i*8+dx},${40+dy}`,{type,fx:108+dx*18,fy:dy*18,color:14,wall:87,wallColor:7});
+  cells.set('50,60',{type:1,wall:7,color:3,wallColor:9});
+  cells.set('51,60',{wall:7,wallColor:9});
+  cells.set('52,60',{type:8});
+  const M=await loadModule();
+  const tileBytes=b=>b.subarray(b.readUInt32LE(10),b.readUInt32LE(14));
+  for(const preset of presets) {
+    const opened=openWorld(M,makeEntityWorld(cells));
+    try {
+      const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:preset.rules});
+      assert.equal(result.status,0,result.status?JSON.stringify(readLastErrorJson(M)):undefined);
+      const expected=new Map([...cells].map(([key,tile])=>{
+        const next={...tile};
+        if(preset.id==='transparent-world') {
+          if(tile.type!==undefined) next.invisible_block=1;
+          if(tile.wall) next.invisible_wall=1;
+        } else if([21,467,441,468].includes(tile.type)) next.invisible_block=1;
+        return [key,next];
+      }));
+      const sizePtr=mustAlloc(M,4,'size'), handlePtr=mustAlloc(M,4,'handle');
+      let ptr=0;
+      try {
+        assert.equal(M._terra_world_commit_to_buffer(opened.handle,0,0,sizePtr,handlePtr),0);
+        const size=readU32(M,sizePtr); ptr=mustAlloc(M,size,'bytes');
+        assert.equal(M._terra_world_commit_to_buffer(opened.handle,ptr,size,sizePtr,handlePtr),0);
+        opened.handle=readU32(M,handlePtr);
+        assert.deepEqual(tileBytes(Buffer.from(M.HEAPU8.subarray(ptr,ptr+size))),tileBytes(makeEntityWorld(expected)),preset.id);
+      } finally {if(ptr)M._tx_free(ptr);M._tx_free(handlePtr);M._tx_free(sizePtr);}
+    } finally {closeWorld(M,opened);}
+  }
+  const opened=openWorld(M,makeEntityWorld(cells));
+  try {
+    for(const has_wall of ['bad',2,-1,null]) {
+      const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{has_wall},patch:{invisible_wall:1}}]});
+      assert.notEqual(result.status,0,'invalid has_wall must not silently paint all tiles');
+    }
+  } finally {closeWorld(M,opened);}
 });
