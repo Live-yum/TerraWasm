@@ -1,4 +1,5 @@
 #include "terra_map.h"
+#include "terra_output.h"
 #include <string.h>
 
 extern uint8_t* tx_alloc(uint32_t);
@@ -33,15 +34,15 @@ static int append_marker_point(TxBuf* points, int32_t x, int32_t y, uint32_t mar
 /* WLD is column-major RLE. Components are joined against the previous column
  * (including diagonal contacts), then retired as soon as they leave the frontier.
  * Memory is O(world height + resulting points), never a full tile grid. */
-static int scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
-                          uint32_t count, TxBuf* points) {
+int tx_scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
+                          uint32_t count, TxBuf* points, TxTileVisitor visit, void* context) {
     uint32_t enabled = 0u, clustered = 0u;
     memset(points, 0, sizeof(*points));
     for (uint32_t i = 0; i < count; i++) {
         enabled |= markers[i].locate != 0;
         clustered |= markers[i].locate == 2;
     }
-    if (!enabled) return 1;
+    if (!enabled && !visit) return 1;
     uint32_t height = (uint32_t)w->maxTilesY, width = (uint32_t)w->maxTilesX;
     if (!height || !width || height > UINT32_MAX / (2u * sizeof(MarkerNode))) return 0;
     MarkerRun *prev = NULL, *curr = NULL;
@@ -58,7 +59,7 @@ static int scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
     if (!points->ok) goto cleanup;
     for (uint32_t m = 0; m < count; m++)
         if (markers[m].locate && (uint32_t)markers[m].id >= type_count) type_count = (uint32_t)markers[m].id + 1u;
-    by_type = (uint16_t*)tx_alloc(type_count * sizeof(uint16_t));
+    by_type = (uint16_t*)tx_alloc((type_count ? type_count : 1u) * sizeof(uint16_t));
     if (!by_type) goto cleanup;
     memset(by_type, 0xff, type_count * sizeof(uint16_t));
     for (uint32_t m = count; m-- > 0u;) {
@@ -89,6 +90,7 @@ static int scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
                 goto cleanup;
             }
             uint32_t run = (uint32_t)tile.same + 1u;
+            if (visit && !visit(w, x, y, &tile, run, context)) goto cleanup;
             for (uint32_t m = tile.active && tile.type < type_count ? by_type[tile.type] : UINT16_MAX;
                  m != UINT16_MAX; m = next_marker[m]) {
                 const MapMarkerEntry* marker = &markers[m];
@@ -171,6 +173,13 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
     TxBuf* cache = &w->entity_marker_cache;
     memset(points, 0, sizeof(*points));
     if (!count) return 1;
+    const TxPreparedOutput* prepared = w->prepared_output;
+    if (prepared && prepared->ready && prepared->marker_count == count &&
+        memcmp(prepared->markers, markers, key_bytes) == 0) {
+        buf_init(points, prepared->points.len);
+        if (prepared->points.len) buf_bytes(points, prepared->points.data, prepared->points.len);
+        return points->ok;
+    }
     if (cache->data && w->entity_marker_key_bytes == key_bytes &&
         memcmp(cache->data, markers, key_bytes) == 0) {
         buf_init(points, cache->len - key_bytes);
@@ -184,7 +193,7 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
     if (cache->data) tx_internal_free(cache->data);
     memset(cache, 0, sizeof(*cache));
     w->entity_marker_key_bytes = 0u;
-    if (!scan_tile_markers(w, markers, count, points)) return 0;
+    if (!tx_scan_tile_markers(w, markers, count, points, NULL, NULL)) return 0;
     /* ponytail: bound retained points to 2 MiB; larger selections rescan.
      * Tile overrides and world close invalidate this cache. */
     if (points->len <= 2u * 1024u * 1024u - key_bytes) {

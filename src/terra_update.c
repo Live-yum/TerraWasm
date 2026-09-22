@@ -1,3 +1,4 @@
+#include "terra_output.h"
 /*
  * terra_update.c -- Streaming tile modifications with batch updates.
  *
@@ -350,6 +351,17 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
     return out->ok;
 }
 
+void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run) {
+    for (uint32_t r = 0; r < rule_count; r++) {
+        if (!tile_matches_where(t, &rules[r])) continue;
+        rules[r].matched += run;
+        if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
+            apply_tile_patch(t, &rules[r]);
+            rules[r].updated += run;
+        }
+    }
+}
+
 int rebuild_tile_section(TxWorld* w, TxBuf* out,
                          TxTileRule* rules, uint32_t rule_count) {
     if (!w || !w->file || w->file_len == 0) {
@@ -361,6 +373,8 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
     if (!out || !out->ok) {
         tx_set_error("TERRAX_INTERNAL_ERROR", "output buffer not initialized"); return 0;
     }
+    if (w->prepared_output && !w->prepared_output->ready && !world_has_pixel_art(w))
+        return tx_output_scan(w, rules, rule_count, out);
     const uint8_t* tile_src;
     uint32_t tile_src_len;
     uint32_t off, end;
@@ -387,16 +401,7 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
             if (!read_tile_at(w, &off, end, &t)) break;
             uint32_t run = (uint32_t)t.same + 1u;
 
-            /* Apply batch update rules */
-            for (uint32_t r = 0; r < rule_count; r++) {
-                if (tile_matches_where(&t, &rules[r])) {
-                    rules[r].matched += run;
-                    if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
-                        apply_tile_patch(&t, &rules[r]);
-                        rules[r].updated += run;
-                    }
-                }
-            }
+            tx_apply_tile_rules(&t, rules, rule_count, run);
 
             /* Check if this tile falls in the pixel art region.
              * If the run spans the pixel art area, we need to split it. */
@@ -644,6 +649,7 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
         }
     }
 
+    if (w->prepared_output && w->prepared_output->ready) tx_output_clear(w);
     uint32_t batch_cap = w->section_overrides[1].active
         ? w->section_overrides[1].len : (w->ends[1] - w->starts[1]);
     TxBuf tile_buf;
@@ -657,13 +663,16 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
         tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed");
         return -1;
     }
+    w->output_capture = w->prepared_output && w->prepared_output->ready;
     extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
     if (!set_section_override_data(w, 1, tile_buf.data, tile_buf.len)) {
+        w->output_capture = 0;
         tx_internal_free(tile_buf.data);
         tx_internal_free(rules);
         return -1;
     }
 
+    w->output_capture = 0;
     uint32_t total_matched = 0, total_updated = 0;
     buf_cstr(response, "{\"status\":\"ok\",\"rule_count\":");
     json_u32(response, (uint32_t)rule_count);

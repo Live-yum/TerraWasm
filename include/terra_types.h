@@ -68,6 +68,7 @@ typedef struct TxHeaderBoolField {
 } TxHeaderBoolField;
 
 typedef struct TxPixelArtChunk TxPixelArtChunk;
+typedef struct TxPreparedOutput TxPreparedOutput;
 
 typedef struct TxIconAtlas {
     uint8_t* rgba;
@@ -404,6 +405,9 @@ typedef struct TxWorld {
     TxIconAtlas icon_atlas;
     TxBuf entity_marker_cache; /* selector bytes followed by compact points */
     uint32_t entity_marker_key_bytes;
+    TxPreparedOutput* prepared_output;
+    uint32_t output_capture;
+    uint32_t tile_decode_calls;
 
     /* Optional TXCI palette used when marker colors are written to MAP. */
     TxciIndex marker_color_index;

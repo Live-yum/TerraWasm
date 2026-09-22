@@ -1,3 +1,4 @@
+#include "terra_output.h"
 /* * terra_wld.c -- WLD binary parser for TerraWasm. * * Pure C implementation that parses raw .wld bytes int o TxWorld metadata, * streams tiles on-demand, and provides JSON serializers/deserializers * for all 11 world sections matching the TerraX V2 API. * * Uses bump allocator from terra_mem.c (tx_malloc, tx_alloc, TxBuf). * Uses json_string, json_u32, etc. from terra_json.c for JSON output. */
 
 #include "terra_types.h"
@@ -181,7 +182,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
         }
     (void)terra_reader_take(off,slen,len);
     }
-/* ==================================================================== * Tile importance lookup * ==================================================================== */static int tile_important(TxWorld *w,uint16_t type){
+/* ==================================================================== * Tile importance lookup * ==================================================================== */int tile_important(TxWorld *w,uint16_t type){
     if (!w||type>=w->tile_type_count)return 0;
     uint32_t idx=type>>3;
     if (idx>=w->important_len)return 0;
@@ -782,6 +783,7 @@ int parse_header(TxWorld *w){
     return 0;
 }
 /* ==================================================================== * read_tile_at -- Stream one tile from the binary * ==================================================================== */int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t){
+    w->tile_decode_calls++;
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     if (*off>=end||*off>=len) return 0;
@@ -960,6 +962,7 @@ int section_index_by_name(const char *name,uint32_t len){
         tx_set_error("TERRAX_SECTION_SET_NOT_SUPPORTED","section index out of range");
         return 0;
         }
+    if (!w->output_capture) tx_output_clear(w);
     if (idx == 1 && w->entity_marker_cache.data) {
         tx_internal_free(w->entity_marker_cache.data);
         memset(&w->entity_marker_cache, 0, sizeof(w->entity_marker_cache));

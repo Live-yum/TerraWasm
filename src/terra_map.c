@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #include "terra_types.h"
+#include "terra_output.h"
 #include "terra_map.h"
 #include "terra_icon.h"
 #include "terra_color_data.h"
@@ -1201,6 +1202,91 @@ static int compress_chunk_exact(const uint32_t* raw_chunk, TxBuf* compressed) {
 
 typedef int (*MapChunkSink)(uint32_t chunk_index, const uint8_t* data, uint32_t size, void* context);
 
+struct TxPreparedMap {
+    uint32_t width, height, cpr, cpc, chunks, strip_bytes;
+    uint32_t *strip, *offsets, *sizes;
+    uint8_t* bytes;
+    uint32_t length, capacity;
+};
+
+void tx_map_base_free(TxPreparedMap* p) {
+    if (!p) return;
+    tx_persistent_free(p->strip);
+    tx_persistent_free(p->offsets);
+    tx_persistent_free(p->sizes);
+    tx_persistent_free(p->bytes);
+    tx_persistent_free(p);
+}
+
+TxPreparedMap* tx_map_base_begin(TxWorld* w) {
+    TxPreparedMap* p = (TxPreparedMap*)tx_persistent_alloc(sizeof(*p));
+    if (!p) goto oom;
+    memset(p, 0, sizeof(*p));
+    if (!map_layout(w, &p->width, &p->height, &p->cpr, &p->cpc, &p->chunks, &p->strip_bytes)) {
+        tx_map_base_free(p); return NULL;
+    }
+    p->strip = (uint32_t*)tx_persistent_alloc(p->strip_bytes);
+    p->offsets = (uint32_t*)tx_persistent_alloc(p->chunks * 4u);
+    p->sizes = (uint32_t*)tx_persistent_alloc(p->chunks * 4u);
+    if (p->strip && p->offsets && p->sizes) return p;
+oom:
+    tx_map_base_free(p);
+    tx_set_error("TERRAX_WASM_OOM", "prepared map allocation failed");
+    return NULL;
+}
+
+int tx_map_base_run(TxWorld* w, TxPreparedMap* p, uint32_t x, uint32_t y,
+                    const TxTile* tile, uint32_t run) {
+    uint32_t cx = x / 64u;
+    if (!(x % 64u) && !y)
+        prefill_chunk_strip_background(p->strip, p->cpc, cx, p->width, p->height,
+                                       w->worldSurface, w->rockLayer);
+    uint32_t value = map_value_for_tile(tile);
+    if (value & 65535u) fill_chunk_strip_run(p->strip, x % 64u, p->height, y, run, value);
+    if (y + run != p->height || (x % 64u != 63u && x + 1u != p->width)) return 1;
+    for (uint32_t cy = 0; cy < p->cpc; cy++) {
+        TxBuf compressed = {0};
+        if (!compress_chunk_exact(p->strip + cy * 4096u, &compressed)) return 0;
+        uint32_t required = p->length + compressed.len;
+        if (required > 32u * 1024u * 1024u) {
+            tx_internal_free(compressed.data);
+            tx_set_error("TERRAX_RESULT_TOO_LARGE", "prepared MAP exceeds the 32 MiB budget");
+            return 0;
+        }
+        if (required > p->capacity) {
+            uint32_t cap = p->capacity ? p->capacity * 2u : 65536u;
+            if (cap < required) cap = required;
+            if (cap > 32u * 1024u * 1024u) cap = 32u * 1024u * 1024u;
+            void* next = tx_persistent_realloc(p->bytes, cap);
+            if (!next) {
+                tx_internal_free(compressed.data);
+                tx_set_error("TERRAX_WASM_OOM", "prepared MAP growth failed"); return 0;
+            }
+            p->bytes = next; p->capacity = cap;
+        }
+        uint32_t i = cx * p->cpc + cy;
+        p->offsets[i] = p->length; p->sizes[i] = compressed.len;
+        memcpy(p->bytes + p->length, compressed.data, compressed.len);
+        p->length = required;
+        tx_internal_free(compressed.data);
+    }
+    if (x + 1u == p->width) { tx_persistent_free(p->strip); p->strip = NULL; }
+    return 1;
+}
+
+int tx_map_base_strip(TxPreparedMap* p, uint32_t cx, uint32_t* strip) {
+    extern int uncompress(unsigned char*, unsigned long*, const unsigned char*, unsigned long);
+    for (uint32_t cy = 0; cy < p->cpc; cy++) {
+        uint32_t i = cx * p->cpc + cy;
+        unsigned long size = 4096u * 4u;
+        if (uncompress((unsigned char*)(strip + cy * 4096u), &size,
+                       p->bytes + p->offsets[i], p->sizes[i]) != 0 || size != 4096u * 4u) {
+            tx_set_error("TERRAX_STATE_ERROR", "prepared MAP chunk is invalid"); return 0;
+        }
+    }
+    return 1;
+}
+
 typedef struct MapChunkMeasureContext {
     uint32_t* sizes;
     uint32_t count;
@@ -1276,6 +1362,9 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
     uint32_t saved_len = w->file_len;
     int ok = 1;
 
+    TxPreparedMap* prepared = w->prepared_output && w->prepared_output->ready &&
+        !request->paint_tile_marker_count ? w->prepared_output->map : NULL;
+
     if (!strip) {
         tx_set_error("TERRAX_WASM_OOM", "map chunk strip allocation failed");
         return 0;
@@ -1309,10 +1398,11 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
         uint32_t world_x_base = chunk_x * 64u;
         uint32_t column_count = width > world_x_base ? width - world_x_base : 0u;
         if (column_count > 64u) column_count = 64u;
-        prefill_chunk_strip_background(strip, cpc, chunk_x, width, height,
-                                       w->worldSurface, w->rockLayer);
+        if (prepared) ok = tx_map_base_strip(prepared, chunk_x, strip);
+        else prefill_chunk_strip_background(strip, cpc, chunk_x, width, height,
+                                            w->worldSurface, w->rockLayer);
 
-        for (uint32_t local_x = 0; local_x < column_count && ok; local_x++) {
+        for (uint32_t local_x = 0; !prepared && local_x < column_count && ok; local_x++) {
             for (uint32_t y = 0; y < height; ) {
                 TxTile t;
                 uint32_t run;

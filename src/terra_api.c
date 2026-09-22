@@ -1,3 +1,4 @@
+#include "terra_output.h"
 /*
  * terra_api.c -- V2 API implementation.
  *
@@ -466,6 +467,7 @@ terrax_world_status terra_world_close(
     if (!world) return tx_invalid_handle();
 
     uint32_t allocation_mark = world->allocation_mark;
+    tx_output_clear(world);
     if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
     if (world->entity_marker_cache.data) tx_internal_free(world->entity_marker_cache.data);
     txw_clear_marker_color_index(world);

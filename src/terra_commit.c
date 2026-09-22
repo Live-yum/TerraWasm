@@ -1,3 +1,4 @@
+#include "terra_output.h"
 /*
  * terra_commit.c -- Save and reopen a world through one caller-owned buffer.
  *
@@ -11,6 +12,7 @@
 #include "terra_world.h"
 #include "terra_types.h"
 
+extern TxWorld* tx_get_world(uint32_t handle);
 extern void tx_set_error(const char* code, const char* message);
 
 terrax_world_status terra_world_commit_to_buffer(
@@ -41,17 +43,25 @@ terrax_world_status terra_world_commit_to_buffer(
      * allocation is independent from the world's native allocation mark, so
      * it remains valid while close rewinds the old world and open copies the
      * serialized bytes into the replacement session. */
+    TxWorld* old_world = tx_get_world(handle);
+    TxPreparedOutput* prepared = old_world->prepared_output;
+    uint32_t decodes = old_world->tile_decode_calls;
+    old_world->prepared_output = NULL;
     status = terra_world_close(handle);
-    if (status != TERRAX_WORLD_STATUS_OK) return status;
+    if (status != TERRAX_WORLD_STATUS_OK) { old_world->prepared_output = prepared; return status; }
 
     status = terra_world_open_from_buffer(
         output,
         *out_required,
         out_new_handle);
     if (status != TERRAX_WORLD_STATUS_OK) {
+        tx_output_free(prepared);
         *out_new_handle = 0u;
         return status;
     }
 
+    TxWorld* reopened = tx_get_world(*out_new_handle);
+    reopened->prepared_output = prepared;
+    reopened->tile_decode_calls = decodes;
     return TERRAX_WORLD_STATUS_OK;
 }

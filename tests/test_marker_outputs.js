@@ -1250,6 +1250,62 @@ function decodeMapCells(bytes) {
   return (x, y) => cells[y * width + x];
 }
 
+test('one tile scan survives commit and produces byte-identical MAP/full/list outputs', async () => {
+  const M = await loadModule(); M._tx_reset_heap();
+  const baseline = M._tx_heap_used();
+  const marker = {tile_type:7,locate:2,icon_id:1000000,radius:12,line_width:2,color:'#FF00FFFF'};
+  for (const replace of [false, true]) for (const markers of [[], [marker]]) {
+    const results = [];
+    for (const prepare of [false, true]) {
+      const opened = openWorld(M, makeEntityWorld());
+      const run = (op, request = {}) => {
+        const result = executeOperation(M, opened.handle, op, request);
+        if (result.status !== 0) assert.fail(`${op}: ${JSON.stringify(readLastErrorJson(M))}`);
+        return JSON.parse(result.value);
+      };
+      try {
+        const before = run('get_output_preparation_stats').tile_decode_calls;
+        if (prepare) run('begin_output_preparation', {tile_markers:markers,map:true});
+        if (replace) run('batch_update_tiles', {rules:[{where:{type:8},patch:{type:7}}]});
+        if (prepare) run('finish_output_preparation');
+        const scanned = run('get_output_preparation_stats');
+        if (prepare) {
+          assert.ok(scanned.source_runs > 0);
+          assert.equal(scanned.tile_decode_calls - before, scanned.source_runs, 'exactly one source traversal');
+        }
+        const sizePtr = mustAlloc(M, 4, 'commit size');
+        const handlePtr = mustAlloc(M, 4, 'commit handle');
+        let ptr = 0, wld;
+        try {
+          assert.equal(M._terra_world_commit_to_buffer(opened.handle,0,0,sizePtr,handlePtr),0);
+          const size = readU32(M,sizePtr); ptr = mustAlloc(M,size,'commit bytes');
+          assert.equal(M._terra_world_commit_to_buffer(opened.handle,ptr,size,sizePtr,handlePtr),0);
+          opened.handle = readU32(M,handlePtr);
+          wld = Buffer.from(M.HEAPU8.subarray(ptr,ptr+size));
+        } finally { if(ptr) M._tx_free(ptr); M._tx_free(sizePtr); M._tx_free(handlePtr); }
+        M._tx_reclaim_transients();
+        installSolidMarkerIcon(M,opened.handle,marker.icon_id,[0,255,0,255]);
+        installMarkerColorIndex(M,opened.handle);
+        run(markers.length ? 'mark_tiles_and_chests_map' : 'render_lit_map',{tile_markers:markers});
+        const map = getMapBytes(M,opened.handle).map;
+        const images = [];
+        for (const max_w of [0,256]) {
+          run(markers.length ? 'mark_tiles_and_chests_preview' : 'render_preview_png',{tile_markers:markers,max_w});
+          images.push(getThumbnailPng(M,opened.handle).png);
+          M._tx_reclaim_transients();
+        }
+        if (prepare) assert.equal(run('get_output_preparation_stats').tile_decode_calls, scanned.tile_decode_calls,
+          'commit, MAP, full PNG and list PNG must not decode another tile');
+        results.push({wld,map,images});
+        run('batch_update_tiles', {rules:[{where:{type:7},patch:{type:8}}]});
+        assert.equal(run('get_output_preparation_stats').ready,0,'subsequent mutation invalidates prepared outputs');
+      } finally { closeWorld(M, opened); }
+      assert.equal(M._tx_heap_used(),baseline,'persistent preparation is released at close');
+    }
+    assert.deepEqual(results[1],results[0],`preserve bytes: replace=${replace}, markers=${markers.length}`);
+  }
+});
+
 test('entity PNG and MAP use icon pixels, retain rings, and invalidate locations after replacement', async () => {
   const M = await loadModule(); M._tx_reset_heap();
   const baseline = M._tx_heap_used();

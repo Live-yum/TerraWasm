@@ -577,6 +577,7 @@ static void png_chunk(TxBuf* out, const char type[4], const uint8_t* data, uint3
 
 static void render_preview_rows_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph,
                                    uint32_t row_start, uint32_t row_count) {
+  if (tx_output_copy_rows(w, rgba, pw, ph, row_start, row_count)) return;
   uint32_t ground = (uint32_t)w->worldSurface;
   uint32_t rock   = (uint32_t)w->rockLayer;
   uint32_t row_end = row_start + row_count;
@@ -1863,18 +1864,21 @@ static int encode_full_preview_rgb_png(
     return -1;
   }
 
-  rgb = tx_alloc((uint32_t)rgb_len64);
+  rgb = tx_output_take_rgb(w, pw, ph);
+  int prepared_rgb = rgb != NULL;
+  void (*free_rgb)(void*) = prepared_rgb ? tx_persistent_free : tx_internal_free;
+  if (!rgb) rgb = tx_alloc((uint32_t)rgb_len64);
   raw = tx_alloc((uint32_t)raw_cap64);
   if (!rgb || !raw) {
     if (raw) tx_internal_free(raw);
-    if (rgb) tx_internal_free(rgb);
+    if (rgb) free_rgb(rgb);
     tx_set_error("TERRAX_WASM_OOM", "full marked preview allocation failed");
     return -1;
   }
 
-  if (!render_full_preview_rgb_to(w, rgb, pw, ph)) {
+  if (!prepared_rgb && !render_full_preview_rgb_to(w, rgb, pw, ph)) {
     tx_internal_free(raw);
-    tx_internal_free(rgb);
+    free_rgb(rgb);
     tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "full marked preview rendering failed");
     return -1;
   }
@@ -1894,7 +1898,7 @@ static int encode_full_preview_rgb_png(
       &out, pw, ph, 2u, &idat_length_pos, &idat_type_pos, &idat_data_pos)) {
     if (out.data) tx_internal_free(out.data);
     tx_internal_free(raw);
-    tx_internal_free(rgb);
+    free_rgb(rgb);
     tx_set_error("TERRAX_WASM_OOM", "full marked PNG output allocation failed");
     return -1;
   }
@@ -1917,7 +1921,7 @@ static int encode_full_preview_rgb_png(
     if (!out.ok) {
       tx_internal_free(out.data);
       tx_internal_free(raw);
-      tx_internal_free(rgb);
+      free_rgb(rgb);
       tx_set_error("TERRAX_WASM_OOM", "full marked PNG compression failed");
       return -1;
     }
@@ -1928,7 +1932,7 @@ static int encode_full_preview_rgb_png(
       out.len - idat_data_pos > UINT32_MAX - 12u) {
     if (out.data) tx_internal_free(out.data);
     tx_internal_free(raw);
-    tx_internal_free(rgb);
+    free_rgb(rgb);
     tx_set_error("TERRAX_WASM_OOM", "full marked PNG compression failed");
     return -1;
   }
@@ -1942,7 +1946,7 @@ static int encode_full_preview_rgb_png(
   png_chunk(&out, "IEND", (const uint8_t*)0, 0u);
 
   tx_internal_free(raw);
-  tx_internal_free(rgb);
+  free_rgb(rgb);
   if (!out.ok) {
     if (out.data) tx_internal_free(out.data);
     tx_set_error("TERRAX_WASM_OOM", "full marked PNG assembly failed");

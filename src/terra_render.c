@@ -14,6 +14,7 @@
  * once at the public render entry and let the core read the cached values.
  */
 #include "terra_types.h"
+#include "terra_output.h"
 #include "terra_render_task.h"
 
 extern const uint8_t* tx_get_tile_colors(void);
@@ -400,4 +401,145 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
       tile_markers, tile_count, &points, matched_chest_count, matched_tile_count);
   if (points.data) tx_internal_free(points.data);
   return result;
+}
+
+void tx_output_free(TxPreparedOutput* p) {
+  if (!p) return;
+  tx_persistent_free(p->rgb);
+  tx_persistent_free(p->list_rgba);
+  tx_persistent_free(p->points.data);
+  tx_map_base_free(p->map);
+  tx_persistent_free(p);
+}
+
+void tx_output_clear(TxWorld* w) {
+  tx_output_free(w->prepared_output);
+  w->prepared_output = NULL;
+}
+
+int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, int map) {
+  uint32_t pw, ph, stride;
+  tx_output_clear(w);
+  if (count > 256u || !compute_preview_size(w, 256u, 0u, &pw, &ph, &stride)) return 0;
+  uint64_t bytes = (uint64_t)w->maxTilesX * w->maxTilesY * 3u;
+  if (!bytes || bytes > MAX_MARKED_PREVIEW_RGB_BYTES) {
+    tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "prepared preview exceeds the image budget");
+    return 0;
+  }
+  TxPreparedOutput* p = (TxPreparedOutput*)tx_persistent_alloc(sizeof(*p));
+  if (!p) goto oom;
+  memset(p, 0, sizeof(*p));
+  w->prepared_output = p;
+  p->width = (uint32_t)w->maxTilesX; p->height = (uint32_t)w->maxTilesY;
+  p->list_width = pw; p->list_height = ph;
+  p->marker_count = count;
+  if (count) memcpy(p->markers, markers, count * sizeof(*markers));
+  p->rgb = tx_persistent_alloc((uint32_t)bytes);
+  p->list_rgba = tx_persistent_alloc(stride * ph);
+  if (!p->rgb || !p->list_rgba) goto oom;
+  if (map && !(p->map = tx_map_base_begin(w))) { tx_output_clear(w); return 0; }
+  for (uint32_t y = 0; y < p->height; y++) {
+    uint8_t bg[4];
+    background_color(y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+    for (uint32_t x = 0; x < p->width; x++) memcpy(p->rgb + (y * p->width + x) * 3u, bg, 3u);
+  }
+  for (uint32_t y = 0; y < ph; y++) {
+    uint8_t bg[4];
+    background_color((uint32_t)((uint64_t)y * p->height / ph), p->height,
+                     (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+    bg[3] = 0;
+    for (uint32_t x = 0; x < pw; x++) memcpy(p->list_rgba + (y * pw + x) * 4u, bg, 4u);
+  }
+  return 1;
+oom:
+  tx_output_clear(w);
+  tx_set_error("TERRAX_WASM_OOM", "output preparation allocation failed");
+  return 0;
+}
+
+typedef struct OutputScanContext { TxTileRule* rules; uint32_t count; TxBuf* tiles; } OutputScanContext;
+
+/* Match the values a subsequent WLD read would observe after write_tile. */
+static void normalize_written_tile(TxWorld* w, TxTile* t) {
+  extern int tile_important(TxWorld*, uint16_t);
+  if (!t->active) { t->type = 0; t->frame_x = t->frame_y = 0; t->tile_color = 0; }
+  else if (!tile_important(w, t->type)) t->frame_x = t->frame_y = -1;
+  else if (t->type == 144u) t->frame_y = 0;
+  if (!t->wall) t->wall_color = 0;
+  if (t->liquid_type != 4u) t->liquid_type &= 3u;
+  if (!t->liquid_amount || !t->liquid_type) t->liquid_amount = t->liquid_type = 0;
+  t->brick_style &= 7u;
+}
+
+static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
+                              uint32_t run, void* context) {
+  OutputScanContext* scan = (OutputScanContext*)context;
+  TxPreparedOutput* p = w->prepared_output;
+  if (scan->tiles) {
+    extern void write_tile(TxWorld*, TxBuf*, const TxTile*, uint32_t);
+    tx_apply_tile_rules(t, scan->rules, scan->count, run);
+    write_tile(w, scan->tiles, t, run - 1u);
+    if (!scan->tiles->ok) return 0;
+    normalize_written_tile(w, t);
+  }
+  p->source_runs++;
+  if (p->map && !tx_map_base_run(w, p->map, x, y, t, run)) return 0;
+  if (!tile_is_non_empty(t)) return 1;
+  uint8_t c[4];
+  color_for_tile(t, y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, c);
+  for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
+  uint32_t px = (uint32_t)((uint64_t)x * p->list_width / p->width);
+  uint32_t py0 = (uint32_t)((uint64_t)y * p->list_height / p->height);
+  uint32_t py1 = (uint32_t)((uint64_t)(y + run) * p->list_height / p->height);
+  if (py1 <= py0) py1 = py0 + 1u;
+  if (py1 > p->list_height) py1 = p->list_height;
+  for (uint32_t py = py0; py < py1; py++) {
+    uint8_t* dest = p->list_rgba + (py * p->list_width + px) * 4u;
+    uint32_t count = dest[3];
+    for (uint32_t ch = 0; ch < 3; ch++)
+      dest[ch] = count < 255u ? (uint8_t)((dest[ch] * count + c[ch]) / (count + 1u))
+                              : (uint8_t)((dest[ch] * 255u + c[ch]) >> 8);
+    if (count < 255u) dest[3]++;
+  }
+  return 1;
+}
+
+int tx_output_scan(TxWorld* w, TxTileRule* rules, uint32_t count, TxBuf* tiles) {
+  TxPreparedOutput* p = w->prepared_output;
+  if (!p || p->ready) return 1;
+  TxBuf points = {0};
+  OutputScanContext scan = {rules, count, tiles};
+  tx_render_refresh_color_tables();
+  if (!tx_scan_tile_markers(w, p->markers, p->marker_count, &points, prepare_output_run, &scan)) goto fail;
+  if (points.len) {
+    p->points.data = tx_persistent_alloc(points.len);
+    if (!p->points.data) { tx_set_error("TERRAX_WASM_OOM", "prepared markers allocation failed"); goto fail; }
+    memcpy(p->points.data, points.data, points.len);
+  }
+  p->points.len = points.len;
+  if (points.data) tx_internal_free(points.data);
+  for (uint32_t i = 0; i < p->list_width * p->list_height; i++) p->list_rgba[i * 4u + 3u] = 255u;
+  p->ready = 1;
+  return 1;
+fail:
+  if (points.data) tx_internal_free(points.data);
+  tx_output_clear(w);
+  return 0;
+}
+
+uint8_t* tx_output_take_rgb(TxWorld* w, uint32_t width, uint32_t height) {
+  TxPreparedOutput* p = w->prepared_output;
+  if (!p || !p->ready || p->width != width || p->height != height) return NULL;
+  uint8_t* rgb = p->rgb;
+  p->rgb = NULL;
+  return rgb;
+}
+
+int tx_output_copy_rows(TxWorld* w, uint8_t* out, uint32_t width, uint32_t height,
+                        uint32_t start, uint32_t count) {
+  TxPreparedOutput* p = w->prepared_output;
+  if (!p || !p->ready || width != p->list_width || height != p->list_height ||
+      start > height || count > height - start) return 0;
+  memcpy(out, p->list_rgba + start * width * 4u, count * width * 4u);
+  return 1;
 }
