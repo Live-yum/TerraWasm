@@ -13,6 +13,7 @@
 
 #include "terra_types.h"
 #include "terra_output.h"
+#include <string.h>
 #include "terra_map.h"
 #include "terra_icon.h"
 #include "terra_color_data.h"
@@ -1367,12 +1368,18 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
 
     TxPreparedMap* prepared = w->prepared_output && w->prepared_output->ready &&
         !request->paint_tile_marker_count ? w->prepared_output->map : NULL;
+    /* Keep one original strip for an exact comparison after markers. Most sky
+     * and distant chunks can reuse their already encoded bytes. Allocation is
+     * optional: the existing encoder remains valid without this scratch copy. */
+    uint32_t* base_strip = prepared && chest_point_count ? (uint32_t*)tx_alloc(strip_bytes) : NULL;
 
     if (!strip) {
+        if (base_strip) tx_internal_free(base_strip);
         tx_set_error("TERRAX_WASM_OOM", "map chunk strip allocation failed");
         return 0;
     }
     if (!sink) {
+        if (base_strip) tx_internal_free(base_strip);
         tx_internal_free(strip);
         tx_set_error("TERRAX_INVALID_ARGUMENT", "map chunk sink is null");
         return 0;
@@ -1401,7 +1408,10 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
         uint32_t world_x_base = chunk_x * 64u;
         uint32_t column_count = width > world_x_base ? width - world_x_base : 0u;
         if (column_count > 64u) column_count = 64u;
-        if (prepared) ok = tx_map_base_strip(prepared, chunk_x, strip);
+        if (prepared) {
+            if (chest_point_count) ok = tx_map_base_strip(prepared, chunk_x, strip);
+            if (base_strip && ok) memcpy(base_strip, strip, strip_bytes);
+        }
         else prefill_chunk_strip_background(strip, cpc, chunk_x, width, height,
                                             w->worldSurface, w->rockLayer);
 
@@ -1443,6 +1453,12 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
         for (uint32_t chunk_y = 0; chunk_y < cpc && ok; chunk_y++) {
             TxBuf compressed = { 0 };
             uint32_t chunk_index = chunk_y * cpr + chunk_x;
+            if (prepared && (!chest_point_count || (base_strip &&
+                memcmp(base_strip + chunk_y * 4096u, strip + chunk_y * 4096u, 4096u * 4u) == 0))) {
+                uint32_t i = chunk_x * cpc + chunk_y;
+                ok = sink(chunk_index, prepared->bytes + prepared->offsets[i], prepared->sizes[i], sink_context);
+                continue;
+            }
             if (!compress_chunk_exact(strip + chunk_y * 4096u, &compressed)) {
                 ok = 0;
                 break;
@@ -1456,6 +1472,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
     w->file_len = saved_len;
     if (matched_tile_count) *matched_tile_count = tile_matches;
     tx_internal_free(strip);
+    if (base_strip) tx_internal_free(base_strip);
     if (icon_values) tx_internal_free(icon_values);
     return ok;
 }
