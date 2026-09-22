@@ -4,7 +4,7 @@
 
 typedef struct TxPreparedMap TxPreparedMap;
 struct TxPreparedOutput {
-    uint8_t *rgb, *rgb_strip, *list_rgba, *preview_rgba;
+    uint8_t *rgb, *list_rgba, *preview_rgba;
     uint32_t width, height, list_width, list_height;
     uint32_t preview_width, preview_height;
     MapMarkerEntry markers[256];

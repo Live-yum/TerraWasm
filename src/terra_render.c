@@ -406,7 +406,6 @@ int32_t txw_render_marked_preview_png(TxWorld* w, uint32_t max_w, uint32_t max_h
 void tx_output_free(TxPreparedOutput* p) {
   if (!p) return;
   tx_persistent_free(p->rgb);
-  tx_persistent_free(p->rgb_strip);
   tx_persistent_free(p->list_rgba);
   tx_persistent_free(p->preview_rgba);
   tx_persistent_free(p->points.data);
@@ -458,14 +457,15 @@ int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, i
     p->preview_rgba = tx_persistent_alloc(preview_stride * p->preview_height);
     if (!p->preview_rgba) goto oom;
     prepare_scaled_background(w, p->preview_rgba, p->preview_width, p->preview_height);
-  } else {
-    p->rgb = tx_persistent_alloc((uint32_t)bytes);
-    p->rgb_strip = tx_persistent_alloc((p->width < 64u ? p->width : 64u) * p->height * 3u);
-    if (!p->rgb_strip) goto oom;
-  }
+  } else p->rgb = tx_persistent_alloc((uint32_t)bytes);
   p->list_rgba = tx_persistent_alloc(stride * ph);
   if ((!p->rgb && !p->preview_rgba) || !p->list_rgba) goto oom;
   if (map && !(p->map = tx_map_base_begin(w))) { tx_output_clear(w); return 0; }
+  for (uint32_t y = 0; p->rgb && y < p->height; y++) {
+    uint8_t bg[4];
+    background_color(y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+    for (uint32_t x = 0; x < p->width; x++) memcpy(p->rgb + (y * p->width + x) * 3u, bg, 3u);
+  }
   prepare_scaled_background(w, p->list_rgba, pw, ph);
   return 1;
 oom:
@@ -505,29 +505,6 @@ static void normalize_written_tile(TxWorld* w, TxTile* t) {
   t->brick_style &= 7u;
 }
 
-/* WLD is column-major but PNG pixels are row-major. Fill a cache-sized strip
- * before copying whole row spans, instead of touching 2400 distant RGB rows
- * for every source column in a large world. */
-static void prepare_rgb_run(TxWorld* w, TxPreparedOutput* p, uint32_t x, uint32_t y,
-                            uint32_t run, const uint8_t* color) {
-  uint32_t columns = p->width < 64u ? p->width : 64u;
-  uint32_t local_x = x % columns;
-  if (!local_x && !y) {
-    for (uint32_t yy = 0; yy < p->height; yy++) {
-      uint8_t bg[4];
-      background_color(yy, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
-      for (uint32_t xx = 0; xx < columns; xx++) memcpy(p->rgb_strip + (yy * columns + xx) * 3u, bg, 3u);
-    }
-  }
-  if (color) for (uint32_t yy = y; yy < y + run; yy++)
-    memcpy(p->rgb_strip + (yy * columns + local_x) * 3u, color, 3u);
-  if (y + run == p->height && (local_x + 1u == columns || x + 1u == p->width)) {
-    uint32_t first = x - local_x;
-    for (uint32_t yy = 0; yy < p->height; yy++)
-      memcpy(p->rgb + (yy * p->width + first) * 3u, p->rgb_strip + yy * columns * 3u, (local_x + 1u) * 3u);
-  }
-}
-
 static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
                               uint32_t run, void* context) {
   OutputScanContext* scan = (OutputScanContext*)context;
@@ -541,13 +518,10 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   }
   p->source_runs++;
   if (p->map && !tx_map_base_run(w, p->map, x, y, t, run)) return 0;
+  if (!tile_is_non_empty(t)) return 1;
   uint8_t c[4];
-  if (!tile_is_non_empty(t)) {
-    if (p->rgb) prepare_rgb_run(w, p, x, y, run, NULL);
-    return 1;
-  }
   color_for_tile(t, y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, c);
-  if (p->rgb) prepare_rgb_run(w, p, x, y, run, c);
+  if (p->rgb) for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
   if (p->preview_rgba) prepare_scaled_run(p, p->preview_rgba, p->preview_width, p->preview_height, x, y, run, c);
   prepare_scaled_run(p, p->list_rgba, p->list_width, p->list_height, x, y, run, c);
   return 1;
@@ -567,7 +541,6 @@ int tx_output_scan(TxWorld* w, TxTileRule* rules, uint32_t count, TxBuf* tiles) 
   }
   p->points.len = points.len;
   if (points.data) tx_internal_free(points.data);
-  tx_persistent_free(p->rgb_strip); p->rgb_strip = NULL;
   for (uint32_t i = 0; i < p->list_width * p->list_height; i++) p->list_rgba[i * 4u + 3u] = 255u;
   for (uint32_t i = 0; i < p->preview_width * p->preview_height; i++) p->preview_rgba[i * 4u + 3u] = 255u;
   p->ready = 1;
