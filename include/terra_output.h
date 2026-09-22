@@ -4,8 +4,9 @@
 
 typedef struct TxPreparedMap TxPreparedMap;
 struct TxPreparedOutput {
-    uint8_t *rgb, *list_rgba;
+    uint8_t *rgb, *list_rgba, *preview_rgba;
     uint32_t width, height, list_width, list_height;
+    uint32_t preview_width, preview_height;
     MapMarkerEntry markers[256];
     uint32_t marker_count;
     TxBuf points;
@@ -15,7 +16,7 @@ struct TxPreparedOutput {
 
 typedef int (*TxTileVisitor)(TxWorld*, uint32_t, uint32_t, TxTile*, uint32_t, void*);
 int tx_scan_tile_markers(TxWorld*, const MapMarkerEntry*, uint32_t, TxBuf*, TxTileVisitor, void*);
-int tx_output_begin(TxWorld*, const MapMarkerEntry*, uint32_t, int);
+int tx_output_begin(TxWorld*, const MapMarkerEntry*, uint32_t, int, uint32_t);
 int tx_output_scan(TxWorld*, TxTileRule*, uint32_t, TxBuf*);
 void tx_output_free(TxPreparedOutput*);
 void tx_output_clear(TxWorld*);

@@ -407,6 +407,7 @@ void tx_output_free(TxPreparedOutput* p) {
   if (!p) return;
   tx_persistent_free(p->rgb);
   tx_persistent_free(p->list_rgba);
+  tx_persistent_free(p->preview_rgba);
   tx_persistent_free(p->points.data);
   tx_map_base_free(p->map);
   tx_persistent_free(p);
@@ -417,7 +418,17 @@ void tx_output_clear(TxWorld* w) {
   w->prepared_output = NULL;
 }
 
-int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, int map) {
+static void prepare_scaled_background(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph) {
+  for (uint32_t y = 0; y < ph; y++) {
+    uint8_t bg[4];
+    background_color((uint32_t)((uint64_t)y * w->maxTilesY / ph), (uint32_t)w->maxTilesY,
+                     (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+    bg[3] = 0;
+    for (uint32_t x = 0; x < pw; x++) memcpy(rgba + (y * pw + x) * 4u, bg, 4u);
+  }
+}
+
+int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, int map, uint32_t preview_width) {
   uint32_t pw, ph, stride;
   tx_output_clear(w);
   if (count > 256u || !compute_preview_size(w, 256u, 0u, &pw, &ph, &stride)) return 0;
@@ -434,22 +445,28 @@ int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, i
   p->list_width = pw; p->list_height = ph;
   p->marker_count = count;
   if (count) memcpy(p->markers, markers, count * sizeof(*markers));
-  p->rgb = tx_persistent_alloc((uint32_t)bytes);
+  if (preview_width) {
+    uint32_t preview_stride;
+    if (!compute_preview_size(w, preview_width, 0u, &p->preview_width, &p->preview_height, &preview_stride)) {
+      tx_output_clear(w); return 0;
+    }
+    if ((uint64_t)preview_stride * p->preview_height > SCALED_PREVIEW_CACHE_BUDGET) {
+      tx_output_clear(w);
+      tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "prepared scaled preview exceeds the image budget"); return 0;
+    }
+    p->preview_rgba = tx_persistent_alloc(preview_stride * p->preview_height);
+    if (!p->preview_rgba) goto oom;
+    prepare_scaled_background(w, p->preview_rgba, p->preview_width, p->preview_height);
+  } else p->rgb = tx_persistent_alloc((uint32_t)bytes);
   p->list_rgba = tx_persistent_alloc(stride * ph);
-  if (!p->rgb || !p->list_rgba) goto oom;
+  if ((!p->rgb && !p->preview_rgba) || !p->list_rgba) goto oom;
   if (map && !(p->map = tx_map_base_begin(w))) { tx_output_clear(w); return 0; }
-  for (uint32_t y = 0; y < p->height; y++) {
+  for (uint32_t y = 0; p->rgb && y < p->height; y++) {
     uint8_t bg[4];
     background_color(y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
     for (uint32_t x = 0; x < p->width; x++) memcpy(p->rgb + (y * p->width + x) * 3u, bg, 3u);
   }
-  for (uint32_t y = 0; y < ph; y++) {
-    uint8_t bg[4];
-    background_color((uint32_t)((uint64_t)y * p->height / ph), p->height,
-                     (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
-    bg[3] = 0;
-    for (uint32_t x = 0; x < pw; x++) memcpy(p->list_rgba + (y * pw + x) * 4u, bg, 4u);
-  }
+  prepare_scaled_background(w, p->list_rgba, pw, ph);
   return 1;
 oom:
   tx_output_clear(w);
@@ -458,6 +475,23 @@ oom:
 }
 
 typedef struct OutputScanContext { TxTileRule* rules; uint32_t count; TxBuf* tiles; } OutputScanContext;
+
+static void prepare_scaled_run(TxPreparedOutput* p, uint8_t* rgba, uint32_t pw, uint32_t ph,
+                               uint32_t x, uint32_t y, uint32_t run, const uint8_t* c) {
+  uint32_t px = (uint32_t)((uint64_t)x * pw / p->width);
+  uint32_t py0 = (uint32_t)((uint64_t)y * ph / p->height);
+  uint32_t py1 = (uint32_t)((uint64_t)(y + run) * ph / p->height);
+  if (py1 <= py0) py1 = py0 + 1u;
+  if (py1 > ph) py1 = ph;
+  for (uint32_t py = py0; py < py1; py++) {
+    uint8_t* dest = rgba + (py * pw + px) * 4u;
+    uint32_t count = dest[3];
+    for (uint32_t ch = 0; ch < 3; ch++)
+      dest[ch] = count < 255u ? (uint8_t)((dest[ch] * count + c[ch]) / (count + 1u))
+                              : (uint8_t)((dest[ch] * 255u + c[ch]) >> 8);
+    if (count < 255u) dest[3]++;
+  }
+}
 
 /* Match the values a subsequent WLD read would observe after write_tile. */
 static void normalize_written_tile(TxWorld* w, TxTile* t) {
@@ -487,20 +521,9 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   if (!tile_is_non_empty(t)) return 1;
   uint8_t c[4];
   color_for_tile(t, y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, c);
-  for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
-  uint32_t px = (uint32_t)((uint64_t)x * p->list_width / p->width);
-  uint32_t py0 = (uint32_t)((uint64_t)y * p->list_height / p->height);
-  uint32_t py1 = (uint32_t)((uint64_t)(y + run) * p->list_height / p->height);
-  if (py1 <= py0) py1 = py0 + 1u;
-  if (py1 > p->list_height) py1 = p->list_height;
-  for (uint32_t py = py0; py < py1; py++) {
-    uint8_t* dest = p->list_rgba + (py * p->list_width + px) * 4u;
-    uint32_t count = dest[3];
-    for (uint32_t ch = 0; ch < 3; ch++)
-      dest[ch] = count < 255u ? (uint8_t)((dest[ch] * count + c[ch]) / (count + 1u))
-                              : (uint8_t)((dest[ch] * 255u + c[ch]) >> 8);
-    if (count < 255u) dest[3]++;
-  }
+  if (p->rgb) for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
+  if (p->preview_rgba) prepare_scaled_run(p, p->preview_rgba, p->preview_width, p->preview_height, x, y, run, c);
+  prepare_scaled_run(p, p->list_rgba, p->list_width, p->list_height, x, y, run, c);
   return 1;
 }
 
@@ -519,6 +542,7 @@ int tx_output_scan(TxWorld* w, TxTileRule* rules, uint32_t count, TxBuf* tiles) 
   p->points.len = points.len;
   if (points.data) tx_internal_free(points.data);
   for (uint32_t i = 0; i < p->list_width * p->list_height; i++) p->list_rgba[i * 4u + 3u] = 255u;
+  for (uint32_t i = 0; i < p->preview_width * p->preview_height; i++) p->preview_rgba[i * 4u + 3u] = 255u;
   p->ready = 1;
   return 1;
 fail:
@@ -538,8 +562,10 @@ uint8_t* tx_output_take_rgb(TxWorld* w, uint32_t width, uint32_t height) {
 int tx_output_copy_rows(TxWorld* w, uint8_t* out, uint32_t width, uint32_t height,
                         uint32_t start, uint32_t count) {
   TxPreparedOutput* p = w->prepared_output;
-  if (!p || !p->ready || width != p->list_width || height != p->list_height ||
-      start > height || count > height - start) return 0;
-  memcpy(out, p->list_rgba + start * width * 4u, count * width * 4u);
+  if (!p || !p->ready || start > height || count > height - start) return 0;
+  uint8_t* rgba = width == p->list_width && height == p->list_height ? p->list_rgba :
+      width == p->preview_width && height == p->preview_height ? p->preview_rgba : NULL;
+  if (!rgba) return 0;
+  memcpy(out, rgba + start * width * 4u, count * width * 4u);
   return 1;
 }

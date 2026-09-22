@@ -178,7 +178,11 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
         memcmp(prepared->markers, markers, key_bytes) == 0) {
         buf_init(points, prepared->points.len);
         if (prepared->points.len) buf_bytes(points, prepared->points.data, prepared->points.len);
-        return points->ok;
+        if (points->ok) return 1;
+        if (points->data) tx_internal_free(points->data);
+        memset(points, 0, sizeof(*points));
+        tx_set_error("TERRAX_WASM_OOM", "prepared entity point copy failed");
+        return 0;
     }
     if (cache->data && w->entity_marker_key_bytes == key_bytes &&
         memcmp(cache->data, markers, key_bytes) == 0) {

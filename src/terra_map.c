@@ -1250,8 +1250,11 @@ int tx_map_base_run(TxWorld* w, TxPreparedMap* p, uint32_t x, uint32_t y,
         uint32_t required = p->length + compressed.len;
         if (required > 32u * 1024u * 1024u) {
             tx_internal_free(compressed.data);
-            tx_set_error("TERRAX_RESULT_TOO_LARGE", "prepared MAP exceeds the 32 MiB budget");
-            return 0;
+            /* ponytail: exceptionally noisy MAP bases retain the existing
+             * streaming reader rather than reject a previously supported WLD. */
+            w->prepared_output->map = NULL;
+            tx_map_base_free(p);
+            return 1;
         }
         if (required > p->capacity) {
             uint32_t cap = p->capacity ? p->capacity * 2u : 65536u;

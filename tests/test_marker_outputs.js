@@ -1254,7 +1254,7 @@ test('one tile scan survives commit and produces byte-identical MAP/full/list ou
   const M = await loadModule(); M._tx_reset_heap();
   const baseline = M._tx_heap_used();
   const marker = {tile_type:7,locate:2,icon_id:1000000,radius:12,line_width:2,color:'#FF00FFFF'};
-  for (const replace of [false, true]) for (const markers of [[], [marker]]) {
+  for (const replace of [false, true]) for (const markers of [[], [marker]]) for (const previewWidth of [0,960]) {
     const results = [];
     for (const prepare of [false, true]) {
       const opened = openWorld(M, makeEntityWorld());
@@ -1265,7 +1265,7 @@ test('one tile scan survives commit and produces byte-identical MAP/full/list ou
       };
       try {
         const before = run('get_output_preparation_stats').tile_decode_calls;
-        if (prepare) run('begin_output_preparation', {tile_markers:markers,map:true});
+        if (prepare) run('begin_output_preparation', {tile_markers:markers,map:true,preview_width:previewWidth});
         if (replace) run('batch_update_tiles', {rules:[{where:{type:8},patch:{type:7}}]});
         if (prepare) run('finish_output_preparation');
         const scanned = run('get_output_preparation_stats');
@@ -1289,7 +1289,7 @@ test('one tile scan survives commit and produces byte-identical MAP/full/list ou
         run(markers.length ? 'mark_tiles_and_chests_map' : 'render_lit_map',{tile_markers:markers});
         const map = getMapBytes(M,opened.handle).map;
         const images = [];
-        for (const max_w of [0,256]) {
+        for (const max_w of [previewWidth,256]) {
           run(markers.length ? 'mark_tiles_and_chests_preview' : 'render_preview_png',{tile_markers:markers,max_w});
           images.push(getThumbnailPng(M,opened.handle).png);
           M._tx_reclaim_transients();

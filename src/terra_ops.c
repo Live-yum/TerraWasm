@@ -665,6 +665,38 @@ static int op_streq(const char* a, const char* b) {
     return *a == *b;
 }
 
+static int execute_begin_output_preparation(TxWorld* w, const char* request, int jlen, TxBuf* response) {
+    MapMarkerEntry* markers = NULL;
+    uint32_t count = 0;
+    int map = 0;
+    int32_t preview_width = 0;
+    int pos = json_find_key(request, jlen, "preview_width");
+    if (pos >= 0 && (!json_extract_int(request, jlen, pos, &preview_width) || preview_width < 0 || preview_width > 2048)) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "preview_width must be an integer from 0 to 2048");
+        return -1;
+    }
+    pos = json_find_key(request, jlen, "map");
+    if (pos >= 0 && !json_extract_bool(request, jlen, pos, &map)) {
+        tx_set_error("TERRAX_VALIDATION_ERROR", "map must be a boolean"); return -1;
+    }
+    if (!parse_marker_array(request, jlen, "tile_markers", "tile_type", &markers, &count)) return -1;
+    int ok = tx_output_begin(w, markers, count, map, (uint32_t)preview_width);
+    if (markers) tx_internal_free(markers);
+    if (!ok) return -1;
+    buf_cstr(response, "{\"status\":\"ok\"}");
+    return 1;
+}
+
+static int execute_output_preparation_stats(TxWorld* w, TxBuf* response) {
+    buf_cstr(response, "{\"tile_decode_calls\":"); json_u32(response, w->tile_decode_calls);
+    buf_cstr(response, ",\"source_runs\":");
+    json_u32(response, w->prepared_output ? w->prepared_output->source_runs : 0u);
+    buf_cstr(response, ",\"ready\":");
+    json_u32(response, w->prepared_output ? w->prepared_output->ready : 0u);
+    buf_u8(response, '}');
+    return 1;
+}
+
 int op_execute_json(TxWorld* w, const char* op_name, const char* request,
                     TxBuf* response) {
     if (!op_name || !request || tx_strlen(op_name) == 0) {
@@ -680,33 +712,15 @@ int op_execute_json(TxWorld* w, const char* op_name, const char* request,
 
     if (op_streq(op_name, "render_preview_png"))
         return execute_txw_render_preview_png(w, request, jlen, response);
-    if (op_streq(op_name, "begin_output_preparation")) {
-        MapMarkerEntry* markers = NULL;
-        uint32_t count = 0;
-        int map = 0;
-        if (!parse_marker_array(request, jlen, "tile_markers", "tile_type", &markers, &count)) return -1;
-        int pos = json_find_key(request, jlen, "map");
-        if (pos >= 0) json_extract_bool(request, jlen, pos, &map);
-        int ok = tx_output_begin(w, markers, count, map);
-        if (markers) tx_internal_free(markers);
-        if (!ok) return -1;
-        buf_cstr(response, "{\"status\":\"ok\"}");
-        return 1;
-    }
+    if (op_streq(op_name, "begin_output_preparation"))
+        return execute_begin_output_preparation(w, request, jlen, response);
     if (op_streq(op_name, "finish_output_preparation")) {
         if (!tx_output_scan(w, NULL, 0, NULL)) return -1;
         buf_cstr(response, "{\"status\":\"ok\"}");
         return 1;
     }
-    if (op_streq(op_name, "get_output_preparation_stats")) {
-        buf_cstr(response, "{\"tile_decode_calls\":"); json_u32(response, w->tile_decode_calls);
-        buf_cstr(response, ",\"source_runs\":");
-        json_u32(response, w->prepared_output ? w->prepared_output->source_runs : 0u);
-        buf_cstr(response, ",\"ready\":");
-        json_u32(response, w->prepared_output ? w->prepared_output->ready : 0u);
-        buf_u8(response, '}');
-        return 1;
-    }
+    if (op_streq(op_name, "get_output_preparation_stats"))
+        return execute_output_preparation_stats(w, response);
     if (op_streq(op_name, "render_thumbnail_png"))
         return execute_txw_render_thumbnail_png(w, request, jlen, response);
     if (op_streq(op_name, "render_lit_map"))
