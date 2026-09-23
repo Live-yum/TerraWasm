@@ -1,5 +1,6 @@
 #include "terra_output.h"
 #include "terra_regions.h"
+#include "terra_theme.h"
 /*
  * terra_update.c -- Streaming tile modifications with batch updates.
  *
@@ -136,6 +137,7 @@ static void init_tile_rule(TxTileRule* rule) {
     rule->fullbright_wall = -1;
 
     rule->patch_is_active = -1;
+    rule->terrain_theme = rule->wall_theme = rule->furniture_theme = -1;
     rule->patch_liquid_amount = -1;
     rule->patch_liquid_type = -1;
     rule->patch_brick_style = -1;
@@ -207,6 +209,8 @@ static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
 }
 
 static void apply_tile_patch(TxTile* t, const TxTileRule* rule) {
+    if (rule->terrain_theme > 0 || rule->wall_theme > 0 || rule->furniture_theme > 0)
+        tx_apply_theme(t, rule->terrain_theme, rule->wall_theme, rule->furniture_theme);
     if (rule->patch_is_active >= 0) t->active = (uint8_t)rule->patch_is_active;
     if (rule->patch_type >= 0) { t->type = (uint16_t)rule->patch_type; t->active = 1; }
     if (rule->patch_wall >= 0) t->wall = (uint16_t)rule->patch_wall;
@@ -653,6 +657,20 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                 TRY_PATCH_INT(patch_tile_color, "tile_color")
                 TRY_PATCH_INT(patch_wall_color, "wall_color")
                 #undef TRY_PATCH_INT
+                #define TRY_THEME(field) \
+                    pp = json_find_key(request + patch_pos, patch_len, #field); \
+                    if (pp >= 0) { \
+                        if (!json_extract_int(request, jlen, pp + patch_pos, &iv) || iv < 1 || iv > 3) { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", #field " must be 1 (desert), 2 (snow), or 3 (jungle)"); \
+                            return -1; \
+                        } \
+                        rules[r].field = iv; \
+                    }
+                TRY_THEME(terrain_theme)
+                TRY_THEME(wall_theme)
+                TRY_THEME(furniture_theme)
+                #undef TRY_THEME
                 #define TRY_PATCH_BOOL(field, key) \
                     pp = json_find_key(request + patch_pos, patch_len, key); \
                     if (pp >= 0 && !json_is_null(request, jlen, pp + patch_pos)) { \

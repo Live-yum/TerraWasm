@@ -510,6 +510,9 @@ typedef struct TxTileRule {
 
     /* Patch clause (fields to change, -1 = no change) */
     int32_t  patch_is_active;
+    int32_t  terrain_theme;   /* -1=no change; 1=desert, 2=snow, 3=jungle */
+    int32_t  wall_theme;
+    int32_t  furniture_theme;
     int32_t  patch_liquid_amount;
     int32_t  patch_liquid_type;
     int32_t  patch_brick_style;

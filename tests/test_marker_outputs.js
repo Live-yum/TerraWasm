@@ -1135,7 +1135,7 @@ function makeEntityWorld(customCells, options = {}) {
   object(50,140,26,3,2); object(60,140,26,3,2,54);
   if (customCells) { cells.clear(); for (const [key,value] of customCells) cells.set(key,value); }
   const important = Buffer.alloc(88);
-  for(const type of [12,236,187,186,31,26,21,467,441,468]) important[type>>3] |= 1 << (type&7);
+  for(const type of [4,10,11,12,14,15,18,19,21,26,31,33,34,42,79,87,88,89,90,93,100,101,104,172,186,187,235,236,441,467,468,469,497]) important[type>>3] |= 1 << (type&7);
   const data=[];
   for(let x=0;x<width;x++) for(let y=0;y<height;) {
     const tile=cells.get(`${x},${y}`);
@@ -1560,5 +1560,94 @@ test('transparent presets preserve every chest frame and color and never coat ab
       const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{has_wall},patch:{invisible_wall:1}}]});
       assert.notEqual(result.status,0,'invalid has_wall must not silently paint all tiles');
     }
+  } finally {closeWorld(M,opened);}
+});
+
+test('composable themes preserve object frames, locks, contents and all prepared outputs', async () => {
+  // Expected placement frames from ContentSamples / TileObjectData in Terraria 1.4.5.8.
+  const furniture = [
+    [21,0,0,[[467,360,0],[21,396,0],[21,288,0]]],
+    [467,72,0,[[467,360,0],[21,396,0],[21,288,0]]],
+    [441,0,0,[[468,360,0],[441,396,0],[441,288,0]]],
+    [468,72,0,[[468,360,0],[441,396,0],[441,288,0]]],
+    [10,18,54,[[10,72,378],[10,18,1458],[10,18,108]]],
+    [11,108,72,[[11,108,396],[11,36,1476],[11,36,126]]],
+    [19,216,18,[[19,216,756],[19,216,630],[19,216,36]]],
+    [34,162,72,[[34,162,396],[34,54,612],[34,54,666]]],
+    [42,18,54,[[42,18,1602],[42,18,666],[42,18,594]]],
+    [14,54,18,[[469,378,18],[14,1296,18],[14,108,18]]],
+    [469,54,18,[[469,378,18],[14,1296,18],[14,108,18]]],
+    [18,36,0,[[18,1404,0],[18,720,0],[18,72,0]]],
+    [33,18,22,[[33,18,814],[33,18,176],[33,18,198]]],
+    [101,54,18,[[101,2106,18],[101,918,18],[101,648,18]]],
+    [15,18,58,[[15,18,1738],[15,18,1138],[15,18,138]]],
+    [79,90,54,[[79,90,1386],[79,90,558],[79,90,90]]],
+    [87,54,18,[[87,2052,18],[87,378,18],[87,108,18]]],
+    [88,54,18,[[88,2052,18],[88,1620,18],[88,108,18]]],
+    [89,54,18,[[89,2214,18],[89,1458,18],[89,162,18]]],
+    [90,90,54,[[90,90,1386],[90,90,198],[90,90,234]]],
+    [93,18,72,[[93,18,2070],[93,18,288],[93,18,342]]],
+    [100,36,54,[[100,36,1386],[100,36,342],[100,36,270]]],
+    [104,36,18,[[104,1404,18],[104,396,18],[104,504,18]]],
+    [172,18,56,[[172,18,1500],[172,18,816],[172,18,94]]],
+    [497,18,58,[[497,18,1498],[497,18,618],[497,18,58]]],
+    [4,88,22,[[4,88,352],[4,88,198],[4,88,462]]],
+  ];
+  const cells=new Map(furniture.map(([type,fx,fy],i)=>[`${10+i},40`,{type,fx,fy,color:14}]));
+  const oresAndBuildings=[0,1,7,8,9,22,41,43,44,56,58,59,107,108,111,166,167,168,211,221,222,223,226,158,321,481];
+  oresAndBuildings.forEach((type,i)=>cells.set(`${10+i},60`,{type,color:7}));
+  [124,561,574,575,576,577,578].forEach((type,i)=>cells.set(`${10+i},70`,{type}));
+  const protectedTiles=[[21,72],[21,144],[21,828],[21,864],[21,900],[21,936],[21,972],[21,1296],[21,1368],[21,1440],[467,468],[10,0,594],[14,1350],[26,0],[235,0]];
+  protectedTiles.forEach(([type,fx,fy=0],i)=>cells.set(`${10+i},80`,{type,fx,fy}));
+  cells.set('10,90',{wall:1,wallColor:8}); cells.set('11,90',{wall:7,wallColor:9});
+  const source=makeEntityWorld(cells), canonical=fixtureCells(source,128,300), M=await loadModule();
+  for(let theme=1;theme<=3;theme++) {
+    const expected=new Map(canonical);
+    furniture.forEach(([, , ,targets],i)=>{const [type,fx,fy]=targets[theme-1];expected.set(`${10+i},40`,{type,fx,fy,color:14});});
+    oresAndBuildings.forEach((_,i)=>expected.set(`${10+i},60`,{type:[396,147,60][theme-1],color:7}));
+    [124,561,574,575,576,577,578].forEach((_,i)=>expected.set(`${10+i},70`,{type:[577,574,575][theme-1]}));
+    expected.set('10,90',{wall:[34,31,42][theme-1],wallColor:8});expected.set('11,90',{wall:[187,71,64][theme-1],wallColor:9});
+    const outputs=[];
+    for(const prepare of [false,true]) {
+      const opened=openWorld(M,source);
+      const run=(name,request={})=>{const r=executeOperation(M,opened.handle,name,request);assert.equal(r.status,0,r.status?JSON.stringify(readLastErrorJson(M)):undefined);return JSON.parse(r.value);};
+      try {
+        if(prepare)run('begin_output_preparation',{map:true});
+        run('batch_update_tiles',{rules:[{where:{is_active:1},patch:{terrain_theme:theme,furniture_theme:theme}},{where:{has_wall:1},patch:{wall_theme:theme}}]});
+        if(prepare)run('finish_output_preparation');
+        const calls=run('get_output_preparation_stats').tile_decode_calls;
+        assert.deepEqual(fixtureCells(commitFixture(M,opened),128,300),expected);
+        installMarkerColorIndex(M,opened.handle);
+        run('render_lit_map');const map=getMapBytes(M,opened.handle).map;
+        run('render_preview_png',{max_w:0});const full=getThumbnailPng(M,opened.handle).png;
+        run('render_preview_png',{max_w:256});const list=getThumbnailPng(M,opened.handle).png;
+        if(prepare)assert.equal(run('get_output_preparation_stats').tile_decode_calls,calls);
+        outputs.push({map,full,list});
+      } finally {closeWorld(M,opened);}
+    }
+    assert.deepEqual(outputs[1],outputs[0]);
+  }
+  const opened=openWorld(M);
+  try {
+    const before=readSection(M,opened.handle,'chests');
+    assert.equal(executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{is_active:1},patch:{furniture_theme:1}}]}).status,0);
+    commitFixture(M,opened);
+    assert.deepEqual(readSection(M,opened.handle,'chests'),before,'chest coordinates, names, all slots and item prefixes survive');
+  } finally {closeWorld(M,opened);}
+});
+
+test('theme patches validate enums and obey arbitrary user conditions and later overrides', async () => {
+  const M=await loadModule(),cells=new Map([['10,40',{type:21,fx:0,fy:0}],['20,40',{type:15,fx:18,fy:18}],['30,40',{type:1}],['40,40',{type:7}]]);
+  const opened=openWorld(M,makeEntityWorld(cells));
+  try {
+    for(const field of ['terrain_theme','wall_theme','furniture_theme']) for(const value of [0,4,-1,1.5,true,null,'1','bad'])
+      assert.notEqual(executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{patch:{[field]:value}}]}).status,0);
+    assert.deepEqual(fixtureCells(commitFixture(M,opened),128,300),fixtureCells(makeEntityWorld(cells),128,300));
+    assert.equal(executeOperation(M,opened.handle,'batch_update_tiles',{rules:[
+      {where:{type:21},patch:{furniture_theme:3,invisible_block:1}},
+      {where:{type:7},patch:{terrain_theme:2,type:8}},
+    ]}).status,0);
+    cells.set('10,40',{type:21,fx:288,fy:0,invisible_block:1});cells.set('40,40',{type:8});
+    assert.deepEqual(fixtureCells(commitFixture(M,opened),128,300),fixtureCells(makeEntityWorld(cells),128,300));
   } finally {closeWorld(M,opened);}
 });
