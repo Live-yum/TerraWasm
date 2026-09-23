@@ -408,6 +408,7 @@ typedef struct TxWorld {
     TxPreparedOutput* prepared_output;
     uint8_t* region_mask; /* batch-local packed environment membership */
     uint8_t region_mask_bits;
+    uint16_t region_geometry[5]; /* ocean, hell, space, underground, cavern */
     uint32_t output_capture;
     uint32_t tile_decode_calls;
 

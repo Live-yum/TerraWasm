@@ -20,6 +20,7 @@ typedef struct {
 } RegionScan;
 
 static uint16_t read_region(const uint8_t* mask, uint32_t i, uint8_t bits) {
+    if (!bits) return 0;
     if (bits > 8) {
         uint32_t bit = (i % 8u) * bits, at = (i / 8u) * bits + bit / 8u;
         uint32_t value = mask[at] | (uint32_t)mask[at+1] << 8 | (uint32_t)mask[at+2] << 16;
@@ -30,6 +31,7 @@ static uint16_t read_region(const uint8_t* mask, uint32_t i, uint8_t bits) {
 }
 
 static void write_region(uint8_t* mask, uint32_t i, uint8_t bits, uint16_t value) {
+    if (!bits) return;
     if (bits > 8) {
         uint32_t bit = (i % 8u) * bits, at = (i / 8u) * bits + bit / 8u;
         uint32_t shifted = (uint32_t)value << (bit % 8u);
@@ -156,14 +158,20 @@ static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, u
     for (uint32_t r=0; r<count; r++)
         if (rules[r].biome_region > 0) requested |= 1u << (rules[r].biome_region-1);
     uint8_t used = 0;
+    const uint16_t geometry = R_OCEAN|R_HELL|R_SPACE|R_UNDERGROUND|R_CAVERN;
     for (uint32_t id=0; id<TX_REGION_COUNT; id++)
-        if (requested & (1u<<id)) bits[id] = 1u << used++;
-    w->region_mask_bits = used<=1 ? 1 : used<=2 ? 2 : used<=4 ? 4 : used<=8 ? 8 : used;
+        if ((requested & (1u<<id)) && !(geometry & (1u<<id))) bits[id] = 1u << used++;
+    w->region_mask_bits = used<=2 ? used : used<=4 ? 4 : used<=8 ? 8 : used;
+    for (uint32_t id=0; id<TX_REGION_COUNT; id++)
+        if (requested & geometry & (1u<<id)) bits[id] = 1u << used++;
+    const uint8_t geometry_ids[] = {8,9,11,12,13};
+    for (uint32_t k=0; k<5; k++) w->region_geometry[k] = bits[geometry_ids[k]];
     for (uint32_t r=0; r<count; r++)
         rules[r].biome_region_bit = rules[r].biome_region>0 ? bits[rules[r].biome_region-1] : 0;
     packing[0] = 0;
     for (uint32_t id=0; id<TX_REGION_COUNT; id++)
-        for (uint32_t i=0; i<(1u<<id); i++) packing[(1u<<id)|i] = packing[i] | bits[id];
+        for (uint32_t i=0; i<(1u<<id); i++)
+            packing[(1u<<id)|i] = packing[i] | ((geometry & (1u<<id)) ? 0 : bits[id]);
     return requested;
 }
 
@@ -195,7 +203,7 @@ int tx_regions_build(TxWorld* w, TxTileRule* rules, uint32_t count) {
     for (uint32_t m=0; m<METRIC_COUNT; m++)
         if (scan.needed_counts & C(m)) scan.metrics[scan.metric_count++]=(uint8_t)m;
     if (scan.metric_count && !tx_scan_tile_markers(w,NULL,0,&points,classify_run,&scan)) goto cleanup;
-    while (scan.next_column<width) emit_column(w,&scan,scan.next_column);
+    while (scan.metric_count && scan.next_column<width) emit_column(w,&scan,scan.next_column);
     if (scan.low_mask && (double)scan.active_tiles/((double)width*height)<0.1) {
         tx_internal_free(scan.mask); scan.mask=scan.low_mask; scan.low_mask=NULL;
     }
@@ -212,7 +220,15 @@ cleanup:
 }
 
 uint16_t tx_region_at(const TxWorld* w, uint32_t x, uint32_t y) {
-    return w->region_mask ? read_region(w->region_mask,x*(uint32_t)w->maxTilesY+y,w->region_mask_bits) : 0;
+    if (!w->region_mask) return 0;
+    uint16_t region = read_region(w->region_mask,x*(uint32_t)w->maxTilesY+y,w->region_mask_bits);
+    /* Coordinate-only regions need no per-tile storage. */
+    if (w->region_geometry[0] && ocean_at(w,x,y)) region |= w->region_geometry[0];
+    if ((int32_t)y > w->maxTilesY - 200) region |= w->region_geometry[1];
+    if (y <= w->worldSurface * 0.3499999940395355) region |= w->region_geometry[2];
+    if (y > w->worldSurface && y <= w->rockLayer) region |= w->region_geometry[3];
+    if (y > w->rockLayer && (int32_t)y <= w->maxTilesY - 200) region |= w->region_geometry[4];
+    return region;
 }
 
 uint32_t tx_region_run(const TxWorld* w, uint32_t x, uint32_t y, uint32_t run) {
