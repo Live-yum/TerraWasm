@@ -16,6 +16,7 @@ typedef struct {
     uint8_t *mask, *low_mask;
     uint16_t previous_wall;
     uint8_t metrics[METRIC_COUNT], metric_count;
+    uint16_t desert_threshold;
     uint32_t active_tiles, needed_counts, next_column;
 } RegionScan;
 
@@ -54,14 +55,14 @@ static uint32_t needed_metrics(uint16_t regions) {
     return metrics;
 }
 
-static uint16_t normal_regions(const TxWorld* w, const int* n, uint32_t cell, uint32_t x, uint32_t y, int threshold) {
+static uint16_t normal_regions(const TxWorld* w, const int* n, uint32_t cell, uint32_t x, uint32_t y, int threshold, int desert_threshold) {
     int flowers = n[FLOWERS] * (w->infectedSeed ? 30 : 10);
     int evil = n[CORRUPT] > flowers ? n[CORRUPT] - flowers : 0;
     int blood = n[CRIMSON] > flowers ? n[CRIMSON] - flowers : 0;
     uint16_t region = 0;
     if (n[DUNGEON] >= 250 && (cell & (C(DUNGEON)|DUNGEON_WALL))) region |= R_DUNGEON;
     if ((n[JUNGLE] >= 140 && (int32_t)y <= w->maxTilesY - 200) || (cell & TEMPLE)) region |= R_JUNGLE;
-    if (n[DESERT] >= threshold) region |= R_DESERT;
+    if (n[DESERT] >= desert_threshold) region |= R_DESERT;
     if (n[SNOW] >= threshold) region |= R_SNOW;
     if (evil - n[HALLOW] >= 300) region |= R_CORRUPT;
     if (blood - n[HALLOW] >= 300) region |= R_CRIMSON;
@@ -109,11 +110,11 @@ static void emit_column(TxWorld* w, RegionScan* scan, uint32_t x) {
     for (uint32_t y=height; y-- > 0;) {
         if (column[y] >> 16) { candidate = column[y] >> 16; next = y; }
         int dual = w->dualdungeonsSeed && y > w->worldSurface && (int32_t)y <= w->maxTilesY - 200;
-        uint16_t region = normal_regions(w,counts,column[y],x,y,1500);
+        uint16_t region = normal_regions(w,counts,column[y],x,y,1500,scan->desert_threshold);
         if (dual) region = dual_regions(region,column[y],next-y < 300 ? candidate : 0);
         write_region(scan->mask,x*height+y,w->region_mask_bits,scan->packing[region]);
         if (scan->low_mask) {
-            region = normal_regions(w,counts,column[y],x,y,300);
+            region = normal_regions(w,counts,column[y],x,y,300,300);
             if (dual) region = dual_regions(region,column[y],next-y < 300 ? candidate : 0);
             write_region(scan->low_mask,x*height+y,w->region_mask_bits,scan->packing[region]);
         }
@@ -181,14 +182,16 @@ static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, u
 
 int tx_regions_build(TxWorld* w, TxTileRule* rules, uint32_t count) {
     uint32_t needed=0, width=(uint32_t)w->maxTilesX, height=(uint32_t)w->maxTilesY;
-    uint8_t surface_sand_split = 0;
+    uint8_t surface_sand_split = 0, protect_desert_edges = 0;
     for (uint32_t r=0; r<count; r++) {
         needed |= rules[r].biome_region>0 || rules[r].exclude_biome_region>0;
         surface_sand_split |= rules[r].terrain_theme == 1;
+        protect_desert_edges |= rules[r].exclude_biome_region == 3;
     }
     if (!needed) { w->surface_sand_split=surface_sand_split; return 1; }
     if (!width || !height || width>UINT32_MAX/height || height>UINT32_MAX/(169u*4u)) return 0;
     RegionScan scan = {0}; TxBuf points = {0}; int ok = 0;
+    scan.desert_threshold = protect_desert_edges ? 300 : 1500;
     scan.packing = (uint16_t*)tx_alloc((1u<<TX_REGION_COUNT)*2u);
     if (!scan.packing) goto cleanup;
     uint16_t requested = compile_regions(w,rules,count,scan.packing);

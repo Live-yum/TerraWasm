@@ -39,14 +39,19 @@ static int natural_sand_source(uint16_t type) {
     }
 }
 
+static int existing_desert_block(uint16_t type) {
+    return type == 53 || type == 112 || type == 116 || type == 234 ||
+           (type >= 396 && type <= 403);
+}
+
 void tx_apply_theme(TxTile* t, int terrain, int wall, int furniture, uint32_t y, double world_surface) {
     static const uint16_t blocks[] = {396, 147, 60};
     static const uint16_t beams[] = {577, 574, 575};
     static const uint16_t safe_walls[] = {34, 31, 42};
     static const uint16_t wild_walls[] = {187, 71, 64};
     if (terrain > 0 && t->active && t->type < sizeof(THEME_TERRAIN) && THEME_TERRAIN[t->type]) {
-        if (terrain == 1 && t->type == 53) {
-            /* Keep existing sand, including unclassified desert edges. */
+        if (terrain == 1 && existing_desert_block(t->type)) {
+            /* Keep existing desert material, including unclassified edges. */
         } else if (terrain == 1 && y <= world_surface && natural_sand_source(t->type)) {
             t->type = 53;
         } else {

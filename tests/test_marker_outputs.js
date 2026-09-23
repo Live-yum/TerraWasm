@@ -1446,6 +1446,8 @@ test('desert conversion preserves the original desert and lays sand over new sur
   const M=await loadModule(), width=1200, height=700, cells=new Map();
   for(let i=0;i<1500;i++) cells.set(`${500+i%75},${250+Math.floor(i/75)}`,{type:53});
   cells.set('535,230',{type:21,fx:108,fy:18,wall:7});
+  cells.set('630,230',{type:21,fx:108,fy:18,wall:7}); // Fringe sees <1500 desert cells.
+  cells.set('630,250',{type:397,wall:187});
   for(let y=180;y<=220;y++) cells.set(`800,${y}`,{type:0}); // One RLE run crosses worldSurface.
   cells.set('801,190',{type:1}); cells.set('802,190',{type:53});
   const source=makeEntityWorld(cells,{width,height,latest:true}), outputs=[];
@@ -1464,6 +1466,8 @@ test('desert conversion preserves the original desert and lays sand over new sur
       const actual=fixtureCells(commitFixture(M,opened),width,height);
       assert.deepEqual(actual.get('535,230'),{type:21,fx:108,fy:18,wall:7});
       assert.deepEqual(actual.get('535,250'),{type:53});
+      assert.deepEqual(actual.get('630,230'),{type:21,fx:108,fy:18,wall:7});
+      assert.deepEqual(actual.get('630,250'),{type:397,wall:187});
       assert.equal(actual.get('800,200').type,53);
       assert.equal(actual.get('800,201').type,396);
       assert.equal(actual.get('801,190').type,396);
