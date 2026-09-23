@@ -1313,10 +1313,125 @@ test('dungeon transparency includes surface entrances, safe walls and wall-less 
   }
 });
 
+test('fourteen environment predicates cover furniture and compose without extra scans', async () => {
+  const M=await loadModule(); M._tx_reset_heap();
+  const baseline=M._tx_heap_used(), width=3200, height=900, cells=new Map(), probes=[];
+  for(const [id,type,count,x] of [[3,53,1500,450],[4,147,1500,750],[5,25,300,1050],
+    [6,203,300,1350],[7,117,125,1650],[8,70,100,1950],[2,60,140,2250],[1,41,300,2550]]) {
+    for(let i=0;i<count;i++) cells.set(`${x+i%75},${250+Math.floor(i/75)}`,{type});
+    probes.push({x:x+35,y:230,biomes:[id]},{x:x+35,y:390,biomes:[]});
+  }
+  for(const y of [69,70,71,200,201,400,401,700,701,899]) probes.push({x:2100,y,biomes:[]});
+  for(const x of [0,379,380,width-380,width-379,width-1])
+    for(const y of [340,341]) probes.push({x,y,biomes:[]});
+  const regionsAt = ({x,y,biomes}) => {
+    const ids=[...biomes];
+    if(y<=340&&(x<380||x>width-380)) ids.push(9);
+    if(y>700) ids.push(10);
+    if(y<=200*0.3499999940395355) ids.push(12);
+    if(y>200&&y<=400) ids.push(13);
+    if(y>400&&y<=700) ids.push(14);
+    if(y<=200&&!ids.length) ids.push(11);
+    return ids;
+  };
+  for(const {x,y,biomes} of probes) cells.set(`${x},${y}`,{type:21,fx:108,fy:18,wall:biomes.includes(1)?7:4,color:13,wallColor:9});
+  const source=makeEntityWorld(cells,{width,height,latest:true});
+  const original=fixtureCells(source,width,height), single=new Map(), calls=new Map();
+  const cases=[...Array.from({length:14},(_,i)=>[i+1]),[1,2],[3,4,5],[3,4,5,6,7],Array.from({length:14},(_,i)=>i+1)];
+  for(const ids of cases) {
+    const opened=openWorld(M,source);
+    const run=(name,request={})=>{
+      const result=executeOperation(M,opened.handle,name,request);
+      assert.equal(result.status,0,result.status?JSON.stringify(readLastErrorJson(M)):undefined);
+      return JSON.parse(result.value);
+    };
+    try {
+      run('header_patch',{patch:{spawnTileX:1000,spawnTileY:100,worldSurface:200,rockLayer:400,dualDungeonsSeed:false,skyblockWorld:false}});
+      if(ids.length>1) run('begin_output_preparation',{map:true});
+      run('batch_update_tiles',{rules:ids.flatMap(biome_region=>[
+        {where:{biome_region,is_active:1},patch:{invisible_block:1}},
+        {where:{biome_region,has_wall:1},patch:{invisible_wall:1}},
+      ])});
+      if(ids.length>1) run('finish_output_preparation');
+      const actual=fixtureCells(commitFixture(M,opened),width,height);
+      for(const probe of probes) {
+        const key=`${probe.x},${probe.y}`, expected={...original.get(key)};
+        if(regionsAt(probe).some(id=>ids.includes(id))) Object.assign(expected,{invisible_block:1,invisible_wall:1});
+        assert.deepEqual(actual.get(key),expected,`regions ${ids} at ${key}`);
+      }
+      if(ids.length===1) {single.set(ids[0],actual);calls.set(ids[0],run('get_output_preparation_stats').tile_decode_calls);}
+      else {
+        const expected=new Map([...original].map(([key,tile])=>[key,{...tile}]));
+        for(const id of ids) for(const [key,tile] of single.get(id)) {
+          if(tile.invisible_block) expected.get(key).invisible_block=1;
+          if(tile.invisible_wall) expected.get(key).invisible_wall=1;
+        }
+        assert.deepEqual(actual,expected,`packed combined regions ${ids}`);
+        assert.equal(run('get_output_preparation_stats').tile_decode_calls,calls.get(1),'one shared classification pass');
+      }
+    } finally {closeWorld(M,opened);}
+    assert.equal(M._tx_heap_used(),baseline);
+  }
+  for(let id=1;id<=14;id++) assert.equal(calls.get(id),calls.get(10)*([9,10,12,13,14].includes(id)?1:2),`source passes for ${id}`);
+});
+
+test('environment thresholds handle sparse skyblocks, sunflowers, hallow cancellation and ocean sand', async () => {
+  const M=await loadModule(), width=1200,height=700;
+  for(const spec of [
+    {id:3,type:53,count:1499,match:false},{id:3,type:53,count:1500,match:true},
+    {id:4,type:147,count:1499,match:false},{id:4,type:147,count:1500,match:true},
+    {id:5,type:25,count:300,flowers:1,match:false},{id:5,type:25,count:330,flowers:1,infectedSeed:true,match:true},
+    {id:5,type:25,count:300,holy:125,match:false},{id:7,type:117,count:125,evil:1,match:false},
+    {id:6,type:203,count:300,match:true},{id:8,type:70,count:99,match:false},{id:8,type:70,count:100,match:true},
+    {id:3,type:53,count:300,skyblockWorld:true,match:true},{id:4,type:147,count:300,skyblockWorld:true,match:true},
+    {id:3,type:53,count:300,skyblockWorld:true,dense:true,match:false},
+    {id:3,type:53,count:1500,ocean:true,match:false},
+  ]) {
+    const cells=new Map(), start=spec.ocean?100:500, px=start+35, py=230;
+    for(let i=0;i<spec.count;i++) cells.set(`${start+i%75},${250+Math.floor(i/75)}`,{type:spec.type});
+    for(const [count,type,y] of [[spec.flowers,27,210],[spec.holy,117,211],[spec.evil,25,214]])
+      for(let i=0;i<(count||0);i++) cells.set(`${start+i%75},${y+Math.floor(i/75)}`,{type});
+    if(spec.dense) for(let x=0;x<300;x++) for(let y=0;y<350;y++) cells.set(`${x},${y}`,{type:1});
+    cells.set(`${px},${py}`,{type:21,fx:0,fy:0,wall:4});
+    const opened=openWorld(M,makeEntityWorld(cells,{width,height,latest:true}));
+    try {
+      let result=executeOperation(M,opened.handle,'header_patch',{patch:{spawnTileX:600,spawnTileY:100,
+        worldSurface:250,rockLayer:350,skyblockWorld:!!spec.skyblockWorld,infectedSeed:!!spec.infectedSeed,dualDungeonsSeed:false}});
+      assert.equal(result.status,0);
+      result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{biome_region:spec.id,type:21},patch:{invisible_block:1}}]});
+      assert.equal(result.status,0);
+      assert.equal(!!fixtureCells(commitFixture(M,opened),width,height).get(`${px},${py}`).invisible_block,spec.match,JSON.stringify(spec));
+    } finally {closeWorld(M,opened);}
+  }
+});
+
+test('dual dungeon floor biomes support desert, snow, infections, hallow and mushroom together', async () => {
+  const M=await loadModule(), width=128,height=800,cells=new Map();
+  const floors=[[10,396,[3]],[25,147,[4]],[40,25,[5]],[55,203,[6]],[70,117,[7]],[85,70,[8]],[100,112,[3,5]]];
+  for(const [x,type] of floors) {
+    for(let y=60;y<=200;y++) cells.set(`${x},${y}`,{wall:187});
+    cells.set(`${x},200`,{type,wall:187});
+    cells.set(`${x},80`,{type:21,fx:0,fy:0,wall:187});
+  }
+  const source=makeEntityWorld(cells,{width,height,latest:true});
+  for(let id=3;id<=8;id++) {
+    const opened=openWorld(M,source);
+    try {
+      let result=executeOperation(M,opened.handle,'header_patch',{patch:{spawnTileX:20,spawnTileY:60,
+        worldSurface:50,rockLayer:120,dualDungeonsSeed:true,skyblockWorld:false}});
+      assert.equal(result.status,0);
+      result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{biome_region:id,type:21},patch:{invisible_block:1}}]});
+      assert.equal(result.status,0);
+      const actual=fixtureCells(commitFixture(M,opened),width,height);
+      for(const [x,,ids] of floors) assert.equal(!!actual.get(`${x},80`).invisible_block,ids.includes(id),`region ${id}, floor at ${x}`);
+    } finally {closeWorld(M,opened);}
+  }
+});
+
 test('invalid region selectors fail without silently modifying the entire world', async () => {
   const M=await loadModule(), opened=openWorld(M,makeEntityWorld());
   try {
-    for(const biome_region of [null,true,'1',0,-1,3,1.5]) {
+    for(const biome_region of [null,true,'1',0,-1,15,1.5]) {
       const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{biome_region},patch:{invisible_block:1}}]});
       assert.notEqual(result.status,0);
     }

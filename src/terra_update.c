@@ -359,9 +359,9 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
     return out->ok;
 }
 
-void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint8_t region) {
+void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint16_t region) {
     for (uint32_t r = 0; r < rule_count; r++) {
-        if (rules[r].biome_region > 0 && !(region & rules[r].biome_region)) continue;
+        if (rules[r].biome_region > 0 && !(region & rules[r].biome_region_bit)) continue;
         if (!tile_matches_where(t, &rules[r])) continue;
         rules[r].matched += run;
         if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
@@ -629,9 +629,9 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                 }
                 wp = json_find_key(request + where_pos, where_len, "biome_region");
                 if (wp >= 0) {
-                    if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 1 || iv > 2) {
+                    if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 1 || iv > TX_REGION_COUNT) {
                         tx_internal_free(rules);
-                        tx_set_error("TERRAX_VALIDATION_ERROR", "biome_region must be 1 (dungeon) or 2 (jungle)");
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "biome_region must be an integer from 1 to 14");
                         return -1;
                     }
                     rules[r].biome_region = iv;
