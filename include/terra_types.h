@@ -409,6 +409,7 @@ typedef struct TxWorld {
     uint8_t* region_mask; /* batch-local packed environment membership */
     uint8_t region_mask_bits;
     uint16_t region_geometry[5]; /* ocean, hell, space, underground, cavern */
+    uint8_t surface_sand_split; /* batch-local surface run boundary */
     uint32_t output_capture;
     uint32_t tile_decode_calls;
 
@@ -492,6 +493,8 @@ typedef struct TxTileRule {
     int32_t  is_active;     /* -1=any, 0=inactive, 1=active */
     int32_t  biome_region; /* -1=any; public environment ID 1..14 */
     uint16_t biome_region_bit; /* compiled batch-local membership bit */
+    int32_t  exclude_biome_region; /* -1=any; skip public environment ID 1..14 */
+    uint16_t exclude_biome_region_bit;
     int32_t  has_wall;      /* -1=any, 0=absent, 1=present */
     int32_t  type;          /* -1=any */
     int32_t  wall;          /* -1=any */

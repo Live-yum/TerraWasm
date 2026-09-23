@@ -1435,9 +1435,43 @@ test('invalid region selectors fail without silently modifying the entire world'
     for(const biome_region of [null,true,'1',0,-1,15,1.5]) {
       const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{biome_region},patch:{invisible_block:1}}]});
       assert.notEqual(result.status,0);
+      const excluded=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{exclude_biome_region:biome_region},patch:{invisible_block:1}}]});
+      assert.notEqual(excluded.status,0);
     }
     assert.deepEqual(fixtureCells(commitFixture(M,opened),128,300),fixtureCells(makeEntityWorld(),128,300));
   } finally {closeWorld(M,opened);}
+});
+
+test('desert conversion preserves the original desert and lays sand over new surface terrain', async () => {
+  const M=await loadModule(), width=1200, height=700, cells=new Map();
+  for(let i=0;i<1500;i++) cells.set(`${500+i%75},${250+Math.floor(i/75)}`,{type:53});
+  cells.set('535,230',{type:21,fx:108,fy:18,wall:7});
+  for(let y=180;y<=220;y++) cells.set(`800,${y}`,{type:0}); // One RLE run crosses worldSurface.
+  cells.set('801,190',{type:1}); cells.set('802,190',{type:53});
+  const source=makeEntityWorld(cells,{width,height,latest:true}), outputs=[];
+  for(const prepare of [false,true]) {
+    const opened=openWorld(M,source);
+    const run=(name,request={})=>{const result=executeOperation(M,opened.handle,name,request);assert.equal(result.status,0,result.status?JSON.stringify(readLastErrorJson(M)):undefined);};
+    try {
+      run('header_patch',{patch:{spawnTileX:600,spawnTileY:100,worldSurface:200,rockLayer:400}});
+      if(prepare)run('begin_output_preparation',{map:true});
+      run('batch_update_tiles',{rules:[
+        {where:{exclude_biome_region:3,is_active:1},patch:{terrain_theme:1}},
+        {where:{exclude_biome_region:3,has_wall:1},patch:{wall_theme:1}},
+        {where:{exclude_biome_region:3,is_active:1},patch:{furniture_theme:1}},
+      ]});
+      if(prepare)run('finish_output_preparation');
+      const actual=fixtureCells(commitFixture(M,opened),width,height);
+      assert.deepEqual(actual.get('535,230'),{type:21,fx:108,fy:18,wall:7});
+      assert.deepEqual(actual.get('535,250'),{type:53});
+      assert.equal(actual.get('800,200').type,53);
+      assert.equal(actual.get('800,201').type,396);
+      assert.equal(actual.get('801,190').type,396);
+      assert.equal(actual.get('802,190').type,53);
+      outputs.push(actual);
+    } finally {closeWorld(M,opened);}
+  }
+  assert.deepEqual(outputs[1],outputs[0]);
 });
 
 test('dual dungeon environments use the nearest solid biome and respect depth and the 300-tile limit', async () => {

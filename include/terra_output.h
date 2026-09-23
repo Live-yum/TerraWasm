@@ -20,7 +20,7 @@ int tx_output_begin(TxWorld*, const MapMarkerEntry*, uint32_t, int, uint32_t);
 int tx_output_scan(TxWorld*, TxTileRule*, uint32_t, TxBuf*);
 void tx_output_free(TxPreparedOutput*);
 void tx_output_clear(TxWorld*);
-void tx_apply_tile_rules(TxTile*, TxTileRule*, uint32_t, uint32_t, uint16_t);
+void tx_apply_tile_rules(TxTile*, TxTileRule*, uint32_t, uint32_t, uint16_t, uint32_t, double);
 uint8_t* tx_output_take_rgb(TxWorld*, uint32_t, uint32_t);
 int tx_output_copy_rows(TxWorld*, uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t);
 TxPreparedMap* tx_map_base_begin(TxWorld*);

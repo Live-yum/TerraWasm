@@ -117,7 +117,7 @@ static void init_tile_rule(TxTileRule* rule) {
     memset(rule, 0, sizeof(TxTileRule));
     rule->is_active = -1;
     rule->has_wall = -1;
-    rule->biome_region = -1;
+    rule->biome_region = rule->exclude_biome_region = -1;
     rule->type = -1;
     rule->wall = -1;
     rule->liquid_amount = -1;
@@ -208,9 +208,9 @@ static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
     return 1;
 }
 
-static void apply_tile_patch(TxTile* t, const TxTileRule* rule) {
+static void apply_tile_patch(TxTile* t, const TxTileRule* rule, uint32_t y, double world_surface) {
     if (rule->terrain_theme > 0 || rule->wall_theme > 0 || rule->furniture_theme > 0)
-        tx_apply_theme(t, rule->terrain_theme, rule->wall_theme, rule->furniture_theme);
+        tx_apply_theme(t, rule->terrain_theme, rule->wall_theme, rule->furniture_theme, y, world_surface);
     if (rule->patch_is_active >= 0) t->active = (uint8_t)rule->patch_is_active;
     if (rule->patch_type >= 0) { t->type = (uint16_t)rule->patch_type; t->active = 1; }
     if (rule->patch_wall >= 0) t->wall = (uint16_t)rule->patch_wall;
@@ -359,13 +359,14 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
     return out->ok;
 }
 
-void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint16_t region) {
+void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint16_t region, uint32_t y, double world_surface) {
     for (uint32_t r = 0; r < rule_count; r++) {
         if (rules[r].biome_region > 0 && !(region & rules[r].biome_region_bit)) continue;
+        if (rules[r].exclude_biome_region > 0 && (region & rules[r].exclude_biome_region_bit)) continue;
         if (!tile_matches_where(t, &rules[r])) continue;
         rules[r].matched += run;
         if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
-            apply_tile_patch(t, &rules[r]);
+            apply_tile_patch(t, &rules[r], y, world_surface);
             rules[r].updated += run;
         }
     }
@@ -419,7 +420,7 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
             remaining -= run;
             t.same = run - 1u;
 
-            tx_apply_tile_rules(&t, rules, rule_count, run, tx_region_at(w, x, y));
+            tx_apply_tile_rules(&t, rules, rule_count, run, tx_region_at(w, x, y), y, w->worldSurface);
 
             /* Check if this tile falls in the pixel art region.
              * If the run spans the pixel art area, we need to split it. */
@@ -636,6 +637,15 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                     }
                     rules[r].biome_region = iv;
                 }
+                wp = json_find_key(request + where_pos, where_len, "exclude_biome_region");
+                if (wp >= 0) {
+                    if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 1 || iv > TX_REGION_COUNT) {
+                        tx_internal_free(rules);
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "exclude_biome_region must be an integer from 1 to 14");
+                        return -1;
+                    }
+                    rules[r].exclude_biome_region = iv;
+                }
             }
             int patch_pos = json_find_key(request + elem_pos, elem_len, "patch");
             if (patch_pos >= 0) {
@@ -712,12 +722,14 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
     if (!init_tile_buffer(&tile_buf, batch_cap, "failed to allocate tile buffer")) {
         if (w->region_mask) tx_internal_free(w->region_mask);
         w->region_mask = NULL;
+        w->surface_sand_split = 0;
         tx_internal_free(rules);
         return -1;
     }
     int rebuilt = rebuild_tile_section(w, &tile_buf, rules, (uint32_t)rule_count);
     if (w->region_mask) tx_internal_free(w->region_mask);
     w->region_mask = NULL;
+    w->surface_sand_split = 0;
     if (!rebuilt) {
         tx_internal_free(tile_buf.data);
         tx_internal_free(rules);

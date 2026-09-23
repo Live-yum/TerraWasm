@@ -28,13 +28,30 @@ static void theme_furniture(TxTile* t, int theme) {
     t->type = f->target[theme];
 }
 
-void tx_apply_theme(TxTile* t, int terrain, int wall, int furniture) {
+static int natural_sand_source(uint16_t type) {
+    switch (type) {
+    case 0: case 2: case 23: case 59: case 60: case 70: case 109:
+    case 147: case 161: case 163: case 164: case 199: case 200:
+    case 661: case 662:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void tx_apply_theme(TxTile* t, int terrain, int wall, int furniture, uint32_t y, double world_surface) {
     static const uint16_t blocks[] = {396, 147, 60};
     static const uint16_t beams[] = {577, 574, 575};
     static const uint16_t safe_walls[] = {34, 31, 42};
     static const uint16_t wild_walls[] = {187, 71, 64};
     if (terrain > 0 && t->active && t->type < sizeof(THEME_TERRAIN) && THEME_TERRAIN[t->type]) {
-        t->type = THEME_TERRAIN[t->type] == 2 ? beams[terrain - 1] : blocks[terrain - 1];
+        if (terrain == 1 && t->type == 53) {
+            /* Keep existing sand, including unclassified desert edges. */
+        } else if (terrain == 1 && y <= world_surface && natural_sand_source(t->type)) {
+            t->type = 53;
+        } else {
+            t->type = THEME_TERRAIN[t->type] == 2 ? beams[terrain - 1] : blocks[terrain - 1];
+        }
         t->frame_x = t->frame_y = 0;
     }
     if (wall > 0 && t->wall && t->wall < sizeof(THEME_HOUSE_WALL))

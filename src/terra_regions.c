@@ -155,8 +155,10 @@ static int classify_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t, uint32_t 
 
 static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, uint16_t* packing) {
     uint16_t requested = 0, bits[TX_REGION_COUNT] = {0};
-    for (uint32_t r=0; r<count; r++)
+    for (uint32_t r=0; r<count; r++) {
         if (rules[r].biome_region > 0) requested |= 1u << (rules[r].biome_region-1);
+        if (rules[r].exclude_biome_region > 0) requested |= 1u << (rules[r].exclude_biome_region-1);
+    }
     uint8_t used = 0;
     const uint16_t geometry = R_OCEAN|R_HELL|R_SPACE|R_UNDERGROUND|R_CAVERN;
     for (uint32_t id=0; id<TX_REGION_COUNT; id++)
@@ -166,8 +168,10 @@ static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, u
         if (requested & geometry & (1u<<id)) bits[id] = 1u << used++;
     const uint8_t geometry_ids[] = {8,9,11,12,13};
     for (uint32_t k=0; k<5; k++) w->region_geometry[k] = bits[geometry_ids[k]];
-    for (uint32_t r=0; r<count; r++)
+    for (uint32_t r=0; r<count; r++) {
         rules[r].biome_region_bit = rules[r].biome_region>0 ? bits[rules[r].biome_region-1] : 0;
+        rules[r].exclude_biome_region_bit = rules[r].exclude_biome_region>0 ? bits[rules[r].exclude_biome_region-1] : 0;
+    }
     packing[0] = 0;
     for (uint32_t id=0; id<TX_REGION_COUNT; id++)
         for (uint32_t i=0; i<(1u<<id); i++)
@@ -177,8 +181,12 @@ static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, u
 
 int tx_regions_build(TxWorld* w, TxTileRule* rules, uint32_t count) {
     uint32_t needed=0, width=(uint32_t)w->maxTilesX, height=(uint32_t)w->maxTilesY;
-    for (uint32_t r=0; r<count; r++) needed |= rules[r].biome_region>0;
-    if (!needed) return 1;
+    uint8_t surface_sand_split = 0;
+    for (uint32_t r=0; r<count; r++) {
+        needed |= rules[r].biome_region>0 || rules[r].exclude_biome_region>0;
+        surface_sand_split |= rules[r].terrain_theme == 1;
+    }
+    if (!needed) { w->surface_sand_split=surface_sand_split; return 1; }
     if (!width || !height || width>UINT32_MAX/height || height>UINT32_MAX/(169u*4u)) return 0;
     RegionScan scan = {0}; TxBuf points = {0}; int ok = 0;
     scan.packing = (uint16_t*)tx_alloc((1u<<TX_REGION_COUNT)*2u);
@@ -216,6 +224,7 @@ cleanup:
     if (scan.low_mask) tx_internal_free(scan.low_mask);
     if (points.data) tx_internal_free(points.data);
     if (!ok) tx_set_error("TERRAX_REGION_FAILED","region classification failed or ran out of memory");
+    w->surface_sand_split = ok ? surface_sand_split : 0;
     return ok;
 }
 
@@ -232,6 +241,9 @@ uint16_t tx_region_at(const TxWorld* w, uint32_t x, uint32_t y) {
 }
 
 uint32_t tx_region_run(const TxWorld* w, uint32_t x, uint32_t y, uint32_t run) {
+    /* The desert theme uses the surface boundary even without a region mask. */
+    if (w->surface_sand_split && y <= w->worldSurface && y + run > (uint32_t)w->worldSurface + 1u)
+        run = (uint32_t)w->worldSurface + 1u - y;
     if (!w->region_mask) return run;
     uint16_t region=tx_region_at(w,x,y);
     uint32_t length=1;
