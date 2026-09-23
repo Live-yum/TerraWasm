@@ -1337,7 +1337,8 @@ test('fourteen environment predicates cover furniture and compose without extra 
   for(const {x,y,biomes} of probes) cells.set(`${x},${y}`,{type:21,fx:108,fy:18,wall:biomes.includes(1)?7:4,color:13,wallColor:9});
   const source=makeEntityWorld(cells,{width,height,latest:true});
   const original=fixtureCells(source,width,height), single=new Map(), calls=new Map();
-  const cases=[...Array.from({length:14},(_,i)=>[i+1]),[1,2],[3,4,5],[3,4,5,6,7],Array.from({length:14},(_,i)=>i+1)];
+  const cases=[...Array.from({length:14},(_,i)=>[i+1]),[1,2],[3,4,5],[3,4,5,6,7],
+    ...[9,10,11,12,13,14].map(length=>Array.from({length},(_,i)=>i+1))];
   for(const ids of cases) {
     const opened=openWorld(M,source);
     const run=(name,request={})=>{

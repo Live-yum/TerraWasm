@@ -8,7 +8,7 @@ extern void tx_set_error(const char*, const char*);
 #include "terra_region_cells.inc"
 
 /* Keep only the 169 columns needed by SceneMetrics, not a full classified
- * world. Each selected environment uses one bit (rounded to 1/2/4/8/16). */
+ * world. Small masks use 1/2/4/8 bits; larger combinations use exact bits. */
 typedef struct {
     uint32_t* columns;
     uint16_t* rows;
@@ -20,13 +20,22 @@ typedef struct {
 } RegionScan;
 
 static uint16_t read_region(const uint8_t* mask, uint32_t i, uint8_t bits) {
-    if (bits == 16) return ((const uint16_t*)mask)[i];
+    if (bits > 8) {
+        uint32_t bit = (i % 8u) * bits, at = (i / 8u) * bits + bit / 8u;
+        uint32_t value = mask[at] | (uint32_t)mask[at+1] << 8 | (uint32_t)mask[at+2] << 16;
+        return (value >> (bit % 8u)) & ((1u << bits) - 1u);
+    }
     uint32_t cells = 8u / bits;
     return (mask[i / cells] >> ((i % cells) * bits)) & ((1u << bits) - 1u);
 }
 
 static void write_region(uint8_t* mask, uint32_t i, uint8_t bits, uint16_t value) {
-    if (bits == 16) { ((uint16_t*)mask)[i] = value; return; }
+    if (bits > 8) {
+        uint32_t bit = (i % 8u) * bits, at = (i / 8u) * bits + bit / 8u;
+        uint32_t shifted = (uint32_t)value << (bit % 8u);
+        mask[at] |= shifted; mask[at+1] |= shifted >> 8; mask[at+2] |= shifted >> 16;
+        return;
+    }
     uint32_t cells = 8u / bits;
     mask[i / cells] |= value << ((i % cells) * bits);
 }
@@ -149,7 +158,7 @@ static uint16_t compile_regions(TxWorld* w, TxTileRule* rules, uint32_t count, u
     uint8_t used = 0;
     for (uint32_t id=0; id<TX_REGION_COUNT; id++)
         if (requested & (1u<<id)) bits[id] = 1u << used++;
-    w->region_mask_bits = used<=1 ? 1 : used<=2 ? 2 : used<=4 ? 4 : used<=8 ? 8 : 16;
+    w->region_mask_bits = used<=1 ? 1 : used<=2 ? 2 : used<=4 ? 4 : used<=8 ? 8 : used;
     for (uint32_t r=0; r<count; r++)
         rules[r].biome_region_bit = rules[r].biome_region>0 ? bits[rules[r].biome_region-1] : 0;
     packing[0] = 0;
@@ -167,7 +176,8 @@ int tx_regions_build(TxWorld* w, TxTileRule* rules, uint32_t count) {
     scan.packing = (uint16_t*)tx_alloc((1u<<TX_REGION_COUNT)*2u);
     if (!scan.packing) goto cleanup;
     uint16_t requested = compile_regions(w,rules,count,scan.packing);
-    uint64_t bytes64 = ((uint64_t)width*height*w->region_mask_bits+7u)/8u;
+    /* Two trailing bytes make the unaligned 3-byte reads safe at the end. */
+    uint64_t bytes64 = ((uint64_t)width*height*w->region_mask_bits+7u)/8u + 2u;
     if (bytes64>UINT32_MAX) goto cleanup;
     uint32_t bytes = (uint32_t)bytes64;
     scan.mask = tx_alloc(bytes);
