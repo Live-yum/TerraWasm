@@ -1,5 +1,6 @@
 #include "terra_map.h"
 #include "terra_output.h"
+#include "terra_regions.h"
 #include <string.h>
 
 extern uint8_t* tx_alloc(uint32_t);
@@ -82,14 +83,20 @@ int tx_scan_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
         end = w->file_len;
     }
     for (uint32_t x = 0; x < width; x++) {
-        uint32_t curr_count = 0u;
+        uint32_t curr_count = 0u, remaining = 0u;
+        TxTile source;
         for (uint32_t y = 0; y < height;) {
-            TxTile tile;
-            if (!read_tile_at(w, &off, end, &tile) || (uint32_t)tile.same + 1u > height - y) {
-                tx_set_error("TERRAX_BAD_TILE_STREAM", "invalid run during entity location");
-                goto cleanup;
+            if (!remaining) {
+                if (!read_tile_at(w, &off, end, &source) || (uint32_t)source.same + 1u > height - y) {
+                    tx_set_error("TERRAX_BAD_TILE_STREAM", "invalid run during entity location");
+                    goto cleanup;
+                }
+                remaining = (uint32_t)source.same + 1u;
             }
-            uint32_t run = (uint32_t)tile.same + 1u;
+            TxTile tile = source;
+            uint32_t run = tx_region_run(w, x, y, remaining);
+            remaining -= run;
+            tile.same = run - 1u;
             if (visit && !visit(w, x, y, &tile, run, context)) goto cleanup;
             for (uint32_t m = tile.active && tile.type < type_count ? by_type[tile.type] : UINT16_MAX;
                  m != UINT16_MAX; m = next_marker[m]) {

@@ -406,6 +406,7 @@ typedef struct TxWorld {
     TxBuf entity_marker_cache; /* selector bytes followed by compact points */
     uint32_t entity_marker_key_bytes;
     TxPreparedOutput* prepared_output;
+    uint8_t* region_mask; /* batch-local packed environment membership */
     uint32_t output_capture;
     uint32_t tile_decode_calls;
 
@@ -487,6 +488,7 @@ typedef enum TxBiomeMode {
 typedef struct TxTileRule {
     /* Where clause (optional fields, -1 = don't match) */
     int32_t  is_active;     /* -1=any, 0=inactive, 1=active */
+    int32_t  biome_region; /* -1=any, 1=dungeon, 2=jungle including temple */
     int32_t  has_wall;      /* -1=any, 0=absent, 1=present */
     int32_t  type;          /* -1=any */
     int32_t  wall;          /* -1=any */

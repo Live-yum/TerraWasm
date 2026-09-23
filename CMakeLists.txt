@@ -51,6 +51,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_render_png_lowmem.c"
     "${SRC_DIR}/terra_map.c"
     "${SRC_DIR}/terra_markers.c"
+    "${SRC_DIR}/terra_regions.c"
     "${SRC_DIR}/terra_icon.c"
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"

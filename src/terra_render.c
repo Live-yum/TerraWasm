@@ -15,6 +15,7 @@
  */
 #include "terra_types.h"
 #include "terra_output.h"
+#include "terra_regions.h"
 #include "terra_render_task.h"
 
 extern const uint8_t* tx_get_tile_colors(void);
@@ -511,7 +512,7 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   TxPreparedOutput* p = w->prepared_output;
   if (scan->tiles) {
     extern void write_tile(TxWorld*, TxBuf*, const TxTile*, uint32_t);
-    tx_apply_tile_rules(t, scan->rules, scan->count, run);
+    tx_apply_tile_rules(t, scan->rules, scan->count, run, tx_region_at(w, x, y));
     write_tile(w, scan->tiles, t, run - 1u);
     if (!scan->tiles->ok) return 0;
     normalize_written_tile(w, t);

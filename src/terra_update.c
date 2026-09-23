@@ -1,4 +1,5 @@
 #include "terra_output.h"
+#include "terra_regions.h"
 /*
  * terra_update.c -- Streaming tile modifications with batch updates.
  *
@@ -115,6 +116,7 @@ static void init_tile_rule(TxTileRule* rule) {
     memset(rule, 0, sizeof(TxTileRule));
     rule->is_active = -1;
     rule->has_wall = -1;
+    rule->biome_region = -1;
     rule->type = -1;
     rule->wall = -1;
     rule->liquid_amount = -1;
@@ -353,8 +355,9 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
     return out->ok;
 }
 
-void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run) {
+void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint8_t region) {
     for (uint32_t r = 0; r < rule_count; r++) {
+        if (rules[r].biome_region > 0 && !(region & rules[r].biome_region)) continue;
         if (!tile_matches_where(t, &rules[r])) continue;
         rules[r].matched += run;
         if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
@@ -397,13 +400,22 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
 
     /* Column-major streaming pass (matching Terraria's tile order) */
     for (uint32_t x = 0; x < world_w; x++) {
-        uint32_t y = 0;
+        uint32_t y = 0, remaining = 0;
+        TxTile source;
         while (y < world_h) {
-            TxTile t;
-            if (!read_tile_at(w, &off, end, &t)) break;
-            uint32_t run = (uint32_t)t.same + 1u;
+            if (!remaining) {
+                if (!read_tile_at(w, &off, end, &source) || (uint32_t)source.same + 1u > world_h - y) {
+                    out->ok = 0;
+                    break;
+                }
+                remaining = (uint32_t)source.same + 1u;
+            }
+            TxTile t = source;
+            uint32_t run = tx_region_run(w, x, y, remaining);
+            remaining -= run;
+            t.same = run - 1u;
 
-            tx_apply_tile_rules(&t, rules, rule_count, run);
+            tx_apply_tile_rules(&t, rules, rule_count, run, tx_region_at(w, x, y));
 
             /* Check if this tile falls in the pixel art region.
              * If the run spans the pixel art area, we need to split it. */
@@ -611,6 +623,15 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
                     }
                     rules[r].has_wall = iv;
                 }
+                wp = json_find_key(request + where_pos, where_len, "biome_region");
+                if (wp >= 0) {
+                    if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 1 || iv > 2) {
+                        tx_internal_free(rules);
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "biome_region must be 1 (dungeon) or 2 (jungle)");
+                        return -1;
+                    }
+                    rules[r].biome_region = iv;
+                }
             }
             int patch_pos = json_find_key(request + elem_pos, elem_len, "patch");
             if (patch_pos >= 0) {
@@ -663,14 +684,23 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
     }
 
     if (w->prepared_output && w->prepared_output->ready) tx_output_clear(w);
+    if (!tx_regions_build(w, rules, (uint32_t)rule_count)) {
+        tx_internal_free(rules);
+        return -1;
+    }
     uint32_t batch_cap = w->section_overrides[1].active
         ? w->section_overrides[1].len : (w->ends[1] - w->starts[1]);
     TxBuf tile_buf;
     if (!init_tile_buffer(&tile_buf, batch_cap, "failed to allocate tile buffer")) {
+        if (w->region_mask) tx_internal_free(w->region_mask);
+        w->region_mask = NULL;
         tx_internal_free(rules);
         return -1;
     }
-    if (!rebuild_tile_section(w, &tile_buf, rules, (uint32_t)rule_count)) {
+    int rebuilt = rebuild_tile_section(w, &tile_buf, rules, (uint32_t)rule_count);
+    if (w->region_mask) tx_internal_free(w->region_mask);
+    w->region_mask = NULL;
+    if (!rebuilt) {
         tx_internal_free(tile_buf.data);
         tx_internal_free(rules);
         tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed");

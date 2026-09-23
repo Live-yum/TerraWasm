@@ -1103,12 +1103,21 @@ test("next operation and close reclaim unconsumed map output", async () => {
 
 // Independent RLE fixture: two diagonal/bridged veins, adjacent different ore,
 // all frames of multi-tile objects, and both sword styles.
-function makeEntityWorld(customCells) {
+function makeEntityWorld(customCells, options = {}) {
   const { makeSectionedWorld } = require('./helpers/sectioned-world');
   const base = makeSectionedWorld(128, { worldName: 'entity-fixture' });
-  const header = Buffer.from(base.subarray(base.readUInt32LE(6)));
-  const afterName = 1 + Buffer.byteLength('entity-fixture');
-  const width = 128, height = 300;
+  const latest = options.latest;
+  const pointerOffset = latest ? 26 : 6;
+  const version = latest ? TEST_BYTES.readUInt32LE(0) : 128;
+  const header = latest ? Buffer.from(TEST_BYTES.subarray(TEST_BYTES.readUInt32LE(26), TEST_BYTES.readUInt32LE(30)))
+    : Buffer.from(base.subarray(base.readUInt32LE(6)));
+  let afterName = 1 + Buffer.byteLength('entity-fixture');
+  if (latest) {
+    let offset = 0;
+    const skipString = () => { let length = 0, shift = 0, byte; do { byte = header[offset++]; length |= (byte & 127) << shift; shift += 7; } while(byte & 128); offset += length; };
+    skipString(); skipString(); afterName = offset + 8 + 16;
+  }
+  const width = options.width || 128, height = options.height || 300;
   header.writeInt32LE(height, afterName + 20);
   header.writeInt32LE(width, afterName + 24);
   const cells = new Map();
@@ -1148,13 +1157,166 @@ function makeEntityWorld(customCells) {
     if(rle) data.push((run-1)&255); if(rle===128) data.push((run-1)>>8);
     y+=run;
   }
-  const format=Buffer.alloc(4+2+7*4+2+important.length);
-  format.writeUInt32LE(128); format.writeUInt16LE(7,4);
+  const sections = latest ? TEST_BYTES.readUInt16LE(24) : 7;
+  const format=Buffer.alloc(pointerOffset+sections*4+2+important.length);
+  format.writeUInt32LE(version);
+  if(latest) TEST_BYTES.copy(format,4,4,24);
+  format.writeUInt16LE(sections,pointerOffset-2);
   const tileStart=format.length+header.length, tileEnd=tileStart+data.length;
-  for(let i=0;i<7;i++) format.writeUInt32LE(i===0?format.length:i===1?tileStart:tileEnd,6+i*4);
-  format.writeUInt16LE(700,34); important.copy(format,36);
+  for(let i=0;i<sections;i++) format.writeUInt32LE(i===0?format.length:i===1?tileStart:tileEnd,pointerOffset+i*4);
+  format.writeUInt16LE(700,pointerOffset+sections*4); important.copy(format,pointerOffset+sections*4+2);
   return Buffer.concat([format,header,Buffer.from(data)]);
 }
+
+// Decode fixture tiles independently of the WASM decoder, ignoring RLE grouping.
+function fixtureCells(bytes, width, height) {
+  const base = bytes.readUInt32LE(0) >= 135 ? 26 : 6;
+  const sections = bytes.readUInt16LE(base - 2);
+  const important = bytes.subarray(base + sections * 4 + 2);
+  let offset = bytes.readUInt32LE(base + 4);
+  const end = bytes.readUInt32LE(base + 8), cells = new Map();
+  for (let x = 0; x < width; x++) for (let y = 0; y < height;) {
+    const f1 = bytes[offset++], f2 = f1 & 1 ? bytes[offset++] : 0;
+    const f3 = f2 & 1 ? bytes[offset++] : 0, f4 = f3 & 1 ? bytes[offset++] : 0;
+    const tile = {};
+    if (f1 & 2) {
+      tile.type = bytes[offset++]; if (f1 & 32) tile.type |= bytes[offset++] << 8;
+      if (important[tile.type >> 3] & (1 << (tile.type & 7))) {
+        tile.fx = bytes.readInt16LE(offset); tile.fy = bytes.readInt16LE(offset + 2); offset += 4;
+      }
+      if (f3 & 8) tile.color = bytes[offset++];
+    }
+    if (f1 & 4) { tile.wall = bytes[offset++]; if (f3 & 16) tile.wallColor = bytes[offset++]; }
+    if (f4 & 2) tile.invisible_block = 1;
+    if (f4 & 4) tile.invisible_wall = 1;
+    let run = 1;
+    if (f1 >> 6 === 1) run += bytes[offset++];
+    else if (f1 >> 6) { run += bytes.readUInt16LE(offset); offset += 2; }
+    assert.ok(y + run <= height);
+    if (Object.keys(tile).length) for (let dy = 0; dy < run; dy++) cells.set(`${x},${y+dy}`, tile);
+    y += run;
+  }
+  assert.equal(offset, end);
+  return cells;
+}
+
+function commitFixture(M, opened) {
+  const sizePtr = mustAlloc(M, 4, 'size'), handlePtr = mustAlloc(M, 4, 'handle');
+  let ptr = 0;
+  try {
+    assert.equal(M._terra_world_commit_to_buffer(opened.handle,0,0,sizePtr,handlePtr),0);
+    const size = readU32(M,sizePtr); ptr = mustAlloc(M,size,'bytes');
+    assert.equal(M._terra_world_commit_to_buffer(opened.handle,ptr,size,sizePtr,handlePtr),0);
+    opened.handle = readU32(M,handlePtr);
+    return Buffer.from(M.HEAPU8.subarray(ptr,ptr+size));
+  } finally { if(ptr) M._tx_free(ptr); M._tx_free(handlePtr); M._tx_free(sizePtr); }
+}
+
+test('environment transparency matches game neighborhoods and shares final tiles with prepared outputs', async () => {
+  const M = await loadModule(); M._tx_reset_heap();
+  const baseline = M._tx_heap_used(), width = 220, height = 500, cells = new Map();
+  for(let x=5;x<20;x++) for(let y=85;y<105;y++) cells.set(`${x},${y}`,{type:41,wall:7});
+  for(let x=130;x<144;x++) for(let y=230;y<240;y++) cells.set(`${x},${y}`,{type:60});
+  // Long runs cross both neighborhood boundaries and the underworld cutoff.
+  for(let y=0;y<height;y++) {
+    cells.set(`10,${y}`,{type:1,wall:7,color:3,wallColor:9});
+    cells.set(`180,${y}`,{wall:4});
+  }
+  for(const [x,y] of [[30,90],[180,230],[219,499],[30,30]])
+    cells.set(`${x},${y}`,{type:21,fx:108,fy:18,color:14,wall:x===30?7:4,wallColor:7});
+  cells.set('219,499',{type:26,fx:54,fy:18,wall:87});
+  cells.set('218,499',{type:226});
+  const source = makeEntityWorld(cells,{width,height});
+  const canonical = fixtureCells(source,width,height);
+  const jungle = [], dungeon = [];
+  for(const [key,t] of canonical) {
+    if(t.type===60||t.type===226) jungle.push(key.split(',').map(Number));
+    if(t.type===41) dungeon.push(key.split(',').map(Number));
+  }
+  const near = (points,x,y) => points.filter(([a,b])=>a>=x-84&&a<x+85&&b>=y-62&&b<y+62).length;
+  for(const biome_region of [1,2]) {
+    const expected = new Map([...canonical].map(([key,t])=>{
+      const [x,y]=key.split(',').map(Number), next={...t};
+      const matches = biome_region===1 ? near(dungeon,x,y)>=250&&y>40&&t.wall===7
+        : (near(jungle,x,y)>=140&&y<=height-200)||t.wall===87||t.type===226;
+      if(matches) { if(t.type!==undefined) next.invisible_block=1; if(t.wall) next.invisible_wall=1; }
+      return [key,next];
+    }));
+    const outputs=[];
+    for(const prepare of [false,true]) {
+      const opened=openWorld(M,source);
+      const run=(name,request={})=>{
+        const result=executeOperation(M,opened.handle,name,request);
+        assert.equal(result.status,0,result.status ? JSON.stringify(readLastErrorJson(M)) : undefined);
+        return JSON.parse(result.value);
+      };
+      try {
+        if(prepare) run('begin_output_preparation',{map:true});
+        run('batch_update_tiles',{rules:[
+          {where:{biome_region,is_active:1},patch:{invisible_block:1}},
+          {where:{biome_region,has_wall:1},patch:{invisible_wall:1}},
+        ]});
+        if(prepare) run('finish_output_preparation');
+        const calls=run('get_output_preparation_stats').tile_decode_calls;
+        assert.deepEqual(fixtureCells(commitFixture(M,opened),width,height),expected);
+        installMarkerColorIndex(M,opened.handle);
+        run('render_lit_map'); const map=getMapBytes(M,opened.handle).map;
+        run('render_preview_png',{max_w:0}); const full=getThumbnailPng(M,opened.handle).png;
+        run('render_preview_png',{max_w:256}); const list=getThumbnailPng(M,opened.handle).png;
+        if(prepare) assert.equal(run('get_output_preparation_stats').tile_decode_calls,calls,'no output rescans after regional replacement');
+        outputs.push({map,full,list});
+      } finally {closeWorld(M,opened);}
+      assert.equal(M._tx_heap_used(),baseline,'regional mask must be released');
+    }
+    assert.deepEqual(outputs[1],outputs[0]);
+  }
+});
+
+test('invalid region selectors fail without silently modifying the entire world', async () => {
+  const M=await loadModule(), opened=openWorld(M,makeEntityWorld());
+  try {
+    for(const biome_region of [null,true,'1',0,-1,3,1.5]) {
+      const result=executeOperation(M,opened.handle,'batch_update_tiles',{rules:[{where:{biome_region},patch:{invisible_block:1}}]});
+      assert.notEqual(result.status,0);
+    }
+    assert.deepEqual(fixtureCells(commitFixture(M,opened),128,300),fixtureCells(makeEntityWorld(),128,300));
+  } finally {closeWorld(M,opened);}
+});
+
+test('dual dungeon environments use the nearest solid biome and respect depth and the 300-tile limit', async () => {
+  const M=await loadModule(); M._tx_reset_heap();
+  const width=128,height=800,cells=new Map();
+  for(const x of [20,30,40,50,60,70]) for(let y=60;y<=500;y++) cells.set(`${x},${y}`,{wall:7});
+  cells.set('20,360',{type:60,wall:7});
+  cells.set('30,200',{type:41,wall:7});
+  cells.set('40,100',{type:41,wall:7}); // Above rock layer: stops search without dungeon.
+  cells.set('50,150',{type:147,wall:7}); cells.set('50,160',{type:60,wall:7});
+  cells.set('60,149',{wall:64}); cells.set('60,150',{type:59,wall:7});
+  cells.set('70,100',{type:61,wall:7}); cells.set('70,180',{type:226,wall:7}); // Non-solid jungle plant does not stop search.
+  const source=makeEntityWorld(cells,{width,height,latest:true});
+  for(const biome_region of [1,2]) {
+    const opened=openWorld(M,source);
+    const run=(name,request)=>{
+      const result=executeOperation(M,opened.handle,name,request);
+      assert.equal(result.status,0,result.status ? JSON.stringify(readLastErrorJson(M)) : undefined);
+    };
+    try {
+      run('header_patch',{patch:{spawnTileX:20,spawnTileY:60,dungeonX:40,dungeonY:50,dualDungeonsSeed:true,worldSurface:50,rockLayer:120,drunkWorld:false,remixWorld:false}});
+      run('batch_update_tiles',{rules:[{where:{biome_region,has_wall:1},patch:{invisible_wall:1}}]});
+      const actual=fixtureCells(commitFixture(M,opened),width,height);
+      const coated=(x,y)=>actual.get(`${x},${y}`)?.invisible_wall||0;
+      if(biome_region===1) {
+        assert.equal(coated(30,60),1); assert.equal(coated(30,200),1); assert.equal(coated(30,201),0);
+        assert.equal(coated(40,60),0); assert.equal(coated(20,100),0);
+      } else {
+        assert.equal(coated(20,60),0); assert.equal(coated(20,61),1); assert.equal(coated(20,361),0);
+        assert.equal(coated(50,100),0); assert.equal(coated(50,151),1);
+        assert.equal(coated(60,100),1); assert.equal(coated(60,151),0);
+        assert.equal(coated(70,90),1); assert.equal(coated(30,100),0);
+      }
+    } finally {closeWorld(M,opened);}
+  }
+});
 
 test('entity points share PNG/MAP anchors, deduplicate frames, and merge diagonal veins', async () => {
   const M=await loadModule(); M._tx_reset_heap();
