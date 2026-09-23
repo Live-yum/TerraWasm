@@ -1237,7 +1237,7 @@ test('environment transparency matches game neighborhoods and shares final tiles
   for(const biome_region of [1,2]) {
     const expected = new Map([...canonical].map(([key,t])=>{
       const [x,y]=key.split(',').map(Number), next={...t};
-      const matches = biome_region===1 ? near(dungeon,x,y)>=250&&y>40&&t.wall===7
+      const matches = biome_region===1 ? near(dungeon,x,y)>=250&&(t.wall===7||t.type===41)
         : (near(jungle,x,y)>=140&&y<=height-200)||t.wall===87||t.type===226;
       if(matches) { if(t.type!==undefined) next.invisible_block=1; if(t.wall) next.invisible_wall=1; }
       return [key,next];
@@ -1269,6 +1269,47 @@ test('environment transparency matches game neighborhoods and shares final tiles
       assert.equal(M._tx_heap_used(),baseline,'regional mask must be released');
     }
     assert.deepEqual(outputs[1],outputs[0]);
+  }
+});
+
+test('dungeon transparency includes surface entrances, safe walls and wall-less outer bricks', async () => {
+  const M=await loadModule(); M._tx_reset_heap();
+  const baseline=M._tx_heap_used(), width=360, height=500;
+  for(const [brick,unsafe,safe,slab] of [[41,7,17,100],[43,8,18,104],[44,9,19,102]]) {
+    const cells=new Map();
+    for(const top of [20,180]) {
+      for(let x=10;x<30;x++) for(let y=top;y<top+20;y++) cells.set(`${x},${y}`,{type:brick});
+      cells.set(`9,${top-1}`,{type:brick}); // Exposed roof / outer wall has no background wall.
+      cells.set(`35,${top}`,{type:21,fx:108,fy:18,wall:safe,color:14});
+      cells.set(`36,${top}`,{type:15,fx:0,fy:18,wall:unsafe});
+      cells.set(`37,${top}`,{type:1,wall:slab,wallColor:3});
+      cells.set(`38,${top}`,{type:1,wall:4}); // Nearby ordinary terrain is not dungeon structure.
+    }
+    cells.set('300,20',{type:brick,wall:safe}); // Isolated material elsewhere is not a dungeon.
+    const source=makeEntityWorld(cells,{width,height,latest:true});
+    const expected=fixtureCells(source,width,height);
+    for(const [key,tile] of expected) {
+      if(key==='300,20'||key.startsWith('38,')) continue;
+      tile.invisible_block=1;
+      if(tile.wall) tile.invisible_wall=1;
+    }
+    for(const flags of [{},{drunkWorld:true},{dualDungeonsSeed:true},{worldSurface:30}]) {
+      const opened=openWorld(M,source);
+      const run=(name,request)=>{
+        const result=executeOperation(M,opened.handle,name,request);
+        assert.equal(result.status,0,result.status ? JSON.stringify(readLastErrorJson(M)) : undefined);
+      };
+      try {
+        run('header_patch',{patch:{spawnTileX:20,spawnTileY:60,worldSurface:80,rockLayer:120,dungeonX:20,dungeonY:100,
+          drunkWorld:false,dualDungeonsSeed:false,remixWorld:false,...flags}});
+        run('batch_update_tiles',{rules:[
+          {where:{biome_region:1,is_active:1},patch:{invisible_block:1}},
+          {where:{biome_region:1,has_wall:1},patch:{invisible_wall:1}},
+        ]});
+        assert.deepEqual(fixtureCells(commitFixture(M,opened),width,height),expected);
+      } finally {closeWorld(M,opened);}
+      assert.equal(M._tx_heap_used(),baseline);
+    }
   }
 });
 

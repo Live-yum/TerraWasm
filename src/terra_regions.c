@@ -43,7 +43,8 @@ static uint8_t dual_candidate(const TxTile* t, uint16_t above, double rock, uint
 static int classify_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t, uint32_t run, void* context) {
     RegionScan* scan = context;
     uint8_t flags = 0;
-    if (t->wall == 7 || t->wall == 8 || t->wall == 9 || (t->wall >= 94 && t->wall <= 99)) flags |= DUNGEON_WALL;
+    if ((t->wall >= 7 && t->wall <= 9) || (t->wall >= 17 && t->wall <= 19) ||
+        (t->wall >= 94 && t->wall <= 105)) flags |= DUNGEON_WALL;
     if (t->wall == 87 || (t->active && t->type == 226)) flags |= TEMPLE;
     if (t->active) {
         switch (t->type) {
@@ -83,7 +84,9 @@ static void dual_regions(TxWorld* w, const uint8_t* column, uint8_t* mask, uint3
     for (uint32_t y = height; y-- > 0;) {
         if (column[y] >> 4) { candidate = column[y] >> 4; next = y; }
         if (y <= w->worldSurface || (int32_t)y > w->maxTilesY - 200) continue;
-        uint8_t region = (column[y] & TEMPLE) ? 2 : 0;
+        uint32_t index = x * height + y;
+        uint8_t region = (mask[index >> 2] >> ((index & 3u) * 2u)) & 1u;
+        if (column[y] & TEMPLE) region |= 2;
         if (next - y < 300) {
             if (candidate == 2 || candidate == 4) region |= 2;
             if (candidate == 3 && (column[y] & DUNGEON_WALL)) region |= 1;
@@ -112,8 +115,6 @@ int tx_regions_build(TxWorld* w, const TxTileRule* rules, uint32_t count) {
     memset(mask, 0, bytes);
     memset(rows, 0, height * 4u);
     for (uint32_t x = 0; x < 85 && x < width; x++) count_column(classification + x * height, rows, height, 1);
-    double dungeon_depth = w->worldSurface;
-    if ((w->drunkWorld || w->worldSurface <= 50.0) && w->dungeonY + 40 > dungeon_depth) dungeon_depth = w->dungeonY + 40;
     for (uint32_t x = 0; x < width; x++) {
         uint32_t jungle = 0, dungeon = 0;
         const uint8_t* column = classification + x * height;
@@ -121,7 +122,9 @@ int tx_regions_build(TxWorld* w, const TxTileRule* rules, uint32_t count) {
         for (uint32_t y = 0; y < height; y++) {
             uint8_t region = (column[y] & TEMPLE) ? 2 : 0;
             if (jungle >= 140 && (int32_t)y <= w->maxTilesY - 200) region |= 2;
-            if (dungeon >= 250 && y > dungeon_depth && (column[y] & DUNGEON_WALL)) region |= 1;
+            /* Editing includes the surface entrance and exposed masonry, not
+             * just the underground unsafe-wall area used for enemy spawning. */
+            if (dungeon >= 250 && (column[y] & (DUNGEON_TILE | DUNGEON_WALL))) region |= 1;
             set_region(mask, x * height + y, region);
             if (y >= 62) { jungle -= rows[(y - 62) * 2]; dungeon -= rows[(y - 62) * 2 + 1]; }
             if (y + 62 < height) { jungle += rows[(y + 62) * 2]; dungeon += rows[(y + 62) * 2 + 1]; }
