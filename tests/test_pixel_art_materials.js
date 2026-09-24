@@ -86,6 +86,18 @@ test('combined tile/wall, either empty, both empty, dirt zero and paints survive
     const reopened = output + '.again';
     assert.equal(M._terra_world_save(handle, str(reopened)), 0);
     assert.deepEqual(firstRow(fs.readFileSync(reopened), height, cases.length), expected);
+    // A second isolation write must preserve both transparent and white interior cells.
+    const bandPalette = Buffer.from([0, 0, 0, 0, 9, 8, 7, 255, 255, 255, 255, 255]);
+    const bandMaps = Buffer.alloc(24);
+    bandMaps.set([9, 8, 7, 255], 0); // empty material deliberately clears the border
+    bandMaps.set([255, 255, 255, 255], 12); bandMaps[22] = 3; // white = skip
+    const band = new Uint16Array(4096); band[0] = 1; band[2] = 2;
+    assert.equal(M._txw_begin_pixel_art_indexed(handle, 0, 0, cases.length, 1, alloc(bandPalette), 3,
+      alloc(txci), txci.length, 0, 0, alloc(bandMaps), 2, 0), 0);
+    assert.equal(M._txw_add_pixel_art_chunk(handle, 0, 0, alloc(new Uint8Array(band.buffer)), band.length, 2), 0);
+    assert.equal(M._terra_world_save(handle, str(output)), 0);
+    expected[0] = { active: false, type: 0, wall: 0, tileColor: 0, wallColor: 0 };
+    assert.deepEqual(firstRow(fs.readFileSync(output), height, cases.length), expected);
   } finally {
     if (handle) M._terra_world_close(handle);
     allocations.forEach(p => M._tx_free(p));
