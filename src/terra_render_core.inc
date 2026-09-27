@@ -220,10 +220,10 @@ static void get_paint_color(uint8_t paint_id, uint8_t* r, uint8_t* g, uint8_t* b
 }
 
 /*
- * Blend a base color with a paint color, matching TerraX's blendWithPaint logic.
+ * Blend a base color with a paint color, matching Terraria 1.4.5.8 MapColor.
  *
  * paint_id 0 = no change
- * paint_id 29 (shadow): multiply paint color by (blue * 0.3)
+ * paint_id 29 (shadow): multiply paint color by min(b,max(r,g)) / 255 * 0.3
  * paint_id 30 (negative): invert for tiles, half-invert (50%) for walls
  * Other paints: multiply paint color by max(r,g,b) / 255
  */
@@ -235,19 +235,18 @@ static void blend_with_paint(uint8_t base_r, uint8_t base_g, uint8_t base_b,
   uint8_t pr, pg, pb;
   get_paint_color(paint_id, &pr, &pg, &pb);
 
-  /* Convert to float-like integer math. Use fixed-point with *256 scaling. */
   uint32_t oldR = (uint32_t)base_r;
   uint32_t oldG = (uint32_t)base_g;
   uint32_t oldB = (uint32_t)base_b;
 
   if (paint_id == 29) {
-    /* Shadow paint: ratio = oldBlue/255 * 0.3 */
-    /* Use fixed-point: ratio_fixed = oldB * 77 / 255 (0.3 * 255 = 77) */
-    /* Then result = paint * ratio = paint * oldB * 77 / (255 * 255) */
-    uint32_t ratio_fp = oldB * 77u; /* 0.3 * 255 = 76.5 ~ 77 */
-    *out_r = (uint8_t)((pr * ratio_fp) / 65025u); /* 65025 = 255*255 */
-    *out_g = (uint8_t)((pg * ratio_fp) / 65025u);
-    *out_b = (uint8_t)((pb * ratio_fp) / 65025u);
+    /* MapColor swaps G with R, then B with R; B becomes min(B,max(R,G)). */
+    uint32_t max_rg = oldR > oldG ? oldR : oldG;
+    uint32_t shadow = oldB < max_rg ? oldB : max_rg;
+    float ratio = ((float)shadow / 255.0f) * 0.3f;
+    *out_r = (uint8_t)((float)pr * ratio);
+    *out_g = (uint8_t)((float)pg * ratio);
+    *out_b = (uint8_t)((float)pb * ratio);
     return;
   }
 
@@ -266,9 +265,9 @@ static void blend_with_paint(uint8_t base_r, uint8_t base_g, uint8_t base_b,
   /* Negative paint (id 30) */
   if (is_wall) {
     /* Wall: half-invert (50%) */
-    *out_r = (uint8_t)(((255u - oldR) * 128u) / 255u); /* 0.5 * 255 = 127.5 ~ 128 */
-    *out_g = (uint8_t)(((255u - oldG) * 128u) / 255u);
-    *out_b = (uint8_t)(((255u - oldB) * 128u) / 255u);
+    *out_r = (uint8_t)((255u - oldR) / 2u);
+    *out_g = (uint8_t)((255u - oldG) / 2u);
+    *out_b = (uint8_t)((255u - oldB) / 2u);
   } else {
     /* Tile: full invert */
     *out_r = (uint8_t)(255u - oldR);
