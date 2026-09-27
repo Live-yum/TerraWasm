@@ -206,10 +206,6 @@ static int is_bad_wall(uint16_t id) {
   return 0;
 }
 
-static uint8_t scale_u8(uint8_t v, uint32_t num, uint32_t den) {
-  return (uint8_t)(((uint32_t)v * num) / den);
-}
-
 /* Get paint RGB from TX_PAINT_COLORS table. Paint IDs are 1-30. */
 static void get_paint_color(uint8_t paint_id, uint8_t* r, uint8_t* g, uint8_t* b) {
   if (paint_id == 0 || paint_id > 30) { *r = 255; *g = 255; *b = 255; return; }
@@ -355,10 +351,6 @@ static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32
     }
     /* Try builtin wall color first */
     if (read_builtin_wall_color(t->wall, 0, out)) {
-      /* Darken walls (62% like before) */
-      out[0] = scale_u8(out[0], 62u, 100u);
-      out[1] = scale_u8(out[1], 62u, 100u);
-      out[2] = scale_u8(out[2], 62u, 100u);
       /* Apply paint blending for walls */
       if (t->wall_color > 0) {
         uint8_t pr, pg, pb;
@@ -369,9 +361,6 @@ static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32
     }
     /* Fallback to external color table */
     if (read_color_table(wall_colors, wall_color_count, t->wall, out)) {
-      out[0] = scale_u8(out[0], 62u, 100u);
-      out[1] = scale_u8(out[1], 62u, 100u);
-      out[2] = scale_u8(out[2], 62u, 100u);
       if (t->wall_color > 0) {
         uint8_t pr, pg, pb;
         blend_with_paint(out[0], out[1], out[2], t->wall_color, 1, &pr, &pg, &pb);

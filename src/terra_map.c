@@ -574,13 +574,11 @@ static int map_value_for_txci_item(const TxciItem* item, uint32_t* out_value) {
     variant = item->variant;
     if (item->is_wall) {
         if (item->type_id >= TX_MAP_WALL_COUNT ||
-            !TX_MAP_WALL_EXISTS[item->type_id] ||
             !TX_MAP_WALL_ID_LIST[item->type_id] ||
             variant >= TX_MAP_WALL_TYPE_COUNTS[item->type_id]) return 0;
         base_type = TX_MAP_WALL_ID_LIST[item->type_id];
     } else {
         if (item->type_id >= TX_MAP_TILE_COUNT ||
-            !TX_MAP_TILE_EXISTS[item->type_id] ||
             !TX_MAP_TILE_ID_LIST[item->type_id] ||
             variant >= TX_MAP_TILE_TYPE_COUNTS[item->type_id]) return 0;
         base_type = TX_MAP_TILE_ID_LIST[item->type_id];
@@ -644,7 +642,7 @@ static uint32_t nearest_map_value_for_rgb(
     }
 
     for (uint32_t id = 0u; id < tile_count; id++) {
-        if (id >= TX_MAP_TILE_COUNT || !TX_MAP_TILE_EXISTS[id] || !TX_MAP_TILE_ID_LIST[id]) continue;
+        if (id >= TX_MAP_TILE_COUNT || !TX_MAP_TILE_ID_LIST[id]) continue;
         if (!map_read_color(tile_colors, tile_count, id, color)) continue;
         {
             uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
@@ -657,7 +655,7 @@ static uint32_t nearest_map_value_for_rgb(
         }
     }
     for (uint32_t id = 0u; id < wall_count; id++) {
-        if (id >= TX_MAP_WALL_COUNT || !TX_MAP_WALL_EXISTS[id] || !TX_MAP_WALL_ID_LIST[id]) continue;
+        if (id >= TX_MAP_WALL_COUNT || !TX_MAP_WALL_ID_LIST[id]) continue;
         if (!map_read_color(wall_colors, wall_count, id, color)) continue;
         {
             uint32_t distance = map_color_distance_sq(r, g, b, color[0], color[1], color[2]);
@@ -671,7 +669,7 @@ static uint32_t nearest_map_value_for_rgb(
 
     for (uint32_t id = 0u; id < TX_MAP_TILE_COUNT; id++) {
         uint32_t variant_count;
-        if (!TX_MAP_TILE_EXISTS[id] || !TX_MAP_TILE_ID_LIST[id]) continue;
+        if (!TX_MAP_TILE_ID_LIST[id]) continue;
         variant_count = TX_MAP_TILE_TYPE_COUNTS[id];
         if (variant_count > TX_COLOR_MAX_VARIANTS) variant_count = TX_COLOR_MAX_VARIANTS;
         for (uint32_t variant = 0u; variant < variant_count; variant++) {
@@ -686,7 +684,7 @@ static uint32_t nearest_map_value_for_rgb(
     }
     for (uint32_t id = 0u; id < TX_MAP_WALL_COUNT; id++) {
         uint32_t variant_count;
-        if (!TX_MAP_WALL_EXISTS[id] || !TX_MAP_WALL_ID_LIST[id]) continue;
+        if (!TX_MAP_WALL_ID_LIST[id]) continue;
         variant_count = TX_MAP_WALL_TYPE_COUNTS[id];
         if (variant_count > TX_COLOR_MAX_VARIANTS) variant_count = TX_COLOR_MAX_VARIANTS;
         for (uint32_t variant = 0u; variant < variant_count; variant++) {
