@@ -25,6 +25,7 @@ extern int parse_format(TxWorld*);
 extern int parse_header(TxWorld*);
 extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
 extern void write_tile(TxWorld*,TxBuf*,const TxTile*,uint32_t);
+extern void tx_render_stream_color(TxWorld*,const TxTile*,uint32_t,uint8_t*);
 extern int same_tile(const TxTile*,const TxTile*);
 extern void buf_init(TxBuf*,uint32_t);
 extern int apply_pixel_art_at(TxWorld*,uint32_t,uint32_t,TxTile*);
@@ -55,6 +56,7 @@ typedef struct StreamTask {
     char* request;
     uint32_t result_kind,result_length,result_offset;
     uint8_t* result;
+    uint8_t* rgb_cache;
     TxTileRule* rules;
     uint32_t rule_count;
     void* region_scan;
@@ -266,6 +268,12 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
         int ok=tx_output_begin(w,markers,count,0,(uint32_t)(map||t->full_png?256:width));if(markers)tx_internal_free(markers);if(!ok)goto invalid;
         if(!parse_marker_array(t->request,jlen,"chest_markers","item_id",&t->chest_markers,&t->chest_count))goto invalid;
         t->marker_scan=tx_marker_stream_begin(w,w->prepared_output->markers,count);if(!t->marker_scan)goto invalid;
+        if(t->full_png){
+            uint64_t bytes=(uint64_t)w->maxTilesX*w->maxTilesY*3;
+            /* Optional cache: allocation is admitted by the host before heap growth.
+             * Failure retains the strip path. Cap is one large-world RGB image. */
+            if(bytes<=60480000u)t->rgb_cache=tx_persistent_alloc((uint32_t)bytes);
+        }
         t->result_kind=map?2:1;t->stage=OP_SCAN;
     }
     return 0;
@@ -432,6 +440,14 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             uint32_t run=(uint32_t)tile.same+1;
             if(t->stage==OP_REGION){if(!tx_region_stream_run(w,t->region_scan,t->x,t->y,&tile,run))return -1;}
             else if(!tx_output_stream_run(w,t->x,t->y,&tile,run)||!tx_marker_stream_run(t->marker_scan,t->x,t->y,&tile,run))return -1;
+            if(t->rgb_cache){
+                uint8_t c[4];int colored=(tile.active&&!tile.invisible_block)||(tile.liquid_amount&&tile.liquid_type)||(tile.wall&&!tile.invisible_wall);
+                if(colored)tx_render_stream_color(w,&tile,t->y,c);
+                for(uint32_t yy=t->y;yy<t->y+run;yy++){
+                    if(!colored)tx_render_stream_color(w,NULL,yy,c);
+                    memcpy(t->rgb_cache+((uint64_t)yy*w->maxTilesX+t->x)*3,c,3);
+                }
+            }
             t->y+=run;if(t->y==(uint32_t)w->maxTilesY){if(t->marker_scan&&!tx_marker_stream_column(t->marker_scan))return -1;t->x++;t->y=0;}
         }else if(t->stage==OP_MEDIA){
             uint32_t offset,length;const uint8_t* bytes;
@@ -441,6 +457,10 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             int range=t->map_encoder?tx_stream_map_range(t->map_encoder,&first,&count):tx_stream_png_range(t->png_encoder,&first,&count);
             if(range<0)continue;
             if(!range){t->stage=DONE;if(t->map_encoder)t->result_length=tx_stream_map_size(t->map_encoder);continue;}
+            if(t->png_encoder&&t->rgb_cache){
+                int filled=tx_stream_png_rgb(t->png_encoder,t->rgb_cache);if(filled<0)return -1;
+                if(filled){if(!tx_stream_png_finish_strip(t->png_encoder))return -1;continue;}
+            }
             t->x=t->map_encoder?first:0;t->scan_end=t->map_encoder?first+count:(uint32_t)w->maxTilesX;t->y=0;
             t->cursor=w->stream_columns[t->x];t->input_length=0;t->stage=OP_MEDIA_SCAN;
         }else if(t->stage==OP_MEDIA_SCAN){
@@ -538,6 +558,7 @@ int32_t terra_world_stream_close(uint32_t id){
     if(t->rules)tx_internal_free(t->rules);
     if(t->operation)tx_internal_free(t->operation);if(t->request)tx_internal_free(t->request);
     if(t->result)tx_internal_free(t->result);
+    if(t->rgb_cache)tx_internal_free(t->rgb_cache);
     if(t->chest_markers)tx_internal_free(t->chest_markers);
     if(t->map_encoder)tx_stream_map_free(t->map_encoder);if(t->png_encoder)tx_stream_png_free(t->png_encoder);
     if(t->input)tx_internal_free(t->input);if(t->output.data)tx_internal_free(t->output.data);

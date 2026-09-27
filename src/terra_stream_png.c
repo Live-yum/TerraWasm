@@ -100,6 +100,15 @@ int tx_stream_png_run(TxStreamPng* p, uint32_t x, uint32_t y, const TxTile* t, u
         memcpy(p->rgba + ((yy - p->start) * p->width + x) * 4u, c, 4u);
     return 1;
 }
+int tx_stream_png_rgb(TxStreamPng* p, const uint8_t* rgb) {
+    if(!p||!rgb||!p->active||p->output.len)return -1;
+    if(p->phase)return 0;
+    const uint8_t* src=rgb+(uint64_t)p->start*p->width*3;
+    for(uint32_t i=0;i<p->rows*p->width;i++){
+        memcpy(p->rgba+i*4,src+i*3,3);p->rgba[i*4+3]=255;
+    }
+    return 1;
+}
 int tx_stream_png_finish_strip(TxStreamPng* p) {
     if (!p || !p->active || p->output.len) return fail();
     if (!p->phase) {
