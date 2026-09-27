@@ -58,7 +58,7 @@ void txw_clear_pixel_art_state(TxWorld* w) {
     w->pixel_art_chunks = NULL;
 }
 
-static void apply_map_to_tile(const TxPixelMap* map, TxTile* t) {
+void tx_apply_pixel_map(const TxPixelMap* map, TxTile* t) {
     if (map->active_mode == 3u) return;
     uint8_t saved_same = t->same;
     memset(t, 0, sizeof(TxTile));
@@ -91,6 +91,7 @@ static void apply_map_to_tile(const TxPixelMap* map, TxTile* t) {
 static uint32_t override_key(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return (uint32_t)r | ((uint32_t)g << 8u) | ((uint32_t)b << 16u) | ((uint32_t)a << 24u);
 }
+#define apply_map_to_tile tx_apply_pixel_map
 
 static uint32_t override_slot(uint32_t key, uint32_t mask) {
     key ^= key >> 16u;

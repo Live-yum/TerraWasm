@@ -120,6 +120,11 @@ typedef struct TxWorld {
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
     uint32_t file_len;
+    /* File-backed worlds keep only format/non-tile sections in file[]. Their
+     * external tile offsets must never be used as compact metadata offsets. */
+    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
+    uint32_t* stream_columns;
+    uint8_t stream_owned;
 
     /* Format metadata (parsed from binary) */
     uint32_t version;

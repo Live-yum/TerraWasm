@@ -253,3 +253,42 @@ uint32_t tx_region_run(const TxWorld* w, uint32_t x, uint32_t y, uint32_t run) {
     while (length<run && tx_region_at(w,x,y+length)==region) length++;
     return length;
 }
+
+void tx_region_stream_free(void* context){RegionScan* s=context;if(!s)return;if(s->columns)tx_internal_free(s->columns);if(s->rows)tx_internal_free(s->rows);if(s->packing)tx_internal_free(s->packing);if(s->mask)tx_internal_free(s->mask);if(s->low_mask)tx_internal_free(s->low_mask);tx_internal_free(s);}
+void* tx_region_stream_begin(TxWorld* w,TxTileRule* rules,uint32_t count){
+ uint32_t width=(uint32_t)w->maxTilesX,height=(uint32_t)w->maxTilesY;uint8_t protect_desert_edges=0;
+ for(uint32_t r=0;r<count;r++){w->surface_sand_split|=rules[r].terrain_theme==1;protect_desert_edges|=rules[r].exclude_biome_region==3;}
+    RegionScan* scan=(RegionScan*)tx_alloc(sizeof(*scan)); if(!scan)return NULL;memset(scan,0,sizeof(*scan));
+    scan->desert_threshold = protect_desert_edges ? 300 : 1500;
+    scan->packing = (uint16_t*)tx_alloc((1u<<TX_REGION_COUNT)*2u);
+    if (!scan->packing) goto failed;
+    uint16_t requested = compile_regions(w,rules,count,scan->packing);
+    /* Two trailing bytes make the unaligned 3-byte reads safe at the end. */
+    uint64_t bytes64 = ((uint64_t)width*height*w->region_mask_bits+7u)/8u + 2u;
+    if (bytes64>UINT32_MAX) goto failed;
+    uint32_t bytes = (uint32_t)bytes64;
+    scan->mask = tx_alloc(bytes);
+    scan->rows = (uint16_t*)tx_alloc(height*METRIC_COUNT*2u);
+    scan->columns = (uint32_t*)tx_alloc(169u*height*4u);
+    if (!scan->mask || !scan->rows || !scan->columns) goto failed;
+    memset(scan->mask,0,bytes); memset(scan->rows,0,height*METRIC_COUNT*2u);
+    memset(scan->columns,0,169u*height*4u);
+    if (w->skyblockWorld && (requested & (R_DESERT|R_SNOW|R_FOREST))) {
+        scan->low_mask=tx_alloc(bytes);
+        if (!scan->low_mask) goto failed;
+        memset(scan->low_mask,0,bytes);
+    }
+    scan->needed_counts = needed_metrics(requested);
+    for (uint32_t m=0; m<METRIC_COUNT; m++)
+        if (scan->needed_counts & C(m)) scan->metrics[scan->metric_count++]=(uint8_t)m;
+ return scan;
+failed:tx_region_stream_free(scan);return NULL;
+}
+int tx_region_stream_run(TxWorld* w,void* context,uint32_t x,uint32_t y,TxTile* t,uint32_t run){RegionScan* scan=context;return !scan->metric_count||classify_run(w,x,y,t,run,scan);}
+void tx_region_stream_finish(TxWorld* w,void* context){RegionScan* scan=context;uint32_t width=(uint32_t)w->maxTilesX,height=(uint32_t)w->maxTilesY;
+    while (scan->metric_count && scan->next_column<width) emit_column(w,scan,scan->next_column);
+    if (scan->low_mask && (double)scan->active_tiles/((double)width*height)<0.1) {
+        tx_internal_free(scan->mask); scan->mask=scan->low_mask; scan->low_mask=NULL;
+    }
+    w->region_mask=scan->mask; scan->mask=NULL;
+ }

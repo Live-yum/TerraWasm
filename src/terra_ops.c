@@ -212,7 +212,7 @@ static int parse_entity_selector(const char* request, int len, MapMarkerEntry* m
     return 1;
 }
 
-static int parse_marker_array(const char* request, int jlen,
+int parse_marker_array(const char* request, int jlen,
                               const char* array_key, const char* id_key,
                               MapMarkerEntry** out_markers, uint32_t* out_count) {
     *out_markers = NULL;

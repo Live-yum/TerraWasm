@@ -528,8 +528,7 @@ static int parse_biome_mode(const char* request, int jlen) {
     return -1;
 }
 
-int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
-                               TxBuf* response) {
+int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTileRule** out_rules, uint32_t* out_count) {
     if (w->legacy_wld) {
         tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
         return -1;
@@ -710,6 +709,15 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
             }
         }
     }
+
+    *out_rules=rules; *out_count=(uint32_t)rule_count; return 1;
+}
+
+int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
+                               TxBuf* response) {
+    TxTileRule* rules=NULL; uint32_t parsed_count=0;
+    if(tx_stream_parse_tile_rules(w,request,jlen,&rules,&parsed_count)<0)return -1;
+    int rule_count=(int)parsed_count;
 
     if (w->prepared_output && w->prepared_output->ready) tx_output_clear(w);
     if (!tx_regions_build(w, rules, (uint32_t)rule_count)) {

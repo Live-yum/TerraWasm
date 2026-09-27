@@ -14,10 +14,19 @@ struct TxPreparedOutput {
     uint32_t ready, source_runs;
 };
 
+typedef struct TxMarkerScan TxMarkerScan;
+TxMarkerScan* tx_marker_stream_begin(TxWorld*, const MapMarkerEntry*, uint32_t);
+int tx_marker_stream_run(TxMarkerScan*, uint32_t, uint32_t, const TxTile*, uint32_t);
+int tx_marker_stream_column(TxMarkerScan*);
+int tx_marker_stream_finish(TxMarkerScan*, TxBuf*);
+void tx_marker_stream_free(TxMarkerScan*);
+
 typedef int (*TxTileVisitor)(TxWorld*, uint32_t, uint32_t, TxTile*, uint32_t, void*);
 int tx_scan_tile_markers(TxWorld*, const MapMarkerEntry*, uint32_t, TxBuf*, TxTileVisitor, void*);
 int tx_output_begin(TxWorld*, const MapMarkerEntry*, uint32_t, int, uint32_t);
 int tx_output_scan(TxWorld*, TxTileRule*, uint32_t, TxBuf*);
+int tx_output_stream_run(TxWorld*, uint32_t, uint32_t, TxTile*, uint32_t);
+void tx_output_stream_finish(TxWorld*);
 void tx_output_free(TxPreparedOutput*);
 void tx_output_clear(TxWorld*);
 void tx_apply_tile_rules(TxTile*, TxTileRule*, uint32_t, uint32_t, uint16_t, uint32_t, double);

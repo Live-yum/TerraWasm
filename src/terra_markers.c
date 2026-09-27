@@ -220,3 +220,82 @@ int tx_locate_tile_markers(TxWorld* w, const MapMarkerEntry* markers,
     }
     return 1;
 }
+
+/* Incremental frontier used by the cooperative source scanner. */
+struct TxMarkerScan { MarkerRun *prev,*curr; MarkerNode *nodes,*next; uint32_t *remap; uint16_t *by_type,next_marker[256]; uint32_t type_count,prev_count,node_count,curr_count,clustered; const MapMarkerEntry* markers; uint32_t count; TxBuf points; };
+void tx_marker_stream_free(struct TxMarkerScan* s) {
+ if(!s)return; if(s->prev)tx_internal_free(s->prev);if(s->curr)tx_internal_free(s->curr);if(s->nodes)tx_internal_free(s->nodes);if(s->next)tx_internal_free(s->next);if(s->remap)tx_internal_free(s->remap);if(s->by_type)tx_internal_free(s->by_type);if(s->points.data)tx_internal_free(s->points.data);tx_internal_free(s);
+}
+struct TxMarkerScan* tx_marker_stream_begin(TxWorld* w,const MapMarkerEntry* markers,uint32_t count) {
+ struct TxMarkerScan* s=(struct TxMarkerScan*)tx_alloc(sizeof(*s));if(!s)return NULL;memset(s,0,sizeof(*s));s->markers=markers;s->count=count;uint32_t height=(uint32_t)w->maxTilesY;
+ buf_init(&s->points,1024);if(!s->points.ok)goto failed;
+ for(uint32_t m=0;m<count;m++){s->clustered|=markers[m].locate==2;if(markers[m].locate&&(uint32_t)markers[m].id>=s->type_count)s->type_count=(uint32_t)markers[m].id+1;}
+ s->by_type=(uint16_t*)tx_alloc((s->type_count?s->type_count:1)*2);if(!s->by_type)goto failed;memset(s->by_type,255,s->type_count*2);
+ for(uint32_t m=count;m-->0;){if(!markers[m].locate)continue;s->next_marker[m]=s->by_type[markers[m].id];s->by_type[markers[m].id]=(uint16_t)m;}
+ if(s->clustered){s->prev=(MarkerRun*)tx_alloc(height*sizeof(MarkerRun));s->curr=(MarkerRun*)tx_alloc(height*sizeof(MarkerRun));s->nodes=(MarkerNode*)tx_alloc(2*height*sizeof(MarkerNode));s->next=(MarkerNode*)tx_alloc(height*sizeof(MarkerNode));s->remap=(uint32_t*)tx_alloc(2*height*4);if(!s->prev||!s->curr||!s->nodes||!s->next||!s->remap)goto failed;}
+ return s;
+failed:tx_marker_stream_free(s);return NULL;
+}
+int tx_marker_stream_run(struct TxMarkerScan* s,uint32_t x,uint32_t y,const TxTile* tile,uint32_t run){
+ const MapMarkerEntry* markers=s->markers;TxBuf* points=&s->points;
+            for (uint32_t m = tile->active && tile->type < s->type_count ? s->by_type[tile->type] : UINT16_MAX;
+                 m != UINT16_MAX; m = s->next_marker[m]) {
+                const MapMarkerEntry* marker = &markers[m];
+                if (!marker->locate || marker->id != tile->type ||
+                    !marker_frame_matches(tile->frame_x, marker->frame_x, marker->frame_x_mod) ||
+                    !marker_frame_matches(tile->frame_y, marker->frame_y, marker->frame_y_mod)) continue;
+                if (marker->locate == 1) {
+                    for (uint32_t dy = 0; dy < run; dy++)
+                        if (!append_marker_point(points, x, y + dy, m)) return 0;
+                } else {
+                    /* One matching cluster selector per tile; the API validates
+                     * duplicate cluster types before scanning. */
+                    if (s->curr_count && s->curr[s->curr_count - 1u].end + 1u == y &&
+                        s->nodes[s->curr[s->curr_count - 1u].label].marker == m) {
+                        s->curr[s->curr_count - 1u].end += run;
+                    } else {
+                        s->nodes[s->node_count] = (MarkerNode){s->node_count, m, (int32_t)x, (int32_t)y};
+                        s->curr[s->curr_count++] = (MarkerRun){y, y + run - 1u, s->node_count++};
+                    }
+                }
+            }
+ return 1; }
+int tx_marker_stream_column(struct TxMarkerScan* s){
+ if(!s->clustered)return 1;TxBuf* points=&s->points;
+        uint32_t start = 0u;
+        for (uint32_t c = 0; c < s->curr_count; c++) {
+            while (start < s->prev_count && s->prev[start].end + 1u < s->curr[c].start) start++;
+            for (uint32_t p = start; p < s->prev_count && s->prev[p].start <= s->curr[c].end + 1u; p++) {
+                uint32_t a = marker_root(s->nodes, s->curr[c].label), b = marker_root(s->nodes, s->prev[p].label);
+                if (a == b || s->nodes[a].marker != s->nodes[b].marker) continue;
+                /* Deterministic anchor: first actual ore cell in scan order. */
+                if (s->nodes[b].x < s->nodes[a].x || (s->nodes[b].x == s->nodes[a].x && s->nodes[b].y < s->nodes[a].y)) {
+                    s->nodes[a].x = s->nodes[b].x; s->nodes[a].y = s->nodes[b].y;
+                }
+                s->nodes[b].parent = a;
+            }
+        }
+        memset(s->remap, 0xff, s->node_count * sizeof(uint32_t));
+        uint32_t next_count = 0u;
+        for (uint32_t c = 0; c < s->curr_count; c++) {
+            uint32_t root = marker_root(s->nodes, s->curr[c].label);
+            if (s->remap[root] == UINT32_MAX) {
+                s->remap[root] = next_count;
+                s->next[next_count] = s->nodes[root];
+                s->next[next_count].parent = next_count;
+                next_count++;
+            }
+            s->curr[c].label = s->remap[root];
+        }
+        for (uint32_t n = 0; n < s->node_count; n++) {
+            if (s->nodes[n].parent == n && s->remap[n] == UINT32_MAX &&
+                !append_marker_point(points, s->nodes[n].x, s->nodes[n].y, s->nodes[n].marker)) return 0;
+        }
+        memcpy(s->nodes, s->next, next_count * sizeof(MarkerNode));
+        MarkerRun* swap = s->prev; s->prev = s->curr; s->curr = swap;
+        s->prev_count = s->curr_count; s->node_count = next_count;
+ s->curr_count=0;return 1;}
+int tx_marker_stream_finish(struct TxMarkerScan* s,TxBuf* points){
+ for(uint32_t n=0;n<s->node_count;n++)if(!append_marker_point(&s->points,s->nodes[n].x,s->nodes[n].y,s->nodes[n].marker))return 0;
+ *points=s->points;memset(&s->points,0,sizeof(s->points));return 1;
+}

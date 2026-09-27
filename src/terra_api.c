@@ -86,6 +86,7 @@ extern void txw_clear_pixel_art_state(TxWorld* w);
 /* ---------- World slot management ---------- */
 
 static TxWorld g_worlds[TX_MAX_WORLDS];
+extern void tx_stream_release_world(TxWorld* world);
 static uint32_t g_next_generation = 1;
 
 #define TX_HANDLE_SLOT_BITS 8u
@@ -471,6 +472,7 @@ terrax_world_status terra_world_close(
     if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
     if (world->entity_marker_cache.data) tx_internal_free(world->entity_marker_cache.data);
     txw_clear_marker_color_index(world);
+    tx_stream_release_world(world);
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();
     if (count > 0) tx_set_world_open_count(count - 1);
@@ -478,6 +480,20 @@ terrax_world_status terra_world_close(
     tx_rewind(allocation_mark);
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
+}
+
+/* Candidate roots belong to the persistent domain, so closing the old arena
+ * cannot invalidate them. This final ownership swap does not allocate. */
+int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
+    if (g_worlds[0].active) terra_world_close(g_worlds[0].handle);
+    g_worlds[0] = *candidate;
+    g_worlds[0].handle = tx_next_handle(0u);
+    g_worlds[0].active = 1u;
+    g_worlds[0].allocation_mark = tx_mark();
+    g_worlds[0].heap_mark = tx_mark();
+    tx_set_world_open_count(1u);
+    *out_handle = g_worlds[0].handle;
+    return 1;
 }
 
 static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {

@@ -58,6 +58,8 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
     "${SRC_DIR}/terra_pixel_art_metadata.c"
+    "${SRC_DIR}/terra_stream.c"
+    "${SRC_DIR}/terra_stream_png.c"
     "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
 )
@@ -227,6 +229,7 @@ if(EMSCRIPTEN)
         "-sFILESYSTEM=1"
     )
     set(WEB_LINK_OPTIONS
+        "SHELL:--post-js ${CMAKE_CURRENT_SOURCE_DIR}/scripts/memory-growth-limit.js"
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
         "${WEB_RUNTIME_METHODS}"
         "-sINITIAL_MEMORY=${TERRAX_WEB_INITIAL_MEMORY}"

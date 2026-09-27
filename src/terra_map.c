@@ -13,6 +13,7 @@
 
 #include "terra_types.h"
 #include "terra_output.h"
+#include "terra_stream_map.h"
 #include <string.h>
 #include "terra_map.h"
 #include "terra_icon.h"
@@ -1809,6 +1810,92 @@ static int32_t generate_map_marked(TxWorld* w,
 int32_t terra_generate_map(TxWorld* w) {
     return generate_map(w, NULL, 0u, NULL, 0u, 0u);
 }
+
+/* Cooperative MAP encoder: one 64-column strip, two exact compression passes.
+ * Pass one measures row-major offsets; pass two emits positioned chunks. */
+struct TxStreamMap {
+    TxWorld* world;
+    MapBuildRequest request;
+    MapChestPoint* points;
+    uint32_t point_count,width,height,cpr,cpc,chunks,strip_bytes,cx,cy,pass,active,pending,total;
+    uint32_t *strip,*sizes,*offsets;
+    TxMapColorCacheEntry colors[512];
+    uint32_t color_count;
+    TxBuf header,output;
+};
+void tx_stream_map_free(TxStreamMap* p){
+    if(!p)return;
+    if(p->points)tx_internal_free(p->points);if(p->strip)tx_internal_free(p->strip);
+    if(p->sizes)tx_internal_free(p->sizes);if(p->offsets)tx_internal_free(p->offsets);
+    if(p->header.data)tx_internal_free(p->header.data);if(p->output.data)tx_internal_free(p->output.data);tx_internal_free(p);
+}
+TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_t chest_count,const MapMarkerEntry* tiles,uint32_t tile_count){
+    TxStreamMap* p=(TxStreamMap*)tx_alloc(sizeof(*p));if(!p)return NULL;memset(p,0,sizeof(*p));p->world=w;
+    p->request=(MapBuildRequest){NULL,0,NULL,0,chests,chest_count,tiles,tile_count,0,0,0,&w->marker_color_index,0};
+    for(uint32_t i=0;i<tile_count;i++)p->request.paint_tile_marker_count+=!tiles[i].locate;
+    if(!map_layout(w,&p->width,&p->height,&p->cpr,&p->cpc,&p->chunks,&p->strip_bytes))goto failed;
+    p->strip=(uint32_t*)tx_alloc(p->strip_bytes);p->sizes=(uint32_t*)tx_alloc(p->chunks*4);p->offsets=(uint32_t*)tx_alloc(p->chunks*4);
+    if(!p->strip||!p->sizes||!p->offsets)goto failed;
+    if(!collect_matching_chest_points(w,&p->request,p->width,p->height,&p->points,&p->point_count))goto failed;
+    const TxBuf* entity=w->prepared_output?&w->prepared_output->points:NULL;
+    uint32_t count=entity?entity->len/sizeof(TxMarkerPoint):0;
+    if(count){
+        uint64_t bytes=((uint64_t)p->point_count+count)*sizeof(MapChestPoint);if(bytes>UINT32_MAX)goto failed;
+        MapChestPoint* all=(MapChestPoint*)tx_alloc((uint32_t)bytes);if(!all)goto failed;
+        if(p->point_count)memcpy(all,p->points,p->point_count*sizeof(MapChestPoint));if(p->points)tx_internal_free(p->points);p->points=all;
+        const TxMarkerPoint* entries=(const TxMarkerPoint*)entity->data;
+        for(uint32_t i=0;i<count;i++){
+            const MapMarkerEntry* m=&tiles[entries[i].marker_index];MapChestPoint* point=&all[p->point_count++];memset(point,0,sizeof(*point));
+            point->x=entries[i].x;point->y=entries[i].y;point->item_id=m->icon_id;point->radius=m->radius;point->line_width=m->line_width;point->reserved[0]=1;memcpy(point->rgba,m->rgba,4);
+        }
+    }
+    buf_init(&p->header,4096);write_map_header(&p->header,w);if(!p->header.ok)goto failed;
+    return p;
+failed:tx_stream_map_free(p);return NULL;
+}
+int tx_stream_map_range(TxStreamMap* p,uint32_t* first,uint32_t* count){
+    if(p->pending||p->active)return -1;
+    if(p->cx==p->cpr){
+        if(p->pass)return 0;
+        uint64_t total=p->header.len;
+        for(uint32_t i=0;i<p->chunks;i++){if(total+4+p->sizes[i]>UINT32_MAX)return -1;p->offsets[i]=(uint32_t)total;total+=4+p->sizes[i];}
+        p->total=(uint32_t)total;p->pass=1;p->cx=0;p->pending=1;return -1;
+    }
+    *first=p->cx*64;*count=p->width-*first;if(*count>64)*count=64;
+    prefill_chunk_strip_background(p->strip,p->cpc,p->cx,p->width,p->height,p->world->worldSurface,p->world->rockLayer);
+    p->active=1;return 1;
+}
+int tx_stream_map_run(TxStreamMap* p,uint32_t x,uint32_t y,const TxTile* t,uint32_t run){
+    if(!p->active||x/64!=p->cx)return 0;
+    uint32_t value;if(!map_value_for_requested_tile(&p->request,t,run,NULL,p->colors,&p->color_count,&value))return 0;
+    if(value&65535)fill_chunk_strip_run(p->strip,x%64,p->height,y,run,value);return 1;
+}
+int tx_stream_map_finish_strip(TxStreamMap* p){
+    if(!p->active)return 0;p->active=0;
+    for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,NULL);
+    if(!p->pass){
+        for(uint32_t cy=0;cy<p->cpc;cy++){TxBuf bytes={0};if(!compress_chunk_exact(p->strip+cy*4096,&bytes))return 0;p->sizes[cy*p->cpr+p->cx]=bytes.len;tx_internal_free(bytes.data);}
+        p->cx++;return 1;
+    }
+    p->cy=0;p->pending=2;return 1;
+}
+int tx_stream_map_pull(TxStreamMap* p,uint32_t* offset,const uint8_t** bytes,uint32_t* length){
+    if(!p->pending)return 0;
+    if(p->pending==1){*offset=0;*bytes=p->header.data;*length=p->header.len;return 1;}
+    uint32_t index=p->cy*p->cpr+p->cx;
+    if(!p->output.data){TxBuf compressed={0};if(!compress_chunk_exact(p->strip+p->cy*4096,&compressed))return -1;
+        if(compressed.len!=p->sizes[index]){tx_internal_free(compressed.data);return -1;}
+        buf_init(&p->output,compressed.len+4);buf_u32le(&p->output,compressed.len);buf_bytes(&p->output,compressed.data,compressed.len);tx_internal_free(compressed.data);if(!p->output.ok)return -1;
+    }
+    *offset=p->offsets[index];*bytes=p->output.data;*length=p->output.len;return 1;
+}
+int tx_stream_map_ack(TxStreamMap* p){
+    if(!p->pending)return 0;
+    if(p->pending==1){p->pending=0;return 1;}
+    if(p->output.data)tx_internal_free(p->output.data);memset(&p->output,0,sizeof(p->output));
+    if(++p->cy==p->cpc){p->cx++;p->pending=0;}return 1;
+}
+uint32_t tx_stream_map_size(TxStreamMap* p){return p->total;}
 
 /* render_lit_map_marked -- map generation with per-marker colors */
 int32_t terra_render_lit_map_marked(TxWorld* w,

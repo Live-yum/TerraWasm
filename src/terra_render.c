@@ -528,6 +528,19 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   return 1;
 }
 
+int tx_output_stream_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* tile, uint32_t run) {
+  OutputScanContext scan = {0};
+  tx_render_refresh_color_tables();
+  return prepare_output_run(w, x, y, tile, run, &scan);
+}
+
+void tx_output_stream_finish(TxWorld* w) {
+  TxPreparedOutput* p = w->prepared_output;
+  for (uint32_t i = 0; i < p->list_width * p->list_height; i++) p->list_rgba[i * 4u + 3u] = 255u;
+  for (uint32_t i = 0; i < p->preview_width * p->preview_height; i++) p->preview_rgba[i * 4u + 3u] = 255u;
+  p->ready = 1;
+}
+
 int tx_output_scan(TxWorld* w, TxTileRule* rules, uint32_t count, TxBuf* tiles) {
   TxPreparedOutput* p = w->prepared_output;
   if (!p || p->ready) return 1;
@@ -542,9 +555,7 @@ int tx_output_scan(TxWorld* w, TxTileRule* rules, uint32_t count, TxBuf* tiles) 
   }
   p->points.len = points.len;
   if (points.data) tx_internal_free(points.data);
-  for (uint32_t i = 0; i < p->list_width * p->list_height; i++) p->list_rgba[i * 4u + 3u] = 255u;
-  for (uint32_t i = 0; i < p->preview_width * p->preview_height; i++) p->preview_rgba[i * 4u + 3u] = 255u;
-  p->ready = 1;
+  tx_output_stream_finish(w);
   return 1;
 fail:
   if (points.data) tx_internal_free(points.data);
@@ -570,3 +581,34 @@ int tx_output_copy_rows(TxWorld* w, uint8_t* out, uint32_t width, uint32_t heigh
   memcpy(out, rgba + start * width * 4u, count * width * 4u);
   return 1;
 }
+
+void tx_render_stream_color(TxWorld* w, const TxTile* tile, uint32_t y, uint8_t* out) {
+  tx_render_refresh_color_tables();
+  if (tile) color_for_tile(tile,y,(uint32_t)w->maxTilesY,(uint32_t)w->worldSurface,(uint32_t)w->rockLayer,out);
+  else background_color(y,(uint32_t)w->maxTilesY,(uint32_t)w->worldSurface,(uint32_t)w->rockLayer,out);
+}
+void tx_render_stream_markers(TxWorld* w,uint8_t* rgba,uint32_t width,uint32_t height,
+    uint32_t start,uint32_t rows,const MapMarkerEntry* chests,uint32_t chest_count,
+    const MapMarkerEntry* tiles,uint32_t tile_count,uint32_t phase) {
+  (void)tile_count;
+  if (!phase) draw_matching_chest_markers_preview_rows(w,rgba,width,height,start,rows,chests,chest_count,0);
+  else if(w->prepared_output)draw_entity_points_rows(w,rgba,width,height,start,rows,tiles,&w->prepared_output->points);
+}
+void tx_render_stream_tile_marker(TxWorld* w,uint8_t* rgba,uint32_t width,uint32_t height,
+    uint32_t start,uint32_t rows,uint32_t x,uint32_t y,const TxTile* tile,uint32_t run,
+    const MapMarkerEntry* markers,uint32_t count) {
+  if(!tile->active)return;
+  const MapMarkerEntry* marker=find_marker_by_id(markers,count,(int32_t)tile->type);
+  if(!marker||marker->locate)return;
+  uint32_t px=clamp_preview_coord((int32_t)x,(uint32_t)w->maxTilesX,width);
+  uint32_t py0=(uint32_t)((uint64_t)y*height/(uint32_t)w->maxTilesY);
+  uint32_t py1=(uint32_t)((uint64_t)(y+run)*height/(uint32_t)w->maxTilesY);
+  if(py1<=py0)py1=py0+1;if(py1>height)py1=height;
+  draw_marker_span_at_preview_rows(rgba,width,height,start,rows,px,py0,py1,
+    scale_marker_measure(marker->radius,(uint32_t)w->maxTilesX,(uint32_t)w->maxTilesY,width,height),
+    scale_marker_measure(marker->line_width,(uint32_t)w->maxTilesX,(uint32_t)w->maxTilesY,width,height),marker->rgba);
+}
+void tx_render_stream_fixed_block(TxBuf* output,uint32_t* bits,uint32_t* count,const uint8_t* bytes,uint32_t length,uint32_t final) {
+  write_fixed_block(output,bits,count,bytes,length,final);
+}
+void tx_render_stream_finish_bits(TxBuf* output,uint32_t* bits,uint32_t* count){bw_finish(output,bits,count);}
