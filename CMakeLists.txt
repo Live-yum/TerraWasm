@@ -86,7 +86,12 @@ set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in A
 set(TERRAX_OPTIMIZE_FLAG "-O3" CACHE STRING "Optimization flag for release-style Wasm builds")
 set(TERRAX_NODE_INITIAL_MEMORY "134217728" CACHE STRING "Node WASM initial linear memory in bytes")
 set(TERRAX_NODE_MAXIMUM_MEMORY "536870912" CACHE STRING "Node WASM maximum linear memory in bytes")
-set(TERRAX_WEB_INITIAL_MEMORY "67108864" CACHE STRING "Web/Mini Program WASM initial linear memory in bytes")
+set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "67108864")
+if(TERRAWASM_FEATURE_SET STREQUAL "plr")
+    # Player documents allocate on demand; avoid a world-sized idle instance.
+    set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "1048576")
+endif()
+set(TERRAX_WEB_INITIAL_MEMORY "${TERRAX_WEB_INITIAL_MEMORY_DEFAULT}" CACHE STRING "Web/Mini Program WASM initial linear memory in bytes")
 set(TERRAX_WEB_MAXIMUM_MEMORY "167772160" CACHE STRING "Web/Mini Program WASM maximum linear memory in bytes")
 option(TERRAX_ENABLE_LTO "Enable link-time optimization for Wasm targets" OFF)
 

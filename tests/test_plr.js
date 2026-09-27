@@ -288,6 +288,14 @@ test("Web PLR ABI creates and processes buffer and virtual-FS player files", asy
   const module = await TerraWorldWasmWeb({
     wasmBinary: fs.readFileSync(path.join(__dirname, "..", "build", "terrax_world_wasm_web.wasm")),
   });
+  const identity = JSON.parse(module.UTF8ToString(module._terra_build_info_json()));
+  if (identity.featureSet === "plr") {
+    assert.equal(module.HEAPU8.byteLength, 1048576,
+      "the player-only Web instance must start at 1 MiB");
+    const growthProbe = module._tx_malloc(2 * 1024 * 1024);
+    assert(growthProbe, "the player-only Web heap must still grow on demand");
+    module._tx_free(growthProbe);
+  }
   const originalHeap = module._tx_heap_used();
   const source = fixtureBytes(module);
   assert.equal(module._tx_heap_used(), originalHeap,
