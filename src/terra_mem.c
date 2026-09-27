@@ -89,6 +89,7 @@ static uint64_t tx_bridge_peak_bytes = 0;
 static uint64_t tx_native_peak_bytes = 0;
 static uint64_t tx_persistent_peak_bytes = 0;
 static uint64_t tx_total_peak_bytes = 0;
+static uint64_t tx_native_owned_peak_bytes = 0;
 
 /* Result pointers (set by operations, read by JS) */
 uint32_t tx_last_ptr = 0;
@@ -227,6 +228,8 @@ static void* tx_new_root(uint32_t size, uint32_t domain) {
     uint64_t* peak = tx_domain_peak(domain);
     *live += size;
     if (*live > *peak) *peak = *live;
+    uint64_t owned_live = tx_native_live_bytes + tx_persistent_live_bytes;
+    if (owned_live > tx_native_owned_peak_bytes) tx_native_owned_peak_bytes = owned_live;
     uint64_t total_live = tx_total_live_bytes();
     if (total_live > tx_total_peak_bytes) tx_total_peak_bytes = total_live;
     return (uint8_t*)header + sizeof(TxAllocHeader);
@@ -275,7 +278,9 @@ uint8_t* tx_alloc(uint32_t size) {
 }
 
 void tx_internal_free(void* payload) {
-    tx_release_root(tx_root_from_owned_payload(payload, TX_DOMAIN_NATIVE), TX_DOMAIN_NATIVE);
+    TxAllocHeader* root = tx_root_from_owned_payload(payload, TX_DOMAIN_NATIVE);
+    if (!root) root = tx_root_from_owned_payload(payload, TX_DOMAIN_PERSISTENT);
+    if (root) tx_release_root(root, root->root.domain);
 }
 
 static void* tx_internal_realloc_domain(
@@ -304,13 +309,16 @@ static void* tx_internal_realloc_domain(
     uint64_t* peak = tx_domain_peak(domain);
     *live = *live - old_size + size;
     if (*live > *peak) *peak = *live;
+    uint64_t owned_live = tx_native_live_bytes + tx_persistent_live_bytes;
+    if (owned_live > tx_native_owned_peak_bytes) tx_native_owned_peak_bytes = owned_live;
     uint64_t total_live = tx_total_live_bytes();
     if (total_live > tx_total_peak_bytes) tx_total_peak_bytes = total_live;
     return (uint8_t*)resized + sizeof(TxAllocHeader);
 }
 
 void* tx_internal_realloc(void* payload, uint32_t size) {
-    return tx_internal_realloc_domain(payload, size, TX_DOMAIN_NATIVE);
+    TxAllocHeader* root = tx_root_from_owned_payload(payload, TX_DOMAIN_PERSISTENT);
+    return tx_internal_realloc_domain(payload, size, root ? TX_DOMAIN_PERSISTENT : TX_DOMAIN_NATIVE);
 }
 
 uint8_t* tx_persistent_alloc(uint32_t size) {
@@ -335,7 +343,8 @@ uint32_t tx_bridge_heap_used(void) {
 }
 
 uint32_t tx_native_heap_used(void) {
-    return tx_native_live_bytes > UINT32_MAX ? UINT32_MAX : (uint32_t)tx_native_live_bytes;
+    uint64_t bytes = tx_native_live_bytes + tx_persistent_live_bytes;
+    return bytes > UINT32_MAX ? UINT32_MAX : (uint32_t)bytes;
 }
 
 uint32_t tx_heap_peak(void) {
@@ -347,7 +356,7 @@ uint32_t tx_bridge_heap_peak(void) {
 }
 
 uint32_t tx_native_heap_peak(void) {
-    return tx_native_peak_bytes > UINT32_MAX ? UINT32_MAX : (uint32_t)tx_native_peak_bytes;
+    return tx_native_owned_peak_bytes > UINT32_MAX ? UINT32_MAX : (uint32_t)tx_native_owned_peak_bytes;
 }
 
 uint32_t tx_memory_used(void) {

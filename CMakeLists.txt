@@ -320,6 +320,8 @@ else()
             add_test(NAME ${target} COMMAND ${target})
         endfunction()
 
+        add_terra_contract(terra_allocator_contract tests/allocator_contract.c)
+
         if(TERRAWASM_ENABLE_WLD)
             find_package(ZLIB REQUIRED)
             add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)
