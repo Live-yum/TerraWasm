@@ -59,14 +59,12 @@ void txw_clear_pixel_art_state(TxWorld* w) {
 }
 
 static void apply_map_to_tile(const TxPixelMap* map, TxTile* t) {
+    if (map->active_mode == 3u) return;
     uint8_t saved_same = t->same;
     memset(t, 0, sizeof(TxTile));
     t->same = saved_same;
 
     if (map->active_mode == 0u) {
-        return;
-    }
-    if (map->active_mode == 3u) {
         return;
     }
     if (map->active_mode == 2u) {
@@ -627,6 +625,7 @@ int apply_pixel_art_at(TxWorld* w, uint32_t x, uint32_t y, TxTile* t) {
     const TxPixelMap* maps = (const TxPixelMap*)w->pixel_art_maps;
     for (uint32_t i = 0; i < w->pixel_art_map_count; i++) {
         if (maps[i].r == r && maps[i].g == g && maps[i].b == b && maps[i].a == a) {
+            if (maps[i].active_mode == 3u) return 0;
             apply_map_to_tile(&maps[i], t);
             return 1;
         }

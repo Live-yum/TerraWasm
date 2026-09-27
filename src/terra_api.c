@@ -514,6 +514,11 @@ static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
             if (tile_buf.data) tx_internal_free(tile_buf.data);
             return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
         }
+        extern int txw_filter_pixel_art_metadata(TxWorld* w);
+        if (!txw_filter_pixel_art_metadata(world)) {
+            tx_internal_free(tile_buf.data);
+            return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+        }
         extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
         if (!set_section_override_data(world, 1, tile_buf.data, tile_buf.len)) {
             if (tile_buf.data) tx_internal_free(tile_buf.data);

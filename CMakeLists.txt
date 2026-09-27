@@ -57,6 +57,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
+    "${SRC_DIR}/terra_pixel_art_metadata.c"
     "${SRC_DIR}/terra_pixel_art_bulk_fast.c"
     "${SRC_DIR}/terra_hash.c"
 )

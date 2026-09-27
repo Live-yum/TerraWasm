@@ -650,7 +650,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
  * WorldFile.LoadWorld_Version1_Old_BeforeRelease88 when a field did not yet
  * exist in that release. */
 int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t);
-static int legacy_skip_string(const uint8_t *p,uint32_t len,uint32_t *off) {
+int legacy_skip_string(const uint8_t *p,uint32_t len,uint32_t *off) {
     int ok=0; uint32_t n=rd_7bit(p,len,off,&ok);
     return ok && terra_reader_has(*off,n,len) && (terra_reader_take(off,n,len),1);
 }

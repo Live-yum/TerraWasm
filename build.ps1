@@ -135,6 +135,8 @@ if ($Test) {
         "tests/test_reader_safety.js",
         "tests/test_pixel_art_bulk.js",
         "tests/test_pixel_art_indexed.js",
+        "tests/test_pixel_art_materials.js",
+        "tests/test_pixel_art_semantics.js",
         "tests/test_section_mutators.js",
         "tests/test_signs.js",
         "tests/test_sha256.js",
