@@ -72,7 +72,7 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    assert.equal(manifest.targets.web.exports.length, 27);
+    assert.equal(manifest.targets.web.exports.length, 37);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);

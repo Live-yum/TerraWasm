@@ -1171,9 +1171,9 @@ function makeEntityWorld(customCells, options = {}) {
 // Decode fixture tiles independently of the WASM decoder, ignoring RLE grouping.
 test('1458 shadow swaps and negative wall half-invert match actual preview pixels', async () => {
   const M = await loadModule(), cells = new Map();
-  for (let id = 1; id <= 100; id++) {
+  for (let id = 1; id <= 113; id++) {
     for (const [row, paint] of [[0, 0], [1, 29], [2, 30]]) {
-      cells.set(`${id},${row}`, { type: id, color: paint });
+      if (id <= 100) cells.set(`${id},${row}`, { type: id, color: paint });
       cells.set(`${id},${row + 3}`, { wall: id, wallColor: paint });
     }
   }
@@ -1184,12 +1184,12 @@ test('1458 shadow swaps and negative wall half-invert match actual preview pixel
     const image = decodePngRgb(getThumbnailPng(M, opened.handle).png);
     const pixel = (x, y) => [...image.rgba.subarray((y * image.width + x) * 4, (y * image.width + x) * 4 + 3)];
     const badTiles = new Set([127, 135, 210, 428, 504, 541]);
-    const badWalls = new Set([0, 21, 88, 89, 90, 91, 92, 93, 106, 107, 145, 150, 152, 168, 241, 318]);
+    const badWalls = new Set([0, 21, 88, 89, 90, 91, 92, 93, 168, 241, 318]);
     let shadowDifferences = 0, negativeDifferences = 0;
-    for (let id = 1; id <= 100; id++) for (const wall of [false, true]) {
-      if ((wall ? badWalls : badTiles).has(id)) continue;
+    for (let id = 1; id <= 113; id++) for (const wall of [false, true]) {
+      if ((!wall && id > 100) || (wall ? badWalls : badTiles).has(id)) continue;
       const row = wall ? 3 : 0, base = pixel(id, row);
-      // Base includes the existing preview wall darkening. MapColor uses float32.
+      // Light=255 uses the raw MapHelper color. MapColor uses float32.
       const shadow = Math.min(base[2], Math.max(base[0], base[1]));
       const factor = Math.fround(Math.fround(shadow / 255) * Math.fround(0.3));
       const expectedShadow = Math.trunc(Math.fround(25 * factor));
