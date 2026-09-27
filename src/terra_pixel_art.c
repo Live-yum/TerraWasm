@@ -88,13 +88,57 @@ static void apply_map_to_tile(const TxPixelMap* map, TxTile* t) {
     }
 }
 
+static uint32_t override_key(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    return (uint32_t)r | ((uint32_t)g << 8u) | ((uint32_t)b << 16u) | ((uint32_t)a << 24u);
+}
+
+static uint32_t override_slot(uint32_t key, uint32_t mask) {
+    key ^= key >> 16u;
+    key *= 2654435761u;
+    return (key ^ (key >> 16u)) & mask;
+}
+
+/* Scratch index: indices + 1 allow all RGBA keys; duplicate colors retain first. */
+static uint32_t* index_overrides(const TxPixelMap* overrides, uint32_t count, uint32_t* mask) {
+    uint32_t capacity = 64u;
+    while (capacity < count * 2u) capacity <<= 1u;
+    *mask = capacity - 1u;
+    uint32_t* slots = (uint32_t*)tx_alloc(capacity * sizeof(uint32_t));
+    if (!slots) return NULL;
+    memset(slots, 0, capacity * sizeof(uint32_t));
+    for (uint32_t i = 0u; i < count; i++) {
+        const TxPixelMap* item = &overrides[i];
+        uint32_t key = override_key(item->r, item->g, item->b, item->a);
+        uint32_t slot = override_slot(key, *mask);
+        while (slots[slot]) {
+            const TxPixelMap* prior = &overrides[slots[slot] - 1u];
+            if (override_key(prior->r, prior->g, prior->b, prior->a) == key) break;
+            slot = (slot + 1u) & *mask;
+        }
+        if (!slots[slot]) slots[slot] = i + 1u;
+    }
+    return slots;
+}
+
 static int find_override(const TxPixelMap* overrides, uint32_t override_count,
-                         uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                         TxPixelMap* out) {
+                         const uint32_t* slots, uint32_t mask,
+                         uint32_t key, TxPixelMap* out) {
     if (!overrides || !out) return 0;
+    if (slots) {
+        uint32_t slot = override_slot(key, mask);
+        while (slots[slot]) {
+            const TxPixelMap* item = &overrides[slots[slot] - 1u];
+            if (override_key(item->r, item->g, item->b, item->a) == key) {
+                *out = *item;
+                return 1;
+            }
+            slot = (slot + 1u) & mask;
+        }
+        return 0;
+    }
     for (uint32_t i = 0; i < override_count; i++) {
-        if (overrides[i].r == r && overrides[i].g == g &&
-            overrides[i].b == b && overrides[i].a == a) {
+        const TxPixelMap* item = &overrides[i];
+        if (override_key(item->r, item->g, item->b, item->a) == key) {
             *out = overrides[i];
             return 1;
         }
@@ -302,6 +346,20 @@ int txw_begin_pixel_art_indexed(
     const uint8_t* palette = (const uint8_t*)(uintptr_t)palette_ptr;
     const TxPixelMap* overrides = overrides_ptr ? (const TxPixelMap*)(uintptr_t)overrides_ptr : NULL;
 
+    /* Avoid palette_count * overrides_count comparisons for large palettes. */
+    uint32_t* override_slots = NULL;
+    uint32_t override_mask = 0u;
+    if (overrides_count > 32u && overrides_count <= (1u << 28u)) {
+        override_slots = index_overrides(overrides, overrides_count, &override_mask);
+        if (!override_slots) {
+            txci_unload(&txci);
+            tx_rewind(txci_mark);
+            tx_internal_free(maps_buf);
+            tx_set_error("TERRAX_WASM_OOM", "indexed override lookup allocation failed");
+            return -1;
+        }
+    }
+
     for (uint32_t i = 0; i < palette_count; i++) {
         uint32_t off = i * 4u;
         uint8_t r = palette[off];
@@ -315,7 +373,7 @@ int txw_begin_pixel_art_indexed(
             maps[i].b = b;
             maps[i].a = a;
             maps[i].active_mode = 0u;
-        } else if (!find_override(overrides, overrides_count, r, g, b, a, &maps[i])) {
+        } else if (!find_override(overrides, overrides_count, override_slots, override_mask, override_key(r,g,b,a), &maps[i])) {
             build_map_from_match(&maps[i], &txci, r, g, b, a, prefer_wall, block_inactive);
         }
     }

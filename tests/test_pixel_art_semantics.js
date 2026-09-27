@@ -54,15 +54,18 @@ test(`${route}: empty clears all tile fields and partial-object metadata; skip a
   const chest=records(2),sign=records(3),entity=records(5);
   const plates=Buffer.alloc(28);plates.writeUInt32LE(3,0);plates.writeInt32LE(1,4);plates.writeInt32LE(2,12);plates.writeInt32LE(4,20);
   handle=open(replaceSections(original,{1:Buffer.concat(columns),2:chest.bytes,3:sign.bytes,5:entity.bytes,6:plates}));
-  const txci=minimalTxci(),palette=Buffer.from([0,0,0,0,8,9,10,255,11,12,13,255]),maps=Buffer.alloc(24);
+  const txci=minimalTxci(),palette=Buffer.from([0,0,0,0,8,9,10,255,11,12,13,255]),maps=Buffer.alloc(40*12);
   maps.set(palette.subarray(4,8),0);maps.set(palette.subarray(8,12),12);maps[22]=3;
+  // Exercise the large override index, including collisions and first-match duplicates.
+  for(let i=2;i<39;i++){maps.set([i,0,0,255],i*12);maps[i*12+4]=1;maps[i*12+10]=1;}
+  maps.set(palette.subarray(4,8),39*12);maps[39*12+4]=1;maps[39*12+10]=1;
   const indices=Buffer.alloc(8192);indices.writeUInt16LE(1,0);indices.writeUInt16LE(2,2);indices.writeUInt16LE(2,4);
   const record=Buffer.concat([Buffer.from([0,0,0,0,3,0,0,0]),indices]);
   if (route==='rgba') {
     const pixels=Buffer.concat([palette.subarray(4,8),palette.subarray(8,12),palette.subarray(8,12)]);
-    assert.equal(M._txw_apply_pixel_art(handle,alloc(pixels),pixels.length,3,1,alloc(txci),txci.length,1,0,0,0,alloc(maps),2),0);
+    assert.equal(M._txw_apply_pixel_art(handle,alloc(pixels),pixels.length,3,1,alloc(txci),txci.length,1,0,0,0,alloc(maps),maps.length/12),0);
   } else {
-    assert.equal(M._txw_begin_pixel_art_indexed(handle,1,0,3,1,alloc(palette),3,alloc(txci),txci.length,0,0,alloc(maps),2,0),0);
+    assert.equal(M._txw_begin_pixel_art_indexed(handle,1,0,3,1,alloc(palette),3,alloc(txci),txci.length,0,0,alloc(maps),maps.length/12,0),0);
     if (route==='single') assert.equal(M._txw_add_pixel_art_chunk(handle,0,0,alloc(indices),4096,3),0);
     else assert.equal(M[route==='bulk'?'_txw_add_pixel_art_chunks_bulk':'_txw_add_pixel_art_chunks_bulk_fast'](handle,alloc(record),record.length,1),0);
   }
