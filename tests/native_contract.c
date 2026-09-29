@@ -196,6 +196,16 @@ static int test_native_terraria_header_layout(void) {
         strstr(header, "\"oreTierCopper\":166") != NULL,
         "native WLD layout contract: header fields were shifted")) goto cleanup;
 
+    terra_world_close(handle); handle = 0u;
+    unsigned char* extended = (unsigned char*)realloc(fixture, fixture_len + 1u);
+    if (!expect(extended != NULL, "native WLD layout contract: allocation failed")) goto cleanup;
+    fixture = extended;
+    fixture[fixture_len++] = 0u;
+    /* Header-only fixture: all later section pointers originally equal EOF. */
+    for (unsigned i = 1u; i < 11u; i++) write_u32le(fixture, 26u + i * 4u, (uint32_t)fixture_len);
+    if (!expect(terra_world_open_from_buffer(fixture, (uint32_t)fixture_len, &handle) == TERRAX_WORLD_STATUS_PARSE_ERROR,
+                "native WLD layout contract: unconsumed header bytes accepted")) goto cleanup;
+
     puts("native WLD layout contract: native Terraria header accepted");
     ok = 1;
 
@@ -214,6 +224,84 @@ static int test_native_abi_contract(void) {
     if (!expect(strstr(build, "compiler") != NULL, "native ABI contract: missing compiler metadata")) return 1;
     puts("native ABI contract: ok");
     return 1;
+}
+
+/* Independent byte offsets from WorldFile.LoadWorldFlags in the checked-in
+ * Terraria fixtures, not from TerraWasm's parser or header encoder:
+ * gameMode=254, spawnX/Y=352/356, dualDungeons=2450,
+ * v323+ lightning flags=2451/2452, manifest prefix=2453 (2451 before 323).
+ * Comparing the entire file also pins all section pointers and the footer. */
+static int test_header_patch_bytes(uint32_t version, uint8_t more, uint8_t none) {
+    const char* path = version >= 323u
+        ? TERRAX_TEST_FIXTURE_DIR "/files/1.wld"
+        : TERRAX_TEST_FIXTURE_DIR "/pixel_art_output.wld";
+    unsigned char *fixture = NULL, *saved = NULL;
+    size_t length = 0u;
+    uint32_t handle = 0u, reopened = 0u, required = 0u;
+    uint64_t json_required = 0u;
+    char response[512], header[20000], request[128];
+    int ok = 0;
+
+    if (!expect(read_file_alloc(path, &fixture, &length), "header patch bytes: missing game fixture")) goto cleanup;
+    write_u32le(fixture, 0u, version);
+    if (version >= 323u) { fixture[2451] = more; fixture[2452] = none; }
+    /* The 7-bit manifest length is 9571; its JSON ends at the tile pointer. */
+    size_t manifest = version >= 323u ? 2453u : 2451u;
+    if (!expect(fixture[manifest] == 0xe3u && fixture[manifest + 1u] == 0x4au &&
+                fixture[manifest + 2u] == '{', "header patch bytes: unexpected game fixture layout")) goto cleanup;
+    if (!expect(terra_world_open_from_buffer(fixture, (uint32_t)length, &handle) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: game fixture rejected")) goto cleanup;
+    if (!expect(terra_section_get_json(handle, "header", header, sizeof(header), &json_required) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: header JSON failed")) goto cleanup;
+    if (version >= 323u) {
+        snprintf(request, sizeof(request), "\"moreLightningSeed\":%s", more ? "true" : "false");
+        if (!expect(strstr(header, request) != NULL, "header patch bytes: moreLightningSeed misread")) goto cleanup;
+        snprintf(request, sizeof(request), "\"noLightningSeed\":%s", none ? "true" : "false");
+        if (!expect(strstr(header, request) != NULL, "header patch bytes: noLightningSeed misread")) goto cleanup;
+    } else if (!expect(strstr(header, "LightningSeed") == NULL, "header patch bytes: old version exposes new flags")) goto cleanup;
+
+    if (!expect(terra_op_execute_json(handle, "header_patch",
+                "{\"patch\":{\"spawnTileX\":4201,\"spawnTileY\":2255,\"gameMode\":3,\"revision\":1234}}",
+                response, sizeof(response), &json_required) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: metadata patch failed")) goto cleanup;
+    write_u32le(fixture, 12u, 1234u);
+    write_u32le(fixture, 254u, 3u);
+    write_u32le(fixture, 352u, 4201u);
+    write_u32le(fixture, 356u, 2255u);
+    saved = (unsigned char*)malloc(length);
+    if (!expect(saved != NULL, "header patch bytes: output allocation failed")) goto cleanup;
+    if (!expect(terra_world_save_to_buffer(handle, saved, (uint32_t)length, &required) == TERRAX_WORLD_STATUS_OK &&
+                required == length && memcmp(saved, fixture, length) == 0,
+                "header patch bytes: metadata patch changed unrelated bytes, pointers or manifest")) goto cleanup;
+
+    snprintf(request, sizeof(request), "{\"patch\":{\"version\":%u}}", version >= 323u ? 322u : 323u);
+    if (!expect(terra_op_execute_json(handle, "header_patch", request, response, sizeof(response), &json_required) == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+                "header patch bytes: crossed lightning layout boundary")) goto cleanup;
+    if (version >= 323u) {
+        if (!expect(terra_op_execute_json(handle, "header_patch", "{\"patch\":{\"moreLightningSeed\":1}}",
+                    response, sizeof(response), &json_required) != TERRAX_WORLD_STATUS_OK,
+                    "header patch bytes: non-boolean flag accepted")) goto cleanup;
+        snprintf(request, sizeof(request), "{\"patch\":{\"moreLightningSeed\":%s,\"noLightningSeed\":%s}}",
+                 more ? "false" : "true", none ? "false" : "true");
+        if (!expect(terra_op_execute_json(handle, "header_patch", request, response, sizeof(response), &json_required) == TERRAX_WORLD_STATUS_OK,
+                    "header patch bytes: lightning patch failed")) goto cleanup;
+        fixture[2451] = !more; fixture[2452] = !none;
+    } else if (!expect(terra_op_execute_json(handle, "header_patch", "{\"patch\":{\"moreLightningSeed\":true}}",
+                          response, sizeof(response), &json_required) == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+                          "header patch bytes: old version writes lightning flags")) goto cleanup;
+    if (!expect(terra_world_save_to_buffer(handle, saved, (uint32_t)length, &required) == TERRAX_WORLD_STATUS_OK &&
+                required == length && memcmp(saved, fixture, length) == 0,
+                "header patch bytes: flag patch or rejected patch changed unrelated bytes")) goto cleanup;
+    terra_world_close(handle); handle = 0u;
+    if (!expect(terra_world_open_from_buffer(saved, required, &reopened) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: saved game fixture cannot reopen")) goto cleanup;
+    printf("header patch bytes: v%u flags %u/%u metadata, manifest and section bytes preserved\n", version, more, none);
+    ok = 1;
+cleanup:
+    if (reopened) terra_world_close(reopened);
+    if (handle) terra_world_close(handle);
+    free(saved); free(fixture);
+    return ok;
 }
 
 static int test_failed_save_preserves_destination(void) {
@@ -336,5 +424,8 @@ int main(void) {
     if (!test_native_terraria_header_layout()) return 3;
     if (!test_string_reader_bounds()) return 4;
     if (!test_failed_save_preserves_destination()) return 5;
+    if (!test_header_patch_bytes(318u, 0u, 0u) || !test_header_patch_bytes(322u, 0u, 0u) ||
+        !test_header_patch_bytes(323u, 1u, 0u) || !test_header_patch_bytes(323u, 0u, 1u) ||
+        !test_header_patch_bytes(326u, 0u, 0u) || !test_header_patch_bytes(326u, 1u, 1u)) return 6;
     return 0;
 }

@@ -623,6 +623,10 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
         }
     /* dualDungeonsSeed (>=304) */if (w->version>=304u)TX_RD_HEADER_BOOL(dualdungeonsSeed,"dualDungeonsSeed");
+    if (w->version>=323u){
+        TX_RD_HEADER_BOOL(moreLightningSeed,"moreLightningSeed");
+        TX_RD_HEADER_BOOL(noLightningSeed,"noLightningSeed");
+        }
     /* legacySkip (>=299 && <313) */if (w->version>=299u&&w->version<313u)w->legacySkip=rd_u32le(p,len,&off);
     /* manifestJson (>=299) */if (w->version>=299u){
         w->maniFestOff=off+header_offset_base;
@@ -634,6 +638,10 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
             return 0;
         }
         w->maniFestLen=slen;
+        }
+    if (off!=len){
+        tx_set_error("TERRAX_BAD_HEADER","header layout does not end at the tile section pointer");
+        return 0;
         }
     if (w->maxTilesX<=0||w->maxTilesY<=0){
         tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");
@@ -1534,6 +1542,12 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_cstr(b,"],\"dualDungeonsSeed\":");
     json_bool(b,w->dualdungeonsSeed);
+    if (w->version>=323u){
+        buf_cstr(b,",\"moreLightningSeed\":");
+        json_bool(b,w->moreLightningSeed);
+        buf_cstr(b,",\"noLightningSeed\":");
+        json_bool(b,w->noLightningSeed);
+        }
     buf_cstr(b,",\"legacySkip\":");
     json_u32(b,w->legacySkip);
     /* manifestJson */buf_cstr(b,",\"manifestJson\":");

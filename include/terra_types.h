@@ -393,6 +393,8 @@ typedef struct TxWorld {
     uint8_t  numExtradSpawnPointManager;     /* >=297 */
     uint32_t extradSpawnPointManagerOff;      /* file offset for i32 array */
     uint8_t  dualdungeonsSeed;    /* >=304 */
+    uint8_t  moreLightningSeed;   /* >=323 */
+    uint8_t  noLightningSeed;     /* >=323 */
     uint32_t legacySkip;           /* >=299 && <313 */
     uint32_t maniFestOff;          /* >=299, file offset for 7bit string */
     uint32_t maniFestLen;          /* >=299, byte length of string at maniFestOff */
