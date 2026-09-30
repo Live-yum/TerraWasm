@@ -1,5 +1,6 @@
 #include "terra_abi.h"
 #include "terra_world.h"
+#include "terra_types.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,14 @@ void terrax_test_reset_fail_save(void);
 
 void rd_string_copy(const uint8_t* p, uint32_t len, uint32_t* off, char* out, uint32_t cap);
 void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off);
+int parse_format(TxWorld* w);
+int parse_header(TxWorld* w);
+int read_tile_at(TxWorld* w, uint32_t* off, uint32_t end, TxTile* t);
+void write_tile(TxWorld* w, TxBuf* b, const TxTile* t, uint32_t same);
+void buf_init(TxBuf* b, uint32_t cap);
+void tx_internal_free(void* ptr);
+int tx_stream_parse_tile_rules(TxWorld* w, const char* json, int len, TxTileRule** rules, uint32_t* count);
+void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t count, uint32_t run, uint16_t region, uint32_t y, double surface);
 
 static int read_file_alloc(const char* path, unsigned char** out_data, size_t* out_len) {
     FILE* f = fopen(path, "rb");
@@ -384,6 +393,160 @@ cleanup:
 #endif
 }
 
+static int test_platform_style_rules(void) {
+    static const char* path = TERRAX_TEST_FIXTURE_DIR "/files/1.wld";
+    static const char* invalid[] = {
+        "{\"rules\":[{\"where\":{\"type\":1,\"platform_style\":0},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"type\":1,\"platform_style\":0}}]}",
+        "{\"rules\":[{\"where\":{\"platform_style\":70},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"platform_style\":-1}}]}",
+        "{\"rules\":[{\"where\":{\"platform_style\":1.5},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"frame_x\":-1},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"frame_y\":32768},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"frame_x\":1.5},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"frame_y\":\"18\"},\"patch\":{\"type\":19}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"frame_x\":-1}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"frame_y\":32768}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"frame_x\":1.5}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"frame_y\":\"18\"}}]}",
+        "{\"rules\":[{\"where\":{\"type\":19},\"patch\":{\"platform_style\":1,\"frame_y\":18}}]}",
+        "{\"rules\":[{\"where\":{\"platform_style\":1,\"frame_y\":36},\"patch\":{\"type\":19}}]}"
+    };
+    unsigned char* bytes = NULL;
+    size_t length = 0;
+    TxWorld world = {0};
+    TxTile platform = {0}, ordinary = {0};
+    TxTileRule* rules = NULL;
+    uint32_t count = 0;
+    int ok = 0;
+    if (!expect(read_file_alloc(path, &bytes, &length), "platform contract: real WLD fixture missing")) return 0;
+    world.file = bytes; world.file_len = (uint32_t)length;
+    if (!expect(parse_format(&world) && parse_header(&world), "platform contract: fixture parse failed")) goto cleanup;
+    uint32_t off = world.starts[1];
+    for (int32_t x = 0; x < world.maxTilesX && (!platform.active || !ordinary.active); x++) {
+        for (int32_t y = 0; y < world.maxTilesY;) {
+            TxTile tile;
+            if (!expect(read_tile_at(&world, &off, world.ends[1], &tile), "platform contract: fixture tile read failed")) goto cleanup;
+            if (tile.active && tile.type == 19 && tile.frame_y >= 0 && tile.frame_y <= 69 * 18 && !platform.active) platform = tile;
+            if (tile.active && tile.type == 1 && !ordinary.active) ordinary = tile;
+            y += (int32_t)tile.same + 1;
+        }
+    }
+    if (!expect(platform.active && ordinary.active, "platform contract: fixture lacks source platform or ordinary block")) goto cleanup;
+    char json[256];
+    int source_style = platform.frame_y / 18;
+    int target_style = source_style == 49 ? 1 : 49;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"platform_style\":%d},\"patch\":{\"platform_style\":%d}}]}", source_style, target_style);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0 && count == 1,
+                "platform contract: style rule parse failed")) goto cleanup;
+    TxTile changed = platform;
+    changed.brick_style = 2;
+    tx_apply_tile_rules(&changed, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(changed.type == 19 && changed.frame_x == platform.frame_x && changed.frame_y == target_style * 18 &&
+                changed.brick_style == 2 && rules[0].updated == 1,
+                "platform contract: material replacement lost frame X or shape")) goto cleanup;
+    TxBuf encoded;
+    buf_init(&encoded, 32);
+    write_tile(&world, &encoded, &changed, 0);
+    TxWorld packet_world = world;
+    packet_world.file = encoded.data; packet_world.file_len = encoded.len;
+    off = 0;
+    TxTile decoded;
+    int valid_packet = encoded.ok && read_tile_at(&packet_world, &off, encoded.len, &decoded) &&
+        decoded.frame_x == platform.frame_x && decoded.frame_y == target_style * 18 && decoded.brick_style == 2;
+    tx_internal_free(encoded.data);
+    if (!expect(valid_packet, "platform contract: saved platform frame did not roundtrip")) goto cleanup;
+    TxTile unmatched = platform;
+    unmatched.frame_y = (int16_t)(target_style * 18);
+    tx_apply_tile_rules(&unmatched, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(unmatched.frame_y == target_style * 18 && rules[0].updated == 1,
+                "platform contract: source material match was too broad")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"platform_style\":%d,\"frame_x\":%d,\"frame_y\":%d},\"patch\":{\"frame_x\":126,\"frame_y\":144}}]}",
+             source_style, platform.frame_x, platform.frame_y);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "platform contract: exact source and target frames rejected")) goto cleanup;
+    changed = platform;
+    tx_apply_tile_rules(&changed, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(changed.frame_x == 126 && changed.frame_y == 144 && rules[0].updated == 1,
+                "platform contract: exact frame patch failed")) goto cleanup;
+    unmatched = platform; unmatched.frame_x++;
+    tx_apply_tile_rules(&unmatched, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(unmatched.frame_x == platform.frame_x + 1 && unmatched.frame_y == platform.frame_y && rules[0].updated == 1,
+                "platform contract: frame X match was too broad")) goto cleanup;
+    unmatched = platform; unmatched.frame_y += 18;
+    tx_apply_tile_rules(&unmatched, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(unmatched.frame_x == platform.frame_x && unmatched.frame_y == platform.frame_y + 18 && rules[0].updated == 1,
+                "platform contract: frame Y match was too broad")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"platform_style\":%d}}]}", target_style);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "platform contract: ordinary-to-platform rule parse failed")) goto cleanup;
+    ordinary.brick_style = 3;
+    tx_apply_tile_rules(&ordinary, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(ordinary.type == 19 && ordinary.frame_x == 90 && ordinary.frame_y == target_style * 18 && ordinary.brick_style == 0,
+                "platform contract: ordinary-to-platform has invalid initial frame or stale slope")) goto cleanup;
+    buf_init(&encoded, 32);
+    write_tile(&world, &encoded, &ordinary, 0);
+    packet_world.file = encoded.data; packet_world.file_len = encoded.len;
+    off = 0;
+    valid_packet = encoded.ok && read_tile_at(&packet_world, &off, encoded.len, &decoded) &&
+        decoded.type == 19 && decoded.frame_x == 90 && decoded.frame_y == target_style * 18;
+    tx_internal_free(encoded.data);
+    if (!expect(valid_packet, "platform contract: ordinary-to-platform frame did not roundtrip")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"platform_style\":%d,\"frame_x\":108}}]}", target_style);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "platform contract: style plus exact frame X rejected")) goto cleanup;
+    ordinary.type = 1; ordinary.frame_x = ordinary.frame_y = -1;
+    tx_apply_tile_rules(&ordinary, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(ordinary.type == 19 && ordinary.frame_x == 108 && ordinary.frame_y == target_style * 18,
+                "platform contract: exact frame X did not override initial platform frame")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* raw_rule = "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":4,\"frame_y\":36}}]}";
+    if (!expect(tx_stream_parse_tile_rules(&world, raw_rule, (int)strlen(raw_rule), &rules, &count) > 0,
+                "platform contract: raw frame with changed type rejected")) goto cleanup;
+    ordinary.type = 1; ordinary.frame_x = ordinary.frame_y = -1;
+    tx_apply_tile_rules(&ordinary, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(ordinary.type == 4 && ordinary.frame_x == 0 && ordinary.frame_y == 36,
+                "platform contract: missing raw frame axis retained -1")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* raw_platform = "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":19,\"frame_y\":72}}]}";
+    if (!expect(tx_stream_parse_tile_rules(&world, raw_platform, (int)strlen(raw_platform), &rules, &count) > 0,
+                "platform contract: raw platform frame rejected")) goto cleanup;
+    ordinary.type = 1; ordinary.frame_x = ordinary.frame_y = -1;
+    tx_apply_tile_rules(&ordinary, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(ordinary.type == 19 && ordinary.frame_x == 90 && ordinary.frame_y == 72,
+                "platform contract: missing platform frame X was not initialized")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* team_rule = "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":427}}]}";
+    if (!expect(tx_stream_parse_tile_rules(&world, team_rule, (int)strlen(team_rule), &rules, &count) > 0,
+                "platform contract: team platform rule parse failed")) goto cleanup;
+    ordinary.type = 1; ordinary.frame_x = ordinary.frame_y = -1;
+    tx_apply_tile_rules(&ordinary, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(ordinary.type == 427 && ordinary.frame_x == 90 && ordinary.frame_y == 0,
+                "platform contract: team platform kept source frame")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* empty_frame_rule = "{\"rules\":[{\"where\":{\"frame_x\":0,\"frame_y\":0},\"patch\":{\"platform_style\":1}}]}";
+    if (!expect(tx_stream_parse_tile_rules(&world, empty_frame_rule, (int)strlen(empty_frame_rule), &rules, &count) > 0,
+                "platform contract: frame-zero rule rejected")) goto cleanup;
+    TxTile empty = {0};
+    tx_apply_tile_rules(&empty, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(!empty.active && rules[0].updated == 0,
+                "platform contract: frame zero matched an empty tile")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        if (!expect(tx_stream_parse_tile_rules(&world, invalid[i], (int)strlen(invalid[i]), &rules, &count) < 0,
+                    "platform contract: invalid style/type combination accepted")) goto cleanup;
+    }
+    puts("platform contract: real WLD material, frame, and validation passed");
+    ok = 1;
+cleanup:
+    if (rules) tx_internal_free(rules);
+    free(bytes);
+    return ok;
+}
+
 static int test_string_reader_bounds(void) {
     static const unsigned char truncated[] = {5u, 'A'};
     static const unsigned char valid[] = {5u, 'h', 'e', 'l', 'l', 'o'};
@@ -422,6 +585,7 @@ int main(void) {
     if (!test_native_abi_contract()) return 1;
     if (!test_header_section_bounds()) return 2;
     if (!test_native_terraria_header_layout()) return 3;
+    if (!test_platform_style_rules()) return 7;
     if (!test_string_reader_bounds()) return 4;
     if (!test_failed_save_preserves_destination()) return 5;
     if (!test_header_patch_bytes(318u, 0u, 0u) || !test_header_patch_bytes(322u, 0u, 0u) ||

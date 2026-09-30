@@ -119,6 +119,8 @@ static void init_tile_rule(TxTileRule* rule) {
     rule->has_wall = -1;
     rule->biome_region = rule->exclude_biome_region = -1;
     rule->type = -1;
+    rule->platform_style = -1;
+    rule->frame_x = rule->frame_y = -1;
     rule->wall = -1;
     rule->liquid_amount = -1;
     rule->liquid_type = -1;
@@ -154,6 +156,8 @@ static void init_tile_rule(TxTileRule* rule) {
     rule->patch_actuator = -1;
     rule->patch_inactive = -1;
     rule->patch_type = -1;
+    rule->patch_platform_style = -1;
+    rule->patch_frame_x = rule->patch_frame_y = -1;
     rule->patch_wall = -1;
 }
 
@@ -189,6 +193,10 @@ static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
     if (rule->is_active >= 0 && (int32_t)t->active != rule->is_active) return 0;
     if (rule->has_wall >= 0 && (t->wall != 0) != rule->has_wall) return 0;
     if (rule->type >= 0 && (int32_t)t->type != rule->type) return 0;
+    if (rule->platform_style >= 0 && (!t->active || t->type != 19u || t->frame_y != rule->platform_style * 18)) return 0;
+    if ((rule->frame_x >= 0 || rule->frame_y >= 0) && !t->active) return 0;
+    if (rule->frame_x >= 0 && t->frame_x != rule->frame_x) return 0;
+    if (rule->frame_y >= 0 && t->frame_y != rule->frame_y) return 0;
     if (rule->wall >= 0 && (int32_t)t->wall != rule->wall) return 0;
     if (rule->liquid_amount >= 0 && (int32_t)t->liquid_amount != rule->liquid_amount) return 0;
     if (rule->liquid_type >= 0 && (int32_t)t->liquid_type != rule->liquid_type) return 0;
@@ -212,7 +220,25 @@ static void apply_tile_patch(TxTile* t, const TxTileRule* rule, uint32_t y, doub
     if (rule->terrain_theme > 0 || rule->wall_theme > 0 || rule->furniture_theme > 0)
         tx_apply_theme(t, rule->terrain_theme, rule->wall_theme, rule->furniture_theme, y, world_surface);
     if (rule->patch_is_active >= 0) t->active = (uint8_t)rule->patch_is_active;
-    if (rule->patch_type >= 0) { t->type = (uint16_t)rule->patch_type; t->active = 1; }
+    if (rule->patch_type >= 0 || rule->patch_platform_style >= 0) {
+        uint16_t target = rule->patch_platform_style >= 0 ? 19u : (uint16_t)rule->patch_type;
+        int changing_type = !t->active || t->type != target;
+        if ((target == 19u || target == 427u || (target >= 435u && target <= 439u)) &&
+            changing_type) {
+            /* Terraria's standalone platform frame; the game reframes neighbors on load/draw. */
+            t->frame_x = 90;
+            t->frame_y = 0;
+            t->brick_style = 0;
+        } else if (changing_type && (rule->patch_frame_x >= 0 || rule->patch_frame_y >= 0)) {
+            if (rule->patch_frame_x < 0) t->frame_x = 0;
+            if (rule->patch_frame_y < 0) t->frame_y = 0;
+        }
+        t->type = target;
+        t->active = 1;
+    }
+    if (rule->patch_platform_style >= 0) t->frame_y = (int16_t)(rule->patch_platform_style * 18);
+    if (rule->patch_frame_x >= 0) t->frame_x = (int16_t)rule->patch_frame_x;
+    if (rule->patch_frame_y >= 0) t->frame_y = (int16_t)rule->patch_frame_y;
     if (rule->patch_wall >= 0) t->wall = (uint16_t)rule->patch_wall;
     if (rule->patch_liquid_amount >= 0) t->liquid_amount = (uint8_t)rule->patch_liquid_amount;
     if (rule->patch_liquid_type >= 0) t->liquid_type = (uint8_t)rule->patch_liquid_type;
@@ -596,6 +622,36 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                 TRY_MATCH_INT(tile_color, "tile_color")
                 TRY_MATCH_INT(wall_color, "wall_color")
                 #undef TRY_MATCH_INT
+                wp = json_find_key(request + where_pos, where_len, "platform_style");
+                if (wp >= 0) {
+                    int type_pos = json_find_key(request + where_pos, where_len, "type");
+                    if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 0 || iv > 69 ||
+                        (type_pos >= 0 && !json_is_null(request, jlen, type_pos + where_pos) && rules[r].type != 19)) {
+                        tx_internal_free(rules);
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "where.platform_style requires Tile 19 and integer style 0..69");
+                        return -1;
+                    }
+                    rules[r].platform_style = iv;
+                }
+                #define TRY_MATCH_FRAME(field, key, label) \
+                    wp = json_find_key(request + where_pos, where_len, key); \
+                    if (wp >= 0) { \
+                        if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < 0 || iv > 32767) { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", label " must be an integer from 0 to 32767"); \
+                            return -1; \
+                        } \
+                        rules[r].field = iv; \
+                    }
+                TRY_MATCH_FRAME(frame_x, "frame_x", "where.frame_x")
+                TRY_MATCH_FRAME(frame_y, "frame_y", "where.frame_y")
+                #undef TRY_MATCH_FRAME
+                if (rules[r].platform_style >= 0 && rules[r].frame_y >= 0 &&
+                    rules[r].frame_y != rules[r].platform_style * 18) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "where.platform_style conflicts with where.frame_y");
+                    return -1;
+                }
                 #define TRY_MATCH_BOOL(field, key) \
                     wp = json_find_key(request + where_pos, where_len, key); \
                     if (wp >= 0 && !json_is_null(request, jlen, wp + where_pos)) { \
@@ -666,6 +722,35 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                 TRY_PATCH_INT(patch_tile_color, "tile_color")
                 TRY_PATCH_INT(patch_wall_color, "wall_color")
                 #undef TRY_PATCH_INT
+                pp = json_find_key(request + patch_pos, patch_len, "platform_style");
+                if (pp >= 0) {
+                    int type_pos = json_find_key(request + patch_pos, patch_len, "type");
+                    if (!json_extract_int(request, jlen, pp + patch_pos, &iv) || iv < 0 || iv > 69 ||
+                        (type_pos >= 0 && !json_is_null(request, jlen, type_pos + patch_pos) && rules[r].patch_type != 19)) {
+                        tx_internal_free(rules);
+                        tx_set_error("TERRAX_VALIDATION_ERROR", "patch.platform_style requires Tile 19 and integer style 0..69");
+                        return -1;
+                    }
+                    rules[r].patch_platform_style = iv;
+                }
+                #define TRY_PATCH_FRAME(field, key, label) \
+                    pp = json_find_key(request + patch_pos, patch_len, key); \
+                    if (pp >= 0) { \
+                        if (!json_extract_int(request, jlen, pp + patch_pos, &iv) || iv < 0 || iv > 32767) { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", label " must be an integer from 0 to 32767"); \
+                            return -1; \
+                        } \
+                        rules[r].field = iv; \
+                    }
+                TRY_PATCH_FRAME(patch_frame_x, "frame_x", "patch.frame_x")
+                TRY_PATCH_FRAME(patch_frame_y, "frame_y", "patch.frame_y")
+                #undef TRY_PATCH_FRAME
+                if (rules[r].patch_platform_style >= 0 && rules[r].patch_frame_y >= 0) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "patch.platform_style conflicts with patch.frame_y");
+                    return -1;
+                }
                 #define TRY_THEME(field) \
                     pp = json_find_key(request + patch_pos, patch_len, #field); \
                     if (pp >= 0) { \

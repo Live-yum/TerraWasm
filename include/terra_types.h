@@ -504,6 +504,9 @@ typedef struct TxTileRule {
     uint16_t exclude_biome_region_bit;
     int32_t  has_wall;      /* -1=any, 0=absent, 1=present */
     int32_t  type;          /* -1=any */
+    int32_t  platform_style; /* -1=any; Tile 19 frame_y / 18 */
+    int32_t  frame_x;       /* -1=any; exact frame coordinate */
+    int32_t  frame_y;
     int32_t  wall;          /* -1=any */
     int32_t  liquid_amount; /* -1=any */
     int32_t  liquid_type;   /* -1=any */
@@ -542,6 +545,9 @@ typedef struct TxTileRule {
     int32_t  patch_actuator;
     int32_t  patch_inactive;
     int32_t  patch_type;         /* -1=no change, >=0 set tile type */
+    int32_t  patch_platform_style; /* -1=no change; Tile 19 frame_y / 18 */
+    int32_t  patch_frame_x; /* -1=no change; exact frame coordinate */
+    int32_t  patch_frame_y;
     int32_t  patch_wall;         /* -1=no change, >=0 set wall id */
 
     /* Limit (0 = unlimited) */
