@@ -36,6 +36,7 @@ void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off);
 int parse_format(TxWorld* w);
 int parse_header(TxWorld* w);
 int read_tile_at(TxWorld* w, uint32_t* off, uint32_t end, TxTile* t);
+int tile_important(TxWorld* w, uint16_t type);
 void write_tile(TxWorld* w, TxBuf* b, const TxTile* t, uint32_t same);
 void buf_init(TxBuf* b, uint32_t cap);
 void tx_internal_free(void* ptr);
@@ -547,6 +548,98 @@ cleanup:
     return ok;
 }
 
+static int test_material_frame_rules(void) {
+    static const char* path = TERRAX_TEST_FIXTURE_DIR "/files/1.wld";
+    unsigned char* bytes = NULL;
+    size_t length = 0;
+    TxWorld world = {0};
+    TxTileRule* rules = NULL;
+    uint32_t count = 0;
+    int ok = 0;
+    char json[1600];
+    const char* source = "{\"frame_x\":0,\"frame_y\":0,\"width\":2,\"height\":2,\"coordinate_width\":16,\"coordinate_heights\":[16,18],\"padding\":2}";
+    const char* target = "{\"frame_x\":72,\"frame_y\":54,\"width\":2,\"height\":2,\"coordinate_width\":16,\"coordinate_heights\":[18,16],\"padding\":2}";
+    if (!expect(read_file_alloc(path, &bytes, &length), "material contract: fixture missing")) return 0;
+    world.file = bytes; world.file_len = (uint32_t)length;
+    if (!expect(parse_format(&world) && parse_header(&world), "material contract: fixture parse failed")) goto cleanup;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"material\":%s}}]}", source, target);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0 && count == 1,
+                "material contract: 2x2 layout rejected")) goto cleanup;
+    for (int row = 0; row < 2; row++) for (int col = 0; col < 2; col++) {
+        TxTile tile = {0}; tile.active = 1; tile.type = 21;
+        tile.frame_x = (int16_t)(col * 18); tile.frame_y = (int16_t)(row * 18);
+        tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+        if (!expect(tile.type == 21 && tile.frame_x == 72 + col * 18 && tile.frame_y == 54 + row * 20,
+                    "material contract: subcell offset lost")) goto cleanup;
+    }
+    TxTile tile = {0}; tile.active = 1; tile.type = 21; tile.frame_x = 1; tile.frame_y = 0;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.frame_x == 1 && rules[0].updated == 4,
+                "material contract: neighboring frame matched")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"material\":%s}},{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"frame_x\":300}}]}", source, target, target);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "material contract: ordered material rules rejected")) goto cleanup;
+    tile.frame_x = tile.frame_y = 0;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.frame_x == 72 && rules[1].updated == 0,
+                "material contract: rule cascade transformed same cell twice")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"tile_color\":3}},{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"fullbright_block\":1}}]}", source, source);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "material contract: independent material rules rejected")) goto cleanup;
+    tile.frame_x = tile.frame_y = 0; tile.tile_color = tile.fullbright_block = 0;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.tile_color == 3 && tile.fullbright_block == 1 &&
+                rules[0].updated == 1 && rules[1].updated == 1,
+                "material contract: independent material patches did not compose")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* one_cell = "{\"frame_x\":0,\"frame_y\":0,\"width\":1,\"height\":1,\"coordinate_width\":16,\"coordinate_heights\":[16],\"padding\":2}";
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"type\":19,\"platform_style\":2}}]}", one_cell);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "material contract: 1x1 to platform rejected")) goto cleanup;
+    tile.frame_x = tile.frame_y = 0; tile.type = 21;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.type == 19 && tile.frame_x == 90 && tile.frame_y == 36,
+                "material contract: 1x1 to platform frame invalid")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"type\":4,\"frame_x\":18,\"frame_y\":36}}]}", one_cell);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "material contract: 1x1 to raw frame rejected")) goto cleanup;
+    tile.frame_x = tile.frame_y = 0; tile.type = 21;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.type == 4 && tile.frame_x == 18 && tile.frame_y == 36,
+                "material contract: 1x1 to raw frame failed")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"type\":1}}]}", one_cell);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) > 0,
+                "material contract: 1x1 to unframed tile rejected")) goto cleanup;
+    tile.frame_x = tile.frame_y = 0; tile.type = 21;
+    tx_apply_tile_rules(&tile, rules, count, 1, 0, 0, world.worldSurface);
+    if (!expect(tile.type == 1, "material contract: 1x1 to unframed tile failed")) goto cleanup;
+    tx_internal_free(rules); rules = NULL;
+    const char* invalid_target = "{\"frame_x\":72,\"frame_y\":54,\"width\":1,\"height\":2,\"coordinate_width\":16,\"coordinate_heights\":[16,16],\"padding\":2}";
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"material\":%s}}]}", source, invalid_target);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) < 0,
+                "material contract: cross-dimension conversion accepted")) goto cleanup;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"type\":55,\"material\":%s}}]}", source, target);
+    if (!expect(tile_important(&world, 55), "material contract: sign target must be frame-important")) goto cleanup;
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) < 0,
+                "material contract: multi-cell cross-ID conversion accepted")) goto cleanup;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"tile_color\":3},\"limit\":1}]}", source);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) < 0,
+                "material contract: partial multi-cell limit accepted")) goto cleanup;
+    snprintf(json, sizeof(json), "{\"rules\":[{\"where\":{\"type\":21,\"material\":%s},\"patch\":{\"material\":%s,\"frame_x\":5}}]}", source, target);
+    if (!expect(tx_stream_parse_tile_rules(&world, json, (int)strlen(json), &rules, &count) < 0,
+                "material contract: conflicting raw frame override accepted")) goto cleanup;
+    puts("material contract: 2x2 subcells, matching, cascade, and validation passed");
+    ok = 1;
+cleanup:
+    if (rules) tx_internal_free(rules);
+    free(bytes);
+    return ok;
+}
+
 static int test_string_reader_bounds(void) {
     static const unsigned char truncated[] = {5u, 'A'};
     static const unsigned char valid[] = {5u, 'h', 'e', 'l', 'l', 'o'};
@@ -586,6 +679,7 @@ int main(void) {
     if (!test_header_section_bounds()) return 2;
     if (!test_native_terraria_header_layout()) return 3;
     if (!test_platform_style_rules()) return 7;
+    if (!test_material_frame_rules()) return 8;
     if (!test_string_reader_bounds()) return 4;
     if (!test_failed_save_preserves_destination()) return 5;
     if (!test_header_patch_bytes(318u, 0u, 0u) || !test_header_patch_bytes(322u, 0u, 0u) ||

@@ -495,6 +495,15 @@ typedef enum TxBiomeMode {
 
 /* ---------- Batch update rule ---------- */
 
+#define TX_MATERIAL_MAX_CELLS 32
+typedef struct TxMaterialFrame {
+    int32_t frame_x, frame_y; /* style origin */
+    int32_t width, height;    /* tile cells */
+    int32_t coordinate_width, padding;
+    int32_t coordinate_heights[TX_MATERIAL_MAX_CELLS];
+    uint8_t present;
+} TxMaterialFrame;
+
 typedef struct TxTileRule {
     /* Where clause (optional fields, -1 = don't match) */
     int32_t  is_active;     /* -1=any, 0=inactive, 1=active */
@@ -507,6 +516,7 @@ typedef struct TxTileRule {
     int32_t  platform_style; /* -1=any; Tile 19 frame_y / 18 */
     int32_t  frame_x;       /* -1=any; exact frame coordinate */
     int32_t  frame_y;
+    TxMaterialFrame material;
     int32_t  wall;          /* -1=any */
     int32_t  liquid_amount; /* -1=any */
     int32_t  liquid_type;   /* -1=any */
@@ -548,6 +558,7 @@ typedef struct TxTileRule {
     int32_t  patch_platform_style; /* -1=no change; Tile 19 frame_y / 18 */
     int32_t  patch_frame_x; /* -1=no change; exact frame coordinate */
     int32_t  patch_frame_y;
+    TxMaterialFrame patch_material;
     int32_t  patch_wall;         /* -1=no change, >=0 set wall id */
 
     /* Limit (0 = unlimited) */

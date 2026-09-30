@@ -197,6 +197,18 @@ static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
     if ((rule->frame_x >= 0 || rule->frame_y >= 0) && !t->active) return 0;
     if (rule->frame_x >= 0 && t->frame_x != rule->frame_x) return 0;
     if (rule->frame_y >= 0 && t->frame_y != rule->frame_y) return 0;
+    if (rule->material.present) {
+        int found = 0;
+        const TxMaterialFrame* m = &rule->material;
+        for (int row = 0, fy = m->frame_y; row < m->height; fy += m->coordinate_heights[row++] + m->padding) {
+            if (t->frame_y != fy) continue;
+            int dx = t->frame_x - m->frame_x;
+            found = dx >= 0 && dx % (m->coordinate_width + m->padding) == 0 &&
+                dx / (m->coordinate_width + m->padding) < m->width;
+            break;
+        }
+        if (!t->active || !found) return 0;
+    }
     if (rule->wall >= 0 && (int32_t)t->wall != rule->wall) return 0;
     if (rule->liquid_amount >= 0 && (int32_t)t->liquid_amount != rule->liquid_amount) return 0;
     if (rule->liquid_type >= 0 && (int32_t)t->liquid_type != rule->liquid_type) return 0;
@@ -216,7 +228,14 @@ static int tile_matches_where(const TxTile* t, const TxTileRule* rule) {
     return 1;
 }
 
-static void apply_tile_patch(TxTile* t, const TxTileRule* rule, uint32_t y, double world_surface) {
+static void apply_tile_patch(TxTile* t, const TxTile* source, const TxTileRule* rule, uint32_t y, double world_surface) {
+    int material_col = -1, material_row = -1;
+    if (rule->patch_material.present) {
+        const TxMaterialFrame* m = &rule->material;
+        material_col = (source->frame_x - m->frame_x) / (m->coordinate_width + m->padding);
+        for (int row = 0, fy = m->frame_y; row < m->height; fy += m->coordinate_heights[row++] + m->padding)
+            if (source->frame_y == fy) { material_row = row; break; }
+    }
     if (rule->terrain_theme > 0 || rule->wall_theme > 0 || rule->furniture_theme > 0)
         tx_apply_theme(t, rule->terrain_theme, rule->wall_theme, rule->furniture_theme, y, world_surface);
     if (rule->patch_is_active >= 0) t->active = (uint8_t)rule->patch_is_active;
@@ -239,6 +258,13 @@ static void apply_tile_patch(TxTile* t, const TxTileRule* rule, uint32_t y, doub
     if (rule->patch_platform_style >= 0) t->frame_y = (int16_t)(rule->patch_platform_style * 18);
     if (rule->patch_frame_x >= 0) t->frame_x = (int16_t)rule->patch_frame_x;
     if (rule->patch_frame_y >= 0) t->frame_y = (int16_t)rule->patch_frame_y;
+    if (rule->patch_material.present && material_row >= 0) {
+        const TxMaterialFrame* m = &rule->patch_material;
+        int fy = m->frame_y;
+        for (int row = 0; row < material_row; row++) fy += m->coordinate_heights[row] + m->padding;
+        t->frame_x = (int16_t)(m->frame_x + material_col * (m->coordinate_width + m->padding));
+        t->frame_y = (int16_t)fy;
+    }
     if (rule->patch_wall >= 0) t->wall = (uint16_t)rule->patch_wall;
     if (rule->patch_liquid_amount >= 0) t->liquid_amount = (uint8_t)rule->patch_liquid_amount;
     if (rule->patch_liquid_type >= 0) t->liquid_type = (uint8_t)rule->patch_liquid_type;
@@ -386,13 +412,14 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
 }
 
 void tx_apply_tile_rules(TxTile* t, TxTileRule* rules, uint32_t rule_count, uint32_t run, uint16_t region, uint32_t y, double world_surface) {
+    TxTile original = *t;
     for (uint32_t r = 0; r < rule_count; r++) {
         if (rules[r].biome_region > 0 && !(region & rules[r].biome_region_bit)) continue;
         if (rules[r].exclude_biome_region > 0 && (region & rules[r].exclude_biome_region_bit)) continue;
-        if (!tile_matches_where(t, &rules[r])) continue;
+        if (!tile_matches_where(rules[r].material.present ? &original : t, &rules[r])) continue;
         rules[r].matched += run;
         if (rules[r].limit == 0 || rules[r].updated < rules[r].limit) {
-            apply_tile_patch(t, &rules[r], y, world_surface);
+            apply_tile_patch(t, &original, &rules[r], y, world_surface);
             rules[r].updated += run;
         }
     }
@@ -552,6 +579,40 @@ static int parse_biome_mode(const char* request, int jlen) {
         }
     }
     return -1;
+}
+
+static int parse_material_frame(const char* json, int jlen, int pos, TxMaterialFrame* m) {
+    extern int json_find_key(const char*, int, const char*);
+    extern int json_array_count(const char*, int, int);
+    extern int json_array_element(const char*, int, int, int);
+    extern int json_skip_value(const char*, int, int);
+    extern int json_extract_int(const char*, int, int, int32_t*);
+    static const char* keys[] = {"frame_x", "frame_y", "width", "height", "coordinate_width", "padding"};
+    int32_t* fields[] = {&m->frame_x, &m->frame_y, &m->width, &m->height, &m->coordinate_width, &m->padding};
+    int end = json_skip_value(json, jlen, pos);
+    if (end <= pos) return 0;
+    for (int i = 0; i < 6; i++) {
+        int p = json_find_key(json + pos, end - pos, keys[i]);
+        if (p < 0 || !json_extract_int(json, jlen, pos + p, fields[i])) return 0;
+    }
+    if (m->frame_x < 0 || m->frame_y < 0 || m->width < 1 || m->height < 1 ||
+        m->width > TX_MATERIAL_MAX_CELLS || m->height > TX_MATERIAL_MAX_CELLS ||
+        m->coordinate_width < 1 || m->coordinate_width > 32767 ||
+        m->padding < 0 || m->padding > 32767 ||
+        (int64_t)m->coordinate_width + m->padding > 32767) return 0;
+    int p = json_find_key(json + pos, end - pos, "coordinate_heights");
+    if (p < 0 || json_array_count(json, jlen, pos + p) != m->height) return 0;
+    int64_t fy = m->frame_y;
+    for (int row = 0; row < m->height; row++) {
+        int element = json_array_element(json, jlen, pos + p, row);
+        if (element < 0 || !json_extract_int(json, jlen, element, &m->coordinate_heights[row]) ||
+            m->coordinate_heights[row] < 1 || m->coordinate_heights[row] > 32767 || fy > 32767) return 0;
+        fy += m->coordinate_heights[row] + m->padding;
+    }
+    if ((int64_t)m->frame_x + (int64_t)(m->width - 1) *
+        (m->coordinate_width + (int64_t)m->padding) > 32767) return 0;
+    m->present = 1;
+    return 1;
 }
 
 int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTileRule** out_rules, uint32_t* out_count) {
@@ -786,11 +847,57 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                 TRY_PATCH_BOOL(patch_inactive, "inactive")
                 #undef TRY_PATCH_BOOL
             }
+            if (where_pos >= 0) {
+                int where_end = json_skip_value(request, jlen, where_pos);
+                int mp = json_find_key(request + where_pos, where_end - where_pos, "material");
+                if (mp >= 0 && (!parse_material_frame(request, jlen, where_pos + mp, &rules[r].material) ||
+                    rules[r].type < 0 || rules[r].type > 65535 ||
+                    !tile_important(w, (uint16_t)rules[r].type) ||
+                    rules[r].platform_style >= 0 || rules[r].frame_x >= 0 || rules[r].frame_y >= 0)) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "where.material requires a frame-important where.type and valid layout without raw frames or platform_style");
+                    return -1;
+                }
+            }
+            if (patch_pos >= 0) {
+                int patch_end = json_skip_value(request, jlen, patch_pos);
+                int mp = json_find_key(request + patch_pos, patch_end - patch_pos, "material");
+                if (mp >= 0 && (!parse_material_frame(request, jlen, patch_pos + mp, &rules[r].patch_material) ||
+                    !rules[r].material.present || rules[r].patch_platform_style >= 0 ||
+                    rules[r].patch_frame_x >= 0 || rules[r].patch_frame_y >= 0 ||
+                    rules[r].patch_type > 65535 ||
+                    (rules[r].patch_type >= 0 && !tile_important(w, (uint16_t)rules[r].patch_type)) ||
+                    rules[r].material.width != rules[r].patch_material.width ||
+                    rules[r].material.height != rules[r].patch_material.height)) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "patch.material requires where.material, frame-important target type, and matching dimensions without raw frames or platform_style");
+                    return -1;
+                }
+            }
+            if (rules[r].material.present &&
+                (rules[r].patch_platform_style >= 0 ? 19 : rules[r].patch_type) >= 0 &&
+                (rules[r].patch_platform_style >= 0 ? 19 : rules[r].patch_type) != rules[r].type &&
+                (rules[r].material.width != 1 || rules[r].material.height != 1)) {
+                tx_internal_free(rules);
+                tx_set_error("TERRAX_VALIDATION_ERROR", "changing a multi-cell material's tile type is unsupported");
+                return -1;
+            }
+            if (rules[r].patch_material.present && (rules[r].patch_type < -1 || rules[r].patch_is_active == 0)) {
+                tx_internal_free(rules);
+                tx_set_error("TERRAX_VALIDATION_ERROR", "patch.material requires an active tile and valid patch.type");
+                return -1;
+            }
             int limit_pos = json_find_key(request + elem_pos, elem_len, "limit");
             if (limit_pos >= 0) {
                 int32_t lv;
                 if (json_extract_int(request, jlen, limit_pos + elem_pos, &lv) && lv >= 0)
                     rules[r].limit = (uint32_t)lv;
+            }
+            if (rules[r].material.present &&
+                (rules[r].material.width != 1 || rules[r].material.height != 1) && rules[r].limit != 0) {
+                tx_internal_free(rules);
+                tx_set_error("TERRAX_VALIDATION_ERROR", "multi-cell material rules cannot have a limit");
+                return -1;
             }
         }
     }
