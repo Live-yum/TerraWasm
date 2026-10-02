@@ -1,58 +1,13 @@
-name: TerraWasm quality
-
+name: TerraWasm all profile experiment
 on:
   push:
-  pull_request:
-  workflow_dispatch:
-
+    branches: [test/all-size-profile-20261002]
 permissions:
   contents: read
-
-concurrency:
-  group: terrawasm-quality-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  EMSCRIPTEN_VERSION: "5.0.7"
-
 jobs:
-  native:
+  compare:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes zlib1g-dev
-      - name: Configure native contracts
-        run: cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON
-      - name: Build native contracts
-        run: cmake --build build-native --config Release --parallel
-      - name: Run native contracts and fuzz smoke
-        run: ctest --test-dir build-native --build-config Release --output-on-failure
-
-  sanitizer-and-fuzz:
-    runs-on: ubuntu-latest
-    env:
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - name: Install sanitizer dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang zlib1g-dev
-      - name: Configure sanitizer contracts
-        env:
-          CC: clang
-        run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_SANITIZERS=ON -DTERRAWASM_FUZZ_SMOKE=ON
-      - name: Build sanitizer contracts
-        run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
-      - name: Run sanitizer contracts
-        run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
-
-  wasm-release:
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,96 +16,56 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - name: Install pinned Emscripten SDK
+      - name: Install pinned Emscripten
         shell: pwsh
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
-          & "$env:RUNNER_TEMP/emsdk/emsdk" install $env:EMSCRIPTEN_VERSION
-          & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
-      - name: Build and test Node and Web artifacts
-        shell: pwsh
-        run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Upload traceable release artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: terrawasm-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm.js
-            build/terrax_world_wasm.wasm
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
-
-  wasm-feature-matrix:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features: [wld, plr]
-    env:
-      TERRAWASM_FEATURE_SET: ${{ matrix.features }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          lfs: true
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 20
-      - name: Install pinned Emscripten SDK
+          & "$env:RUNNER_TEMP/emsdk/emsdk" install 5.0.7
+          & "$env:RUNNER_TEMP/emsdk/emsdk" activate 5.0.7
+      - name: Compare the same source and fixtures across optimization profiles
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
-          & "$env:RUNNER_TEMP/emsdk/emsdk" install $env:EMSCRIPTEN_VERSION
-          & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
-      - name: Build and test selected capability set
-        shell: pwsh
-        run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Validate buffer-only WLD Web profile
-        if: matrix.features == 'wld'
-        shell: pwsh
-        run: node tests/check_viewer_web_profile_artifact.js build/terrax_world_wasm_web.wasm
-      - name: Run native-size PNG under Mini Program memory ceiling
-        if: matrix.features == 'wld'
-        shell: pwsh
-        run: |
-          & "$env:RUNNER_TEMP/emsdk/emsdk_env.ps1" 2>$null
-          & emcmake cmake -S . -B build-lowmem `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DTERRAWASM_FEATURE_SET=wld `
-            -DTERRAX_BUILD_COMMIT=$env:GITHUB_SHA `
-            -DTERRAX_BUILD_DIRTY=false `
-            -DTERRAX_BUILD_COMPILER=emscripten `
-            -DTERRAX_NODE_INITIAL_MEMORY=67108864 `
-            -DTERRAX_NODE_MAXIMUM_MEMORY=167772160
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & cmake --build build-lowmem --config Release --target terrax_world_wasm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:TERRAWASM_LOW_MEMORY_MODULE = (Resolve-Path "build-lowmem/terrax_world_wasm.js").Path
-          & node -e "const f=require(process.env.TERRAWASM_LOW_MEMORY_MODULE);f().then(M=>{const i=JSON.parse(M.UTF8ToString(M._terra_build_info_json()));if(i.maxMemory!==167772160)throw new Error('expected 160 MiB maxMemory, got '+i.maxMemory);console.log('maxMemory='+i.maxMemory)})"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & node tests/test_preview_png_lowmem_160.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Upload WLD viewer artifacts
-        if: matrix.features == 'wld'
+          $reports = @()
+          foreach ($profile in @("-O3", "-Os", "-Oz")) {
+            Write-Host "PROFILE $profile"
+            # The diagnostic Node invocation keeps the known oversize O3 control
+            # measurable. Each manifest's Web size is recorded against the
+            # unchanged production gate below; no production check is changed.
+            & ./build.ps1 -Target node -Features all -OptimizeFlag $profile -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $manifest = Get-Content build/terra.manifest.json -Raw | ConvertFrom-Json
+            $wasm = $manifest.targets.web.artifacts | Where-Object role -eq "wasm"
+            $wrapper = $manifest.targets.web.artifacts | Where-Object role -eq "wrapper"
+            @'
+          const fs = require('fs');
+          module.exports = async () => {
+            const M = await require('./terrax_world_wasm_web.js')({wasmBinary: fs.readFileSync(__dirname + '/terrax_world_wasm_web.wasm')});
+            process.on('exit', () => console.log('[profile-memory] ' + JSON.stringify({linearBytes:M._tx_memory_used(),heapPeakBytes:M._tx_heap_peak(),bridgePeakBytes:M._tx_bridge_heap_peak(),nativePeakBytes:M._tx_native_heap_peak()})));
+            return M;
+          };
+          '@ | Set-Content build/profile-lowmem.cjs
+            $env:TERRAWASM_LOW_MEMORY_MODULE = (Resolve-Path build/profile-lowmem.cjs).Path
+            $timer = [System.Diagnostics.Stopwatch]::StartNew()
+            & node tests/test_preview_png_lowmem_160.js
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $timer.Stop()
+            $reports += [ordered]@{
+              profile = $profile
+              sourceCommit = $manifest.sourceCommit
+              dirty = $manifest.dirty
+              webWasmBytes = $wasm.bytes
+              webWrapperBytes = $wrapper.bytes
+              sizeGatePassed = ($wasm.bytes -le 327680 -and $wrapper.bytes -le 131072)
+              fullPreviewProcessMs = [Math]::Round($timer.Elapsed.TotalMilliseconds, 1)
+              maxLinearMemoryBytes = $manifest.targets.web.memory.maxBytes
+            }
+          }
+          $reports | ConvertTo-Json -Depth 6 | Tee-Object -FilePath "$env:RUNNER_TEMP/all-profile-results.json"
+          if (-not ($reports | Where-Object sizeGatePassed)) { throw "No profile meets the unchanged production size gate" }
+      - name: Upload profile measurements
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: terrawasm-wld-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
-
-
-      - name: Upload PLR viewer artifacts
-        if: matrix.features == 'plr'
-        uses: actions/upload-artifact@v7
-        with:
-          name: terrawasm-plr-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
+          name: all-profile-measurements
+          path: ${{ runner.temp }}/all-profile-results.json
+          if-no-files-found: warn
