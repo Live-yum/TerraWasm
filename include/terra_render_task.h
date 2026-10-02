@@ -11,8 +11,8 @@ typedef struct TxOpenPreviewTask {
 
     uint32_t source_width;
     uint32_t source_height;
-    uint32_t ground;
-    uint32_t rock;
+    double ground;
+    double rock;
 
     uint32_t tile_start;
     uint32_t tile_end;

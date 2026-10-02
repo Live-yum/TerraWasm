@@ -29,8 +29,9 @@ extern int txw_test_stream_png_pixel(TxStreamPng* png, uint32_t y, uint8_t rgba[
 extern uint32_t txw_test_map_runtime_value_for_tile(const TxTile* tile);
 extern void txw_test_map_runtime_write_header(TxBuf* out, TxWorld* world);
 extern void txw_test_map_runtime_render_color(const TxTile* tile, uint32_t y,
-                                              uint32_t height, uint32_t ground, uint32_t rock,
+                                              uint32_t height, double ground, double rock,
                                               uint8_t rgba[4]);
+extern uint32_t txw_test_map_runtime_background(uint32_t y, double ground, double rock);
 
 static void put32(uint8_t* p, uint32_t v) {
     p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8u);
@@ -75,6 +76,11 @@ static uint8_t* make_runtime(uint32_t* out_len) {
     palette[5u * 4u] = 70u; palette[5u * 4u + 1u] = 80u; palette[5u * 4u + 2u] = 90u;
     palette[9u * 4u] = 1u; palette[9u * 4u + 1u] = 2u; palette[9u * 4u + 2u] = 3u;
     palette[11u * 4u] = 4u; palette[11u * 4u + 1u] = 5u; palette[11u * 4u + 2u] = 6u;
+    palette[16u * 4u] = 7u; palette[16u * 4u + 1u] = 8u; palette[16u * 4u + 2u] = 9u;
+    palette[36u * 4u] = 13u; palette[36u * 4u + 1u] = 14u; palette[36u * 4u + 2u] = 15u;
+    palette[244u * 4u] = 10u; palette[244u * 4u + 1u] = 11u; palette[244u * 4u + 2u] = 12u;
+    palette[265u * 4u] = 16u; palette[265u * 4u + 1u] = 17u; palette[265u * 4u + 2u] = 18u;
+    palette[521u * 4u] = 19u; palette[521u * 4u + 1u] = 20u; palette[521u * 4u + 2u] = 21u;
     p[len - 90u] = 200u; /* paint 1 */
     *out_len = len;
     return p;
@@ -104,12 +110,16 @@ static void test_rle_colors(TxWorld* world, const TxTile* tile, int foreground) 
     png = tx_stream_png_begin(world, 0u, 0u, NULL, 0u, NULL, 0u);
     assert(png && tx_stream_png_range(png, &start, &count) == 1 && start == 0u && count > 1u);
     assert(tx_stream_png_run(png, 0u, 0u, tile, HEIGHT));
-    for (uint32_t y = 0u; y < 2u; y++) {
+    for (uint32_t sample = 0u; sample < 3u; sample++) {
+        uint32_t y = sample < 2u ? sample : 11u;
         tx_render_stream_color(world, foreground ? tile : NULL, y, expected);
         assert(memcmp(full + y * 3u, expected, 3u) == 0);
         assert(memcmp(rows + y * 4u, expected, 4u) == 0);
         assert(memcmp(stream + y * 3u, expected, 3u) == 0);
         assert(txw_test_stream_png_pixel(png, y, got) && memcmp(got, expected, 4u) == 0);
+        if (!foreground && y == 11u) {
+            assert(expected[0] == 13u && expected[1] == 14u && expected[2] == 15u);
+        }
     }
     if (!foreground) assert(memcmp(full, full + 3u, 3u) != 0);
     tx_stream_png_free(png);
@@ -158,11 +168,26 @@ int main(int argc, char** argv) {
     memset(&tile, 0, sizeof(tile));
     txw_test_map_runtime_render_color(&tile, 0u, 100u, 35u, 65u, rgba);
     assert(rgba[0] == 1u && rgba[1] == 2u && rgba[2] == 3u);
+    /* Official CalcSkyGradient: skyPosition + floor(255 * y / worldSurface).
+     * MAP, buffered PNG and stream PNG keep the original fractional surface. */
+    assert((txw_test_map_runtime_background(21u, 671.0, 900.0) & 65535u) == 16u);
+    txw_test_map_runtime_render_color(&tile, 21u, 1000u, 671.0, 900.0, rgba);
+    assert(rgba[0] == 7u && rgba[1] == 8u && rgba[2] == 9u);
+    assert((txw_test_map_runtime_background(3u, 3.25, 900.0) & 65535u) == 244u);
+    txw_test_map_runtime_render_color(&tile, 3u, 1000u, 3.25, 900.0, rgba);
+    assert(rgba[0] == 10u && rgba[1] == 11u && rgba[2] == 12u);
+    txw_test_map_runtime_render_color(&tile, 150u, 1000u, 100.5, 200.5, rgba);
+    assert(rgba[0] == 16u && rgba[1] == 17u && rgba[2] == 18u);
+    txw_test_map_runtime_render_color(&tile, 300u, 1000u, 100.5, 200.5, rgba);
+    assert(rgba[0] == 19u && rgba[1] == 20u && rgba[2] == 21u);
+    world.worldSurface = 3.25; world.rockLayer = 900.0; world.maxTilesY = 1000;
+    tx_render_stream_color(&world, NULL, 3u, rgba);
+    assert(rgba[0] == 10u && rgba[1] == 11u && rgba[2] == 12u);
 
     world.version = 326u;
     world.maxTilesX = 1;
     world.maxTilesY = 300;
-    world.worldSurface = 100;
+    world.worldSurface = 100.5;
     world.rockLayer = 200;
     memset(&tile, 0, sizeof(tile)); tile.active = 1u; tile.type = 127u;
     test_rle_colors(&world, &tile, 0);

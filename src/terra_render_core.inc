@@ -288,8 +288,12 @@ static void lerp_rgb(uint8_t out[4], int32_t r0, int32_t g0, int32_t b0, int32_t
   out[3] = 255u;
 }
 
-static void background_color(uint32_t y, uint32_t world_h, uint32_t ground, uint32_t rock, uint8_t out[4]) {
+static void background_color(uint32_t y, uint32_t world_h, double ground, double rock, uint8_t out[4]) {
   const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+  if (!layout) {
+    ground = (uint32_t)ground;
+    rock = (uint32_t)rock;
+  }
   if (ground == 0u) ground = world_h > 3u ? (world_h * 35u) / 100u : 1u;
   if (rock == 0u) rock = world_h > 2u ? (world_h * 65u) / 100u : ground + 1u;
   if (ground == 0u) ground = 1u;
@@ -297,13 +301,13 @@ static void background_color(uint32_t y, uint32_t world_h, uint32_t ground, uint
   if (layout) {
     uint32_t index;
     if (y < ground) {
-      index = layout->sky_pos + (uint32_t)(((uint64_t)y * (layout->dirt_pos - layout->sky_pos)) / ground);
+      index = layout->sky_pos + (uint32_t)(255.0 * ((double)y / ground));
     } else if (y < rock) {
-      index = layout->dirt_pos + (uint32_t)(((uint64_t)(y - ground) * (layout->rock_pos - layout->dirt_pos)) / (rock - ground));
+      /* These variants represent scene snowiness, not vertical depth. The
+       * offline MAP and PNG renderer use the game's no-snow background. */
+      index = layout->dirt_pos;
     } else if (y + 200u < world_h) {
-      uint32_t den = world_h - 200u > rock ? world_h - 200u - rock : 1u;
-      index = layout->rock_pos + (uint32_t)(((uint64_t)(y - rock) * (layout->hell_pos - layout->rock_pos)) / den);
-      if (index >= layout->hell_pos) index = layout->hell_pos - 1u;
+      index = layout->rock_pos;
     } else index = layout->hell_pos;
     tx_map_runtime_color(index, out);
     return;
@@ -337,7 +341,7 @@ int tx_render_has_foreground(const TxTile* tile) {
   return tile && tile_is_non_empty(tile);
 }
 
-static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32_t ground, uint32_t rock, uint8_t out[4]) {
+static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, double ground, double rock, uint8_t out[4]) {
   const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
   if (layout) {
     uint16_t base;
@@ -441,7 +445,7 @@ static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32
 
 #ifdef TERRAX_TESTING
 void txw_test_map_runtime_render_color(const TxTile* tile, uint32_t y,
-                                       uint32_t height, uint32_t ground, uint32_t rock,
+                                       uint32_t height, double ground, double rock,
                                        uint8_t rgba[4]) {
   color_for_tile(tile, y, height, ground, rock, rgba);
 }
@@ -640,8 +644,8 @@ static void png_chunk(TxBuf* out, const char type[4], const uint8_t* data, uint3
 static void render_preview_rows_to(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph,
                                    uint32_t row_start, uint32_t row_count) {
   if (tx_output_copy_rows(w, rgba, pw, ph, row_start, row_count)) return;
-  uint32_t ground = (uint32_t)w->worldSurface;
-  uint32_t rock   = (uint32_t)w->rockLayer;
+  double ground = w->worldSurface;
+  double rock = w->rockLayer;
   uint32_t row_end = row_start + row_count;
   if (row_start >= ph || row_count == 0u) return;
   if (row_end < row_start || row_end > ph) row_end = ph;
@@ -745,8 +749,8 @@ static int render_full_preview_rgb_to(TxWorld* w, uint8_t* rgb,
                                       uint32_t pw, uint32_t ph) {
   uint32_t width;
   uint32_t height;
-  uint32_t ground;
-  uint32_t rock;
+  double ground;
+  double rock;
   uint8_t* saved_file;
   uint32_t saved_len;
   uint32_t off;
@@ -756,8 +760,8 @@ static int render_full_preview_rgb_to(TxWorld* w, uint8_t* rgb,
   width = (uint32_t)w->maxTilesX;
   height = (uint32_t)w->maxTilesY;
   if (pw != width || ph != height) return 0;
-  ground = (uint32_t)w->worldSurface;
-  rock = (uint32_t)w->rockLayer;
+  ground = w->worldSurface;
+  rock = w->rockLayer;
 
   for (uint32_t y = 0u; y < height; y++) {
     uint8_t bg[4];

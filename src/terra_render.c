@@ -94,8 +94,8 @@ int tx_open_preview_begin(TxWorld* world, TxOpenPreviewTask* task) {
   task->stride = stride;
   task->source_width = (uint32_t)world->maxTilesX;
   task->source_height = (uint32_t)world->maxTilesY;
-  task->ground = (uint32_t)world->worldSurface;
-  task->rock = (uint32_t)world->rockLayer;
+  task->ground = world->worldSurface;
+  task->rock = world->rockLayer;
   task->tile_start = world->starts[1];
   task->tile_end = world->ends[1];
   task->offset = task->tile_start;
@@ -423,7 +423,7 @@ static void prepare_scaled_background(TxWorld* w, uint8_t* rgba, uint32_t pw, ui
   for (uint32_t y = 0; y < ph; y++) {
     uint8_t bg[4];
     background_color((uint32_t)((uint64_t)y * w->maxTilesY / ph), (uint32_t)w->maxTilesY,
-                     (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+                     w->worldSurface, w->rockLayer, bg);
     bg[3] = 0;
     for (uint32_t x = 0; x < pw; x++) memcpy(rgba + (y * pw + x) * 4u, bg, 4u);
   }
@@ -464,7 +464,7 @@ int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, i
   if (map && !(p->map = tx_map_base_begin(w))) { tx_output_clear(w); return 0; }
   for (uint32_t y = 0; p->rgb && y < p->height; y++) {
     uint8_t bg[4];
-    background_color(y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, bg);
+    background_color(y, p->height, w->worldSurface, w->rockLayer, bg);
     for (uint32_t x = 0; x < p->width; x++) memcpy(p->rgb + (y * p->width + x) * 3u, bg, 3u);
   }
   prepare_scaled_background(w, p->list_rgba, pw, ph);
@@ -521,7 +521,7 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   if (p->map && !tx_map_base_run(w, p->map, x, y, t, run)) return 0;
   if (!tile_is_non_empty(t)) return 1;
   uint8_t c[4];
-  color_for_tile(t, y, p->height, (uint32_t)w->worldSurface, (uint32_t)w->rockLayer, c);
+  color_for_tile(t, y, p->height, w->worldSurface, w->rockLayer, c);
   if (p->rgb) for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
   if (p->preview_rgba) prepare_scaled_run(p, p->preview_rgba, p->preview_width, p->preview_height, x, y, run, c);
   prepare_scaled_run(p, p->list_rgba, p->list_width, p->list_height, x, y, run, c);
@@ -584,8 +584,8 @@ int tx_output_copy_rows(TxWorld* w, uint8_t* out, uint32_t width, uint32_t heigh
 
 void tx_render_stream_color(TxWorld* w, const TxTile* tile, uint32_t y, uint8_t* out) {
   tx_render_refresh_color_tables();
-  if (tile) color_for_tile(tile,y,(uint32_t)w->maxTilesY,(uint32_t)w->worldSurface,(uint32_t)w->rockLayer,out);
-  else background_color(y,(uint32_t)w->maxTilesY,(uint32_t)w->worldSurface,(uint32_t)w->rockLayer,out);
+  if (tile) color_for_tile(tile,y,(uint32_t)w->maxTilesY,w->worldSurface,w->rockLayer,out);
+  else background_color(y,(uint32_t)w->maxTilesY,w->worldSurface,w->rockLayer,out);
 }
 void tx_render_stream_markers(TxWorld* w,uint8_t* rgba,uint32_t width,uint32_t height,
     uint32_t start,uint32_t rows,const MapMarkerEntry* chests,uint32_t chest_count,

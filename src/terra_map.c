@@ -830,10 +830,14 @@ static void fill_chunk_strip_run(uint32_t* strip, uint32_t local_x, uint32_t hei
 
 static void prefill_chunk_strip_background(uint32_t* strip, uint32_t cpc, uint32_t chunk_x,
                                            uint32_t width, uint32_t height,
-                                           int32_t groundLevel, int32_t rockLevel) {
+                                           double groundLevel, double rockLevel) {
     const uint32_t world_x_base = chunk_x * 64u;
     const uint32_t padding_val = (255u << 16);
     const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+    if (!layout) {
+        groundLevel = (int32_t)groundLevel;
+        rockLevel = (int32_t)rockLevel;
+    }
     if (groundLevel <= 0) groundLevel = (int32_t)(height > 3u ? (height * 35u) / 100u : 1u);
     if (rockLevel <= groundLevel) {
         rockLevel = (int32_t)(height > 2u ? (height * 65u) / 100u : (uint32_t)groundLevel + 1u);
@@ -851,9 +855,7 @@ static void prefill_chunk_strip_background(uint32_t* strip, uint32_t cpc, uint32
             uint32_t bg_type;
             if (layout) {
                 if ((int32_t)world_y < groundLevel) {
-                    bg_type = layout->sky_pos +
-                        (uint32_t)(((uint64_t)world_y * (layout->dirt_pos - layout->sky_pos)) /
-                                   (uint32_t)groundLevel);
+                    bg_type = layout->sky_pos + (uint32_t)(255.0 * ((double)world_y / groundLevel));
                 } else if ((int32_t)world_y < rockLevel) {
                     bg_type = layout->dirt_pos;
                 } else if (world_y + 200u < height) {
@@ -1197,6 +1199,12 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
 }
 
 #ifdef TERRAX_TESTING
+uint32_t txw_test_map_runtime_background(uint32_t y, double ground, double rock) {
+    uint32_t strip[4096];
+    if (y >= 64u) return 0u;
+    prefill_chunk_strip_background(strip, 1u, 0u, 1u, 1000u, ground, rock);
+    return strip[y * 64u];
+}
 uint32_t txw_test_map_runtime_value_for_tile(const TxTile* tile) {
     return map_value_for_tile(tile);
 }
