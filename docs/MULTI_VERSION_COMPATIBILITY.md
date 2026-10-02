@@ -48,3 +48,9 @@
 本地验证：新增原生 future WLD 合约及 PLR 来源只读合约通过；15 项可运行 Release 与 ASan/UBSan 测试通过（包括全部 87 个旧版合成布局的完整打开/原样保存）。现环境缺少仓库 LFS 的 `native-terraria-header.wld`，对应旧测试未计入通过；LeakSanitizer 在此环境因 ptrace 不可用。私有 CI 保持完整 native、ASan/UBSan/LSan、Node/Web及feature matrix验证，并上传可追溯 WLD/PLR 产物。上述核心测试不代表用户端完整工作流已达到 200,000,000 bytes / 8 秒目标，仍需用最终 viewer 验证。
 
 审查发现并修复了 GCC -O3 将自实现 memset 字节循环优化成自身递归的问题；memset/memcpy 均改用 native/Emscripten 工具链 libc。原生 Release 1–87 完整 open/save 矩阵及独立审查驱动全部通过。未来元数据还覆盖了 15,728,640 个空字符串的最坏密度：本地 Release 同步 task-begin 扫描约 0.08 秒。此路径仍有同步扫描，并不承诺每个增量 step 的固定毫秒预算；WASM 实测与完整 viewer 8 秒预算另行验证。
+
+### Combined build size and performance
+
+The default `all` Web/Node build uses `-Oz` with LTO; standalone `wld` and `plr` viewer builds retain `-O3` with LTO disabled. Explicit `-OptimizeFlag` and `-EnableLto:$false` arguments override these defaults. The Web size gate remains 327,680 bytes.
+
+An isolated comparison of the same C source and existing 8400×2400 fixture passed all 148 combined contracts under each tested profile, including future strict reads, immutable version-reset guards, and original stream exports. `-O3` produced 375,564 Web WASM bytes with a 574.2 ms MAP render and an 884.3 ms full-preview process. `-Oz` + LTO produced 317,080 bytes, 813.1 ms MAP render, and a 953.8 ms full-preview process. The compact profile's Web preview used 104,529,920 linear-memory bytes with a 99,164,329-byte tracked heap peak. These single-run core measurements describe the size/speed tradeoff; they do not certify browser/UI end-to-end latency or total process memory for every file up to 200,000,000 bytes. The independently delivered viewer modules do not use the compact combined profile.
