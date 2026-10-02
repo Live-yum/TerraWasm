@@ -9,7 +9,7 @@
 #else
 #define TX_COLD_PARSER
 #endif
-extern int serialize_legacy_section_json(TxWorld*,int,TxBuf*);
+extern TX_COLD_PARSER int serialize_legacy_section_json(TxWorld*,int,TxBuf*);
 /* ==================================================================== * Extern declarations from terra_mem.c * ==================================================================== */extern uint32_t tx_strlen(const char *s);
 extern int tx_streq_c(const char *a,const char *b);
 extern int tx_streq_n(const char *a,uint32_t alen,const char *b);
@@ -1004,7 +1004,7 @@ int section_index_by_name(const char *name,uint32_t len){
     w->section_overrides[idx].active=1;
     w->heap_mark=tx_mark(); return 1;
     }
-/* ==================================================================== * JSON serializers for all 11 sections * * These produce JSON matching the TerraX V2 API exactly, as defined in * world_api_v318_format.cpp, world_api_v318_header.cpp, and * world_api_v318_sections.cpp. * ==================================================================== *//* --- format section --- */void serialize_format_json(TxWorld *w,TxBuf *b){
+/* ==================================================================== * JSON serializers for all 11 sections * * These produce JSON matching the TerraX V2 API exactly, as defined in * world_api_v318_format.cpp, world_api_v318_header.cpp, and * world_api_v318_sections.cpp. * ==================================================================== *//* --- format section --- */TX_COLD_PARSER void serialize_format_json(TxWorld *w,TxBuf *b){
     buf_cstr(b," { \"version\":");
     json_u32(b,w->version);
     buf_cstr(b,",\"originalVersion\":"); json_u32(b,w->original_version ? w->original_version : w->version);
@@ -1099,7 +1099,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_u8(b, (uint8_t)('0' + sec % 10));
     buf_u8(b, '"');
 }
-/* --- header section (all fields, matching buildHeaderJson order) --- */void serialize_header_json(TxWorld *w,TxBuf *b){
+/* --- header section (all fields, matching buildHeaderJson order) --- */TX_COLD_PARSER void serialize_header_json(TxWorld *w,TxBuf *b){
     uint8_t *p=w->file;
     uint32_t flen=w->file_len;
     uint32_t header_base=0u;
@@ -1583,7 +1583,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_cstr(b,"\n}\n");
     }
-/* --- chests section --- *//* * Binary format per chest (version >= 294): * i32 x, i32 y, 7bit-string name, i32 maxItems * For each item: u16 stack;  stack != 0: i32 itemType, u8 prefix */void serialize_chests_json(TxWorld *w,TxBuf *b){
+/* --- chests section --- *//* * Binary format per chest (version >= 294): * i32 x, i32 y, 7bit-string name, i32 maxItems * For each item: u16 stack;  stack != 0: i32 itemType, u8 prefix */TX_COLD_PARSER void serialize_chests_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,2);
     uint32_t off=w->section_overrides[2].active?0u:(section<0?0u:w->starts[section]);
     uint32_t end=w->section_overrides[2].active?w->section_overrides[2].len:(section<0?0u:w->ends[section]);
@@ -1636,7 +1636,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_u8(b,']');
     }
-/* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */void serialize_signs_json(TxWorld *w,TxBuf *b){
+/* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */TX_COLD_PARSER void serialize_signs_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,3); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -1662,7 +1662,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_u8(b,']');
     }
-/* --- npcs section --- *//* * Binary format: * Loop: i32 npcType;  >= 0: f32 x, f32 y, 7bit-string name, ... * Terminator: npcType < 0 * Then: u32 shimmeredCount, [i32 shimmeredNetId...] */void serialize_npcs_json(TxWorld *w,TxBuf *b){
+/* --- npcs section --- *//* * Binary format: * Loop: i32 npcType;  >= 0: f32 x, f32 y, 7bit-string name, ... * Terminator: npcType < 0 * Then: u32 shimmeredCount, [i32 shimmeredNetId...] */TX_COLD_PARSER void serialize_npcs_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,4); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -1823,7 +1823,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_cstr(b,"]\n}\n");
     }
-/* --- tile_entities section --- *//* * Binary format: * u16 count * For each entity: * u8 type, i32 id, u16 x, u16 y * Then type-specific data */static void serialize_item_stack_json(TxBuf *b,int16_t id,uint8_t prefix,uint16_t stack){
+/* --- tile_entities section --- *//* * Binary format: * u16 count * For each entity: * u8 type, i32 id, u16 x, u16 y * Then type-specific data */static TX_COLD_PARSER void serialize_item_stack_json(TxBuf *b,int16_t id,uint8_t prefix,uint16_t stack){
     buf_cstr(b," { \"itemType\":");
     json_i32(b,id);
     buf_cstr(b,",\"prefix\":");
@@ -1832,7 +1832,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,stack);
     buf_cstr(b,"\n}\n");
     }
-void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
+TX_COLD_PARSER void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,5); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2031,7 +2031,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- weighted_pressure_plates section --- */void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
+/* --- weighted_pressure_plates section --- */TX_COLD_PARSER void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,6); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2052,7 +2052,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- town_manager section --- */void serialize_town_manager_json(TxWorld *w,TxBuf *b){
+/* --- town_manager section --- */TX_COLD_PARSER void serialize_town_manager_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,7); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2076,7 +2076,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- bestiary section --- *//* * Binary format: * u32 killCount, [7bit-string name, u32 count...] * u32 sightingCount, [7bit-string name...] * u32 chatCount, [7bit-string name...] */void serialize_bestiary_json(TxWorld *w,TxBuf *b){
+/* --- bestiary section --- *//* * Binary format: * u32 killCount, [7bit-string name, u32 count...] * u32 sightingCount, [7bit-string name...] * u32 chatCount, [7bit-string name...] */TX_COLD_PARSER void serialize_bestiary_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,8);
     uint32_t off=w->section_overrides[8].active?0u:(section<0?0u:w->starts[section]);
     uint32_t end=w->section_overrides[8].active?w->section_overrides[8].len:(section<0?0u:w->ends[section]);
@@ -2126,7 +2126,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_cstr(b,"]\n}\n");
     }
-/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */int serialize_creative_powers_json(TxWorld *w,TxBuf *b){
+/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */TX_COLD_PARSER int serialize_creative_powers_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,9);
     uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
@@ -2161,7 +2161,7 @@ truncated:
     tx_set_error("TERRAX_TRUNCATED_CREATIVE_POWERS","creative power payload or terminator is truncated");
     return 0;
     }
-/* --- footer section --- */void serialize_footer_json(TxWorld *w,TxBuf *b){
+/* --- footer section --- */TX_COLD_PARSER void serialize_footer_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,10);
     uint8_t overridden=section>=0 && w->section_overrides[section].active;
     uint32_t off=overridden?0u:(section<0?0u:w->starts[section]);
@@ -2186,7 +2186,7 @@ truncated:
     buf_cstr(b,",\"worldId\":"); json_i32(b,valid?id:0);
     buf_cstr(b,"\n}\n");
     }
-/* ==================================================================== * Unified section serializer -- dispatch by section index * ==================================================================== */int serialize_section_json(TxWorld *w,int idx,TxBuf *b){
+/* ==================================================================== * Unified section serializer -- dispatch by section index * ==================================================================== */TX_COLD_PARSER int serialize_section_json(TxWorld *w,int idx,TxBuf *b){
     if (w->legacy_wld && idx>=2 && idx<=10) return serialize_legacy_section_json(w,idx,b);
     /* API section names use the latest layout; old worlds omit sections. */
     if (idx>=2 && idx<=10) {
