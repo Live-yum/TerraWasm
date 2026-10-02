@@ -161,17 +161,19 @@ test("a fixed-width WLD header cannot be zero-filled after truncation", async ()
 });
 
 
-test("WLD current-version guard matches Terraria release 326", async () => {
+test("WLD positive future versions reach structural validation", async () => {
   const M = await TerraWorldWasm();
 
   for (const [version, expectedCode] of [
     [326, "TERRAX_TRUNCATED_FORMAT"],
-    [327, "TERRAX_UNSUPPORTED_VERSION"],
+    [327, "TERRAX_TRUNCATED_FORMAT"],
+    [2147483647, "TERRAX_TRUNCATED_FORMAT"],
+    [0, "TERRAX_UNSUPPORTED_VERSION"],
+    [2147483648, "TERRAX_UNSUPPORTED_VERSION"],
   ]) {
     // The public open ABI rejects buffers shorter than 16 bytes before the
-    // WLD parser runs. Keep this candidate at that minimum so release 326
-    // reaches parse_format() and fails on missing metadata, while release 327
-    // is rejected by the version guard before metadata is consumed.
+    // WLD parser runs. Every positive int32 release reaches parse_format()
+    // and fails on missing metadata; invalid signed release values fail early.
     const candidate = Buffer.alloc(16);
     candidate.writeUInt32LE(version, 0);
     const inputPtr = alloc(M, candidate);
@@ -189,3 +191,4 @@ test("WLD current-version guard matches Terraria release 326", async () => {
     }
   }
 });
+
