@@ -942,3 +942,8 @@ main();
 ### 历史 WLD 兼容范围
 
 WLD 文件格式 1-87 支持同步与任务式打开、header/宝箱/告示牌/NPC 读取、瓦片预览和原字节保存；旧格式不支持现代编辑编码器，编辑请求返回不支持错误。没有出现的可选 section 返回空集合（图鉴保持对象结构）。88-326 沿用分段模型。这里的数字是文件头 release 值，不是游戏展示版本号。详见 [多版本兼容说明](MULTI_VERSION_COMPATIBILITY.md)。
+
+
+## Future-version read safety
+
+Positive Int32 source releases are attempted without a known-maximum read gate. A structurally readable source newer than release 326 is read-only. WLD `format` JSON includes `originalVersion`, `readOnly`, `compatibility` (`future-layout-readonly`, `legacy-readonly`, or `known`) and `canExportOriginal`. Original byte export remains available. Mutations fail with `TERRAX_FUTURE_VERSION_READ_ONLY` / status `NOT_SUPPORTED`; this includes direct pixel, command and stream write entry points. A stream-backed source must be saved through stream `save`, which copies its immutable source ranges; buffer save never exports a compact metadata image as a world. PLR semantic JSON is unchanged; future sources retain the original encrypted bytes and cannot be changed through setters, replacement JSON, patches or aliases. Creation/conversion targets remain at proven layouts.

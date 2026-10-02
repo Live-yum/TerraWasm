@@ -142,6 +142,7 @@ int txw_add_pixel_art_chunks_bulk_fast(
     uint32_t record_count)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w || !w->pixel_art_indexed || !w->pixel_art_chunk_table) {
         tx_set_error("TERRAX_STATE_ERROR", "indexed pixel art not initialized");
         return -1;
@@ -180,3 +181,4 @@ int txw_add_pixel_art_chunks_bulk_fast(
     tx_clear_error();
     return 0;
 }
+

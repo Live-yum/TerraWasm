@@ -129,6 +129,7 @@ if ($Test) {
         "tests/test_removed_api_contract.js",
         "tests/test_icon_atlas_bridge.js",
         "tests/test_open_task.js",
+        "tests/test_future_readonly.js",
         "tests/test_wld_legacy.js",
         "tests/test_wld_header_versions.js",
         "tests/test_wld_legacy_api.js",
@@ -157,3 +158,4 @@ if ($Test) {
     }
     Pop-Location
 }
+

@@ -189,12 +189,16 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     return (w->important[idx]>>(type&7u))&1u;
     }
 /* ==================================================================== * parse_format -- Extract format metadata from raw .wld bytes * ==================================================================== */int parse_format(TxWorld *w){
+    if (!w || !w->file || w->file_len < 4u) {
+        tx_set_error("TERRAX_TRUNCATED_FORMAT","world version word is truncated"); return 0;
+    }
     uint32_t off=0;
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     w->version=rd_u32le(p,len,&off);
-    if (w->version==0u||w->version>326u){
-        tx_set_error("TERRAX_UNSUPPORTED_VERSION","unsupported .wld version");
+    if (!w->original_version) w->original_version=w->version;
+    if (w->version==0u||w->version>INT32_MAX){
+        tx_set_error("TERRAX_BAD_VERSION","world version must be a positive int32");
         return 0;
         }
     /* Releases 1..87 predate the section table entirely.  The old loader
@@ -240,14 +244,24 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
         i++)w->magic[i]=(char)p[off++];
         w->magic[7]=0;
         w->file_type=p[off++];
+        if ((!tx_streq_c(w->magic,"relogic") && !tx_streq_c(w->magic,"xindong")) || w->file_type!=2u) {
+            tx_set_error("TERRAX_BAD_METADATA","expected relogic or xindong world metadata (type 2)"); return 0;
+        }
         w->revision=rd_u32le(p,len,&off);
         w->favorite=rd_u64le(p,len,&off);
         }
+    if (!terra_reader_has(off,2u,len)) { tx_set_error("TERRAX_TRUNCATED_FORMAT","section count truncated"); return 0; }
     w->pointer_count=rd_u16le(p,len,&off);
     if (w->pointer_count==0u||w->pointer_count>TX_MAX_SECTIONS){
         tx_set_error("TERRAX_BAD_POINTERS","unsupported section pointer count");
         return 0;
         }
+    if (!terra_reader_has(off,(uint32_t)w->pointer_count*4u+2u,len)) {
+        tx_set_error("TERRAX_TRUNCATED_FORMAT","section pointer table truncated"); return 0;
+    }
+    if (w->pointer_count<2u || (tx_world_is_future(w) && w->pointer_count!=11u)) {
+        tx_set_error("TERRAX_BAD_POINTERS","section count does not match the attempted layout"); return 0;
+    }
     for (uint32_t i=0;
     i<w->pointer_count;
     i++)w->positions[i]=rd_u32le(p,len,&off);
@@ -260,6 +274,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     w->important=p+off;
     off+=w->important_len;
     w->format_len=off;
+    if (w->positions[0]!=off) { tx_set_error("TERRAX_BAD_POINTERS","first section must start exactly after format metadata"); return 0; }
     for (uint32_t i=0;
     i<w->pointer_count;
     i++){
@@ -643,7 +658,8 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         tx_set_error("TERRAX_BAD_HEADER","header layout does not end at the tile section pointer");
         return 0;
         }
-    if (w->maxTilesX<=0||w->maxTilesY<=0){
+    if (w->maxTilesX<=0||w->maxTilesY<=0||
+        (uint64_t)(uint32_t)w->maxTilesX*(uint32_t)w->maxTilesY>TX_MAX_WORLD_TILES){
         tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");
         return 0;
         }
@@ -837,9 +853,11 @@ int parse_header(TxWorld *w){
     if (f1&1u)TILE_U8(f2);
     if (f2&1u)TILE_U8(f3);
     if (f3&1u)TILE_U8(f4);
+    if (tx_world_is_future(w) && ((f4&0xe1u) || (f2&0x80u))) return 0;
     t->active=(f1>>1)&1u;
     if (t->active){
         if (f1&32u)TILE_U16(t->type); else TILE_U8(t->type);
+        if (tx_world_is_future(w) && t->type>=w->tile_type_count) return 0;
         if (tile_important(w,t->type)){
             TILE_U16(t->frame_x);
             TILE_U16(t->frame_y);
@@ -966,6 +984,7 @@ int section_index_by_name(const char *name,uint32_t len){
     if (tx_streq_n(name,len,"format"))return-2; return -1;
     }
 /* Directly set section override data without copying. Caller transfers ownership of the data buffer. */int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t len){
+    if (!tx_world_require_writable(w)) return 0;
     if (idx<0||(uint32_t)idx>=TX_MAX_SECTION_OVERRIDES){
         tx_set_error("TERRAX_SECTION_SET_NOT_SUPPORTED","section index out of range");
         return 0;
@@ -988,6 +1007,10 @@ int section_index_by_name(const char *name,uint32_t len){
 /* ==================================================================== * JSON serializers for all 11 sections * * These produce JSON matching the TerraX V2 API exactly, as defined in * world_api_v318_format.cpp, world_api_v318_header.cpp, and * world_api_v318_sections.cpp. * ==================================================================== *//* --- format section --- */void serialize_format_json(TxWorld *w,TxBuf *b){
     buf_cstr(b," { \"version\":");
     json_u32(b,w->version);
+    buf_cstr(b,",\"originalVersion\":"); json_u32(b,w->original_version ? w->original_version : w->version);
+    buf_cstr(b,",\"readOnly\":"); json_bool(b,w->legacy_wld || tx_world_is_future(w));
+    buf_cstr(b,",\"compatibility\":"); json_string(b,tx_world_is_future(w) ? "future-layout-readonly" : w->legacy_wld ? "legacy-readonly" : "known");
+    buf_cstr(b,",\"canExportOriginal\":true");
     buf_cstr(b,",\"magic\":");
     json_string(b,w->magic[0]?w->magic:"relogic");
     buf_cstr(b,",\"type\":");
@@ -2217,3 +2240,4 @@ truncated:
 /* ==================================================================== * Same-tile comparison helper * ==================================================================== */int same_tile(const TxTile *a,const TxTile *b){
     return a->active==b->active&&a->type==b->type&&a->frame_x==b->frame_x&&a->frame_y==b->frame_y&&a->wall==b->wall&&a->liquid_amount==b->liquid_amount&&a->liquid_type==b->liquid_type&&a->brick_style==b->brick_style&&a->tile_color==b->tile_color&&a->wall_color==b->wall_color&&a->wire_red==b->wire_red&&a->wire_blue==b->wire_blue&&a->wire_green==b->wire_green&&a->wire_yellow==b->wire_yellow&&a->actuator==b->actuator&&a->inactive==b->inactive&&a->invisible_block==b->invisible_block&&a->invisible_wall==b->invisible_wall&&a->fullbright_block==b->fullbright_block&&a->fullbright_wall==b->fullbright_wall;
     }
+

@@ -430,5 +430,6 @@ int terra_validate_string_sections(TxWorld* world) {
 int parse_header(TxWorld* world) {
     if (!validate_header_prefix(world)) return 0;
     if (!terra_parse_header_unchecked(world)) return 0;
-    return terra_validate_string_sections(world);
+    return terra_validate_string_sections(world) && tx_validate_future_sections(world);
 }
+

@@ -237,7 +237,7 @@ int tx_wld_guard_task_begin(TxWorld* world, TxWldGuardTask* task) {
     }
     if (!task_validate_header_prefix(world)) return 0;
     if (!terra_parse_header_unchecked(world)) return 0;
-    if (!task_validate_header_late_strings(world)) return 0;
+    if (!task_validate_header_late_strings(world) || !tx_validate_future_sections(world)) return 0;
     task->stage = TX_GUARD_STAGE_CHESTS_INIT;
     task->initialized = 1u;
     return 1;
@@ -593,3 +593,4 @@ uint32_t tx_wld_guard_task_progress(const TxWldGuardTask* task) {
         return (stage * 100u) / TX_GUARD_STAGE_DONE;
     }
 }
+

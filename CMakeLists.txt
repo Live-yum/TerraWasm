@@ -43,6 +43,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_json.c"
     "${SRC_DIR}/terra_wld.c"
     "${SRC_DIR}/terra_wld_guard.c"
+    "${SRC_DIR}/terra_future.c"
     "${SRC_DIR}/terra_api.c"
     "${SRC_DIR}/terra_commit.c"
     "${SRC_DIR}/terra_ops.c"
@@ -139,6 +140,7 @@ if(EMSCRIPTEN)
     if(TERRAWASM_ENABLE_WLD)
         set_source_files_properties(
             "${SRC_DIR}/terra_mutators.c"
+            "${SRC_DIR}/terra_future.c"
             "${SRC_DIR}/terra_wld_legacy.c"
             "${SRC_DIR}/terra_legacy_npc.c"
             PROPERTIES COMPILE_OPTIONS "-Oz"
@@ -329,6 +331,9 @@ else()
                 TERRAX_TESTING
                 TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
             )
+            add_terra_contract(terra_legacy_open_matrix_contract tests/legacy_open_matrix_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_future_readonly_contract tests/future_readonly_contract.c ZLIB::ZLIB)
+            target_compile_definitions(terra_future_readonly_contract PRIVATE TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
             add_terra_contract(terra_error_json_contract tests/error_json_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_zlib_bridge_contract tests/zlib_bridge_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_json_parser_contract tests/json_parser_contract.c ZLIB::ZLIB)
@@ -391,3 +396,4 @@ else()
         endif()
     endif()
 endif()
+
