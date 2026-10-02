@@ -62,6 +62,12 @@ int main(void){
     assert(strstr(format,"\"originalVersion\":328")&&strstr(format,"\"readOnly\":true"));
     const char*ops[]={"header_patch","replace_chests","replace_bestiary","batch_update_tiles"};
     for(unsigned i=0;i<4;i++){assert(terra_op_execute_json(h,ops[i],"{}",NULL,0,&required)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);assert_readonly();}
+    assert(terra_op_execute_json(h,"header_patch","{\"patch\":{\"version\":326}}",NULL,0,&required)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);assert_readonly();
+    /* Even an internal version reset cannot remove the immutable source gate. */
+    TxWorld* future_world=tx_get_world(h);future_world->version=326;
+    assert(terra_op_execute_json(h,"header_patch","{}",NULL,0,&required)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);assert_readonly();
+    assert(!set_section_override_data(future_world,0,NULL,0));assert_readonly();
+    future_world->version=328;
     assert(terra_world_apply_commands(h,NULL,0)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);assert_readonly();
     assert(txw_queue_pixel_art(h,0,0,0,0,0,0,0,0,0)<0);assert_readonly();
     assert(txw_begin_pixel_art_indexed(h,0,0,0,0,0,0,0,0,0,0,0,0,0)<0);assert_readonly();

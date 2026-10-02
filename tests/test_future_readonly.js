@@ -20,6 +20,11 @@ test('future WLD read-only survives incremental open and all public mutation rou
    const name=a.alloc(op+'\0');assert.equal(M._terra_op_execute_json(h,name,empty,0,0n,req),4);
    assert.equal(M._terra_world_stream_operation_begin(h,name,empty,hp),-1);
  }
+ const reset=a.alloc('{"patch":{"version":326}}\0'),headerPatch=a.alloc('header_patch\0');
+ assert.equal(M._terra_op_execute_json(h,headerPatch,reset,0,0n,req),4);
+ assert.equal(M._terra_world_stream_operation_begin(h,headerPatch,reset,hp),-1);
+ assert.equal(M._terra_section_get_json(h,fmt,out,32768n,req),0);
+ assert.equal(JSON.parse(text(M,out)).originalVersion,328);
  assert.equal(M._terra_world_apply_commands(h,0,0),4);
  for(const name of ['_txw_queue_pixel_art','_txw_begin_pixel_art_indexed','_txw_add_pixel_art_chunk','_txw_add_pixel_art_chunks_bulk','_txw_add_pixel_art_chunks_bulk_fast','_txw_apply_pixel_art'])
    if(typeof M[name]==='function')assert.equal(M[name](h,...Array(16).fill(0)),-1,name);

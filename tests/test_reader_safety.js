@@ -168,8 +168,8 @@ test("WLD positive future versions reach structural validation", async () => {
     [326, "TERRAX_TRUNCATED_FORMAT"],
     [327, "TERRAX_TRUNCATED_FORMAT"],
     [2147483647, "TERRAX_TRUNCATED_FORMAT"],
-    [0, "TERRAX_UNSUPPORTED_VERSION"],
-    [2147483648, "TERRAX_UNSUPPORTED_VERSION"],
+    [0, "TERRAX_BAD_VERSION"],
+    [2147483648, "TERRAX_BAD_VERSION"],
   ]) {
     // The public open ABI rejects buffers shorter than 16 bytes before the
     // WLD parser runs. Every positive int32 release reaches parse_format()

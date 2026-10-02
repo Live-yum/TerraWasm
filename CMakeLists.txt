@@ -141,6 +141,9 @@ if(EMSCRIPTEN)
         set_source_files_properties(
             "${SRC_DIR}/terra_mutators.c"
             "${SRC_DIR}/terra_ops.c"
+            "${SRC_DIR}/terra_json.c"
+            "${SRC_DIR}/terra_wld_guard.c"
+            "${SRC_DIR}/terra_markers.c"
             "${SRC_DIR}/terra_commands.c"
             "${SRC_DIR}/terra_pixel_art_metadata.c"
             "${SRC_DIR}/terra_future.c"

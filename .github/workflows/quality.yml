@@ -69,7 +69,7 @@ jobs:
           & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
       - name: Build and test Node and Web artifacts
         shell: pwsh
-        run: ./build.ps1 -Target all -Features all -EnableLto -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+        run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
       - name: Upload traceable release artifacts
         uses: actions/upload-artifact@v7
         with:

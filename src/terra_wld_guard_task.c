@@ -11,6 +11,13 @@
 
 #include <stdint.h>
 
+/* Metadata validation runs outside the tile scanning/rendering hot paths. */
+#if defined(__clang__) && defined(__EMSCRIPTEN__)
+#define TX_GUARD_COLD __attribute__((minsize))
+#else
+#define TX_GUARD_COLD
+#endif
+
 extern int terra_parse_header_unchecked(TxWorld* world);
 extern void tx_set_error(const char* code, const char* message);
 
@@ -29,7 +36,7 @@ extern void tx_set_error(const char* code, const char* message);
 #define TX_GUARD_STAGE_BESTIARY_CHATS 12u
 #define TX_GUARD_STAGE_DONE 13u
 
-static int task_guard_read_7bit(
+static TX_GUARD_COLD int task_guard_read_7bit(
         const uint8_t* data, uint32_t length,
         uint32_t* offset, uint32_t* value) {
     uint32_t result = 0u;
@@ -49,14 +56,14 @@ static int task_guard_read_7bit(
     return 0;
 }
 
-static int task_guard_skip_string(
+static TX_GUARD_COLD int task_guard_skip_string(
         const uint8_t* data, uint32_t length, uint32_t* offset) {
     uint32_t string_length = 0u;
     if (!task_guard_read_7bit(data, length, offset, &string_length)) return 0;
     return terra_reader_take(offset, string_length, length);
 }
 
-static int task_guard_read_u8(
+static TX_GUARD_COLD int task_guard_read_u8(
         const uint8_t* data, uint32_t length,
         uint32_t* offset, uint8_t* value) {
     if (!data || !offset || !value || !terra_reader_has(*offset, 1u, length)) return 0;
@@ -64,7 +71,7 @@ static int task_guard_read_u8(
     return 1;
 }
 
-static int task_guard_read_u16(
+static TX_GUARD_COLD int task_guard_read_u16(
         const uint8_t* data, uint32_t length,
         uint32_t* offset, uint16_t* value) {
     uint32_t current;
@@ -75,7 +82,7 @@ static int task_guard_read_u16(
     return 1;
 }
 
-static int task_guard_read_u32(
+static TX_GUARD_COLD int task_guard_read_u32(
         const uint8_t* data, uint32_t length,
         uint32_t* offset, uint32_t* value) {
     uint32_t current;
@@ -89,7 +96,7 @@ static int task_guard_read_u32(
     return 1;
 }
 
-static int task_guard_section_view(
+static TX_GUARD_COLD int task_guard_section_view(
         TxWorld* world, uint32_t index,
         const uint8_t** data, uint32_t* offset, uint32_t* length) {
     if (!world || !data || !offset || !length || index >= world->pointer_count) return 0;
@@ -107,7 +114,7 @@ static int task_guard_section_view(
     return 1;
 }
 
-static int task_guard_absolute_section_offset(
+static TX_GUARD_COLD int task_guard_absolute_section_offset(
         TxWorld* world, uint32_t index,
         uint32_t absolute, uint32_t* offset) {
     if (!world || !offset || index >= world->pointer_count) return 0;
@@ -122,7 +129,7 @@ static int task_guard_absolute_section_offset(
     return 1;
 }
 
-static int task_validate_header_prefix(TxWorld* world) {
+static TX_GUARD_COLD int task_validate_header_prefix(TxWorld* world) {
     const uint8_t* data;
     uint32_t length;
     uint32_t offset;
@@ -160,7 +167,7 @@ static int task_validate_header_prefix(TxWorld* world) {
     return 1;
 }
 
-static int task_validate_recorded_header_offsets(TxWorld* world) {
+static TX_GUARD_COLD int task_validate_recorded_header_offsets(TxWorld* world) {
     const uint8_t* data;
     uint32_t length;
     uint32_t start;
@@ -181,7 +188,7 @@ static int task_validate_recorded_header_offsets(TxWorld* world) {
  * are needed to locate later fixed fields. Keep that bounded header decode
  * authoritative, then move the independent external sections to the resumable
  * state machine below. */
-static int task_validate_header_late_strings(TxWorld* world) {
+static TX_GUARD_COLD int task_validate_header_late_strings(TxWorld* world) {
     const uint8_t* data;
     uint32_t length;
     uint32_t offset;
@@ -209,7 +216,7 @@ static int task_validate_header_late_strings(TxWorld* world) {
     return 1;
 }
 
-static void task_guard_reset_section(TxWldGuardTask* task) {
+static TX_GUARD_COLD void task_guard_reset_section(TxWldGuardTask* task) {
     task->data = NULL;
     task->length = 0u;
     task->offset = 0u;
@@ -220,7 +227,7 @@ static void task_guard_reset_section(TxWldGuardTask* task) {
     task->legacy_slots = 0u;
 }
 
-int tx_wld_guard_task_begin(TxWorld* world, TxWldGuardTask* task) {
+TX_GUARD_COLD int tx_wld_guard_task_begin(TxWorld* world, TxWldGuardTask* task) {
     if (!world || !task) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "null incremental WLD guard state");
         return 0;
@@ -243,7 +250,7 @@ int tx_wld_guard_task_begin(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_init_chests(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_init_chests(TxWorld* world, TxWldGuardTask* task) {
     uint16_t chest_count;
     task_guard_reset_section(task);
     if (world->pointer_count <= 2u) {
@@ -272,7 +279,7 @@ static int task_guard_init_chests(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_chest_header(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_chest_header(TxWorld* world, TxWldGuardTask* task) {
     uint32_t slots = task->legacy_slots;
     if (task->index >= task->count) {
         task->stage = TX_GUARD_STAGE_SIGNS_INIT;
@@ -295,7 +302,7 @@ static int task_guard_chest_header(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_chest_item(TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_chest_item(TxWldGuardTask* task) {
     uint16_t stack;
     if (task->sub_index >= task->sub_count) {
         task->index++;
@@ -314,7 +321,7 @@ static int task_guard_chest_item(TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_init_signs(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_init_signs(TxWorld* world, TxWldGuardTask* task) {
     uint16_t sign_count;
     task_guard_reset_section(task);
     if (world->pointer_count <= 3u) {
@@ -338,7 +345,7 @@ static int task_guard_init_signs(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_sign(TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_sign(TxWldGuardTask* task) {
     if (task->index >= task->count) {
         task->stage = TX_GUARD_STAGE_NPCS_INIT;
         return 1;
@@ -352,7 +359,7 @@ static int task_guard_sign(TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_init_npcs(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_init_npcs(TxWorld* world, TxWldGuardTask* task) {
     task_guard_reset_section(task);
     if (world->pointer_count <= 4u) {
         task->stage = TX_GUARD_STAGE_BESTIARY_KILLS_INIT;
@@ -378,7 +385,7 @@ static int task_guard_init_npcs(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
     uint8_t has_npc;
     if (task->offset >= task->length) {
         tx_set_error("TERRAX_TRUNCATED_NPCS", "town NPC list has no terminator");
@@ -433,7 +440,7 @@ static int task_guard_npc(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_init_bestiary(TxWorld* world, TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_init_bestiary(TxWorld* world, TxWldGuardTask* task) {
     task_guard_reset_section(task);
     if (world->version < 210u || world->pointer_count <= 8u) {
         task->stage = TX_GUARD_STAGE_DONE;
@@ -455,7 +462,7 @@ static int task_guard_init_bestiary(TxWorld* world, TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_bestiary_kill(TxWldGuardTask* task) {
+static TX_GUARD_COLD int task_guard_bestiary_kill(TxWldGuardTask* task) {
     if (task->index >= task->count) {
         task->stage = TX_GUARD_STAGE_BESTIARY_SIGHTINGS_INIT;
         return 1;
@@ -469,7 +476,7 @@ static int task_guard_bestiary_kill(TxWldGuardTask* task) {
     return 1;
 }
 
-static int task_guard_bestiary_count(
+static TX_GUARD_COLD int task_guard_bestiary_count(
         TxWldGuardTask* task, uint8_t next_stage, const char* error_message) {
     task->index = 0u;
     if (!task_guard_read_u32(task->data, task->length, &task->offset, &task->count)) {
@@ -480,7 +487,7 @@ static int task_guard_bestiary_count(
     return 1;
 }
 
-static int task_guard_bestiary_string(
+static TX_GUARD_COLD int task_guard_bestiary_string(
         TxWldGuardTask* task, uint8_t next_stage, const char* error_message) {
     if (task->index >= task->count) {
         task->stage = next_stage;
@@ -494,7 +501,7 @@ static int task_guard_bestiary_string(
     return 1;
 }
 
-int tx_wld_guard_task_step(TxWorld* world, TxWldGuardTask* task, uint32_t record_budget) {
+TX_GUARD_COLD int tx_wld_guard_task_step(TxWorld* world, TxWldGuardTask* task, uint32_t record_budget) {
     if (!world || !task || !task->initialized) {
         tx_set_error("TERRAX_STATE_ERROR", "incremental WLD guard is not initialized");
         return -1;
@@ -584,7 +591,7 @@ int tx_wld_guard_task_step(TxWorld* world, TxWldGuardTask* task, uint32_t record
     return task->finished ? 1 : 0;
 }
 
-uint32_t tx_wld_guard_task_progress(const TxWldGuardTask* task) {
+TX_GUARD_COLD uint32_t tx_wld_guard_task_progress(const TxWldGuardTask* task) {
     if (!task || !task->initialized) return 0u;
     if (task->finished) return 100u;
     {
@@ -594,3 +601,5 @@ uint32_t tx_wld_guard_task_progress(const TxWldGuardTask* task) {
     }
 }
 
+
+#undef TX_GUARD_COLD
