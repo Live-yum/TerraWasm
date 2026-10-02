@@ -462,7 +462,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
                 if(filled){if(!tx_stream_png_finish_strip(t->png_encoder))return -1;continue;}
             }
             t->x=t->map_encoder?first:0;t->scan_end=t->map_encoder?first+count:(uint32_t)w->maxTilesX;t->y=0;
-            t->cursor=w->stream_columns[t->x];t->input_length=0;t->stage=OP_MEDIA_SCAN;
+            t->cursor=w->stream_columns[t->x];t->stage=OP_MEDIA_SCAN;
         }else if(t->stage==OP_MEDIA_SCAN){
             if(t->x==t->scan_end){
                 int ok=t->map_encoder?tx_stream_map_finish_strip(t->map_encoder):tx_stream_png_finish_strip(t->png_encoder);
