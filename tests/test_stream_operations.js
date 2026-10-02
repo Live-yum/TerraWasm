@@ -31,13 +31,25 @@ test('source-backed thumbnail, full PNG, MAP and ordinary mutations match memory
   const r=streamed(name,request);assert.equal(r.kind,kind);if(kind===1)assert.deepEqual(pngPixels(r.bytes),pngPixels(expected));else assert.equal(Buffer.compare(r.bytes,expected),0);check(M._terra_world_stream_close(r.id));
   if(name==='render_lit_map'){
    const rewinds=r.sourceOffsets.filter((offset,i)=>i&&offset<r.sourceOffsets[i-1]).length;
-   assert.equal(rewinds,1,'staged MAP should rewind once for its first media scan');
-   assert.ok(r.sourceBytes<sources.get(1).length*3,`MAP reread ${r.sourceBytes} of ${sources.get(1).length} source bytes`);
+   assert.equal(rewinds,0,'plain indexed MAP should read columns in order once');
+   assert.ok(r.sourceBytes<sources.get(1).length*2,`MAP reread ${r.sourceBytes} of ${sources.get(1).length} source bytes`);
    assert.ok(r.outputEvents<20,`MAP emitted ${r.outputEvents} fragments`);
    t.diagnostic(`MAP source bytes: ${r.sourceBytes}; output events: ${r.outputEvents}; map size: ${r.bytes.length}`);
   }
   if(name==='render_preview_png'&&process.env.STREAM_WEB){if(process.env.STREAM_CACHE_LIMIT){assert.ok(r.sourceBytes>1048576);assert.ok(M.HEAPU8.length<=Number(process.env.STREAM_CACHE_LIMIT));}else assert.ok(r.sourceBytes<=sources.get(1).length*3);}
  }
+ const marked=streamed('render_lit_map',{tile_markers:[{tile_type:2,locate:1},{tile_type:2,locate:2}]});
+ assert.equal(Buffer.compare(marked.bytes,map),0,'unmatched markers must preserve MAP bytes');
+ assert.equal(marked.sourceOffsets.filter((offset,i)=>i&&offset<marked.sourceOffsets[i-1]).length,1,'tile markers retain the scan pass');
+ check(M._terra_world_stream_close(marked.id));
+ const source=sources.get(1),tileStart=source.readUInt32LE(30),saved=source[tileStart+3];
+ source[tileStart+3]=1;
+ try{
+  check(M._terra_world_stream_operation_begin(world,str('render_lit_map'),str('{}'),hp));
+  const badId=M.HEAPU32[hp/4];
+  assert.throws(()=>pump(badId),/indexed map column length mismatch/,'changed source must fail its saved column index');
+  check(M._terra_world_stream_close(badId));
+ }finally{source[tileStart+3]=saved;}
  if(process.env.STREAM_WEB&&!process.env.STREAM_CACHE_LIMIT){
   const held=[];
   try{
@@ -56,7 +68,7 @@ test('source-backed thumbnail, full PNG, MAP and ordinary mutations match memory
    },1);
    assert.ok(held.length,'MAP fallback memory pressure was not applied');
    assert.equal(Buffer.compare(fallback.bytes,map),0);
-   assert.equal(fallback.sourceOffsets.filter((offset,i)=>i&&offset<fallback.sourceOffsets[i-1]).length,2);
+   assert.equal(fallback.sourceOffsets.filter((offset,i)=>i&&offset<fallback.sourceOffsets[i-1]).length,1);
    t.diagnostic(`MAP fallback held allocations: ${held.length}; output events: ${fallback.outputEvents}`);
    check(M._terra_world_stream_close(fallback.id));
   }finally{growthLimit=167772160;for(const p of held)M._tx_free(p);}

@@ -62,7 +62,7 @@ typedef struct StreamTask {
     void* region_scan;
     TxMarkerScan* marker_scan;
     MapMarkerEntry* chest_markers;
-    uint32_t chest_count,scan_end,media_active,full_png;
+    uint32_t chest_count,scan_end,indexed_map,full_png;
     TxStreamMap* map_encoder;
     TxStreamPng* png_encoder;
 } StreamTask;
@@ -267,6 +267,14 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
         t->full_png=png&&width==(int32_t)w->maxTilesX;
         int ok=tx_output_begin(w,markers,count,0,(uint32_t)(map||t->full_png?256:width));if(markers)tx_internal_free(markers);if(!ok)goto invalid;
         if(!parse_marker_array(t->request,jlen,"chest_markers","item_id",&t->chest_markers,&t->chest_count))goto invalid;
+        t->result_kind=map?2:1;
+        if(!strcmp(t->operation,"render_lit_map")&&!count&&source->stream_source_id&&source->stream_columns&&
+           !source->section_overrides[1].active&&source->stream_columns[0]==t->original_start&&
+           source->stream_columns[w->maxTilesX]==t->original_end){
+            t->map_encoder=tx_stream_map_begin(w,t->chest_markers,t->chest_count,NULL,0);
+            if(!t->map_encoder)goto invalid;
+            t->indexed_map=1;t->stage=OP_MEDIA;return 0;
+        }
         t->marker_scan=tx_marker_stream_begin(w,w->prepared_output->markers,count);if(!t->marker_scan)goto invalid;
         if(t->full_png){
             uint64_t bytes=(uint64_t)w->maxTilesX*w->maxTilesY*3;
@@ -274,7 +282,7 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
              * Failure retains the strip path. Cap is one large-world RGB image. */
             if(bytes<=60480000u)t->rgb_cache=tx_persistent_alloc((uint32_t)bytes);
         }
-        t->result_kind=map?2:1;t->stage=OP_SCAN;
+        t->stage=OP_SCAN;
     }
     return 0;
 invalid:
@@ -471,7 +479,12 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             TxTile tile;int r=read_next(t,&tile,NULL,NULL);if(r<0)return -1;if(!r)break;
             uint32_t run=(uint32_t)tile.same+1;
             int ok=t->map_encoder?tx_stream_map_run(t->map_encoder,t->x,t->y,&tile,run):tx_stream_png_run(t->png_encoder,t->x,t->y,&tile,run);
-            if(!ok)return -1;t->y+=run;if(t->y==(uint32_t)w->maxTilesY){t->x++;t->y=0;}
+            if(!ok)return -1;t->y+=run;if(t->y==(uint32_t)w->maxTilesY){
+                if(t->indexed_map&&(t->cursor!=w->stream_columns[t->x+1]||
+                   (t->x+1==(uint32_t)w->maxTilesX&&t->cursor!=t->original_end)))
+                    return fail("TERRAX_BAD_TILE_STREAM","indexed map column length mismatch");
+                t->x++;t->y=0;
+            }
         }else if(t->stage==OP_RESULT){
             if(t->result_offset<t->result_length){uint32_t n=t->result_length-t->result_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->result_offset,n,t->result+t->result_offset);break;}
             t->stage=DONE;
