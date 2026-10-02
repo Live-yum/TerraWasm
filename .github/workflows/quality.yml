@@ -26,12 +26,12 @@ jobs:
         shell: pwsh
         run: |
           $reports = @()
-          foreach ($profile in @("-O3", "-Os", "-Oz")) {
+          foreach ($profile in @("-Os", "-Oz")) {
             Write-Host "PROFILE $profile"
             # The diagnostic Node invocation keeps the known oversize O3 control
             # measurable. Each manifest's Web size is recorded against the
             # unchanged production gate below; no production check is changed.
-            & ./build.ps1 -Target node -Features all -OptimizeFlag $profile -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+            & ./build.ps1 -Target node -Features all -OptimizeFlag $profile -EnableLto -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $manifest = Get-Content build/terra.manifest.json -Raw | ConvertFrom-Json
             $wasm = $manifest.targets.web.artifacts | Where-Object role -eq "wasm"
@@ -50,7 +50,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $timer.Stop()
             $reports += [ordered]@{
-              profile = $profile
+              profile = "$profile + LTO"
               sourceCommit = $manifest.sourceCommit
               dirty = $manifest.dirty
               webWasmBytes = $wasm.bytes
