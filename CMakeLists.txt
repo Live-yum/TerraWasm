@@ -35,6 +35,11 @@ set(COMMON_SOURCES
     "${SRC_DIR}/terra_reader.c"
     "${SRC_DIR}/terra_mem.c"
 )
+# GCC otherwise rewrites terra_mem.c's own memset loop into a recursive call.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    set_property(SOURCE "${SRC_DIR}/terra_mem.c" APPEND PROPERTY COMPILE_OPTIONS
+        -fno-tree-loop-distribute-patterns)
+endif()
 set(WLD_SOURCES
     "${SRC_DIR}/terra_legacy_npc.c"
     "${SRC_DIR}/terra_wld_legacy.c"
@@ -50,6 +55,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_render.c"
     "${SRC_DIR}/terra_render_png_lowmem.c"
     "${SRC_DIR}/terra_map.c"
+    "${SRC_DIR}/terra_map_runtime.c"
     "${SRC_DIR}/terra_markers.c"
     "${SRC_DIR}/terra_regions.c"
     "${SRC_DIR}/terra_theme.c"
@@ -338,6 +344,7 @@ else()
             add_terra_contract(terra_wld_sections_versions_contract tests/wld_sections_versions_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_wld_version_patch_contract tests/wld_version_patch_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_map_runtime_contract tests/map_runtime_contract.c ZLIB::ZLIB)
 
             if(TERRAWASM_FUZZ_SMOKE)
                 add_executable(terra_fuzz_smoke

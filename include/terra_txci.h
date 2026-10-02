@@ -15,7 +15,6 @@
 #define TXCI_HEADER_SIZE       44
 #define TXCI_ITEM_SIZE         6
 #define TXCI_DIR_SIZE          8
-#define TXCI_MAX_GROUP_OPTIONS 256u
 
 /* Block types in the directory */
 #define TXCI_BLOCK_UNIFORM  0
@@ -80,6 +79,9 @@ int txci_lookup_group(const TxciIndex* idx, uint8_t r, uint8_t g, uint8_t b);
  */
 int txci_get_items(const TxciIndex* idx, uint32_t group_id,
                    TxciItem* out, int max_out);
+
+/* Read one candidate by absolute item index after header validation. */
+int txci_get_item(const TxciIndex* idx, uint32_t item_index, TxciItem* out);
 
 /*
  * Choose the best tile/wall match for an RGB color.

@@ -12,6 +12,7 @@
 #include "terra_map.h"
 #include "terra_icon.h"
 #include "terra_color_data.h"
+#include "terra_map_runtime.h"
 
 /* ====================================================================
  * Extern declarations from terra_mem.c
@@ -208,6 +209,13 @@ static int is_bad_wall(uint16_t id) {
 
 /* Get paint RGB from TX_PAINT_COLORS table. Paint IDs are 1-30. */
 static void get_paint_color(uint8_t paint_id, uint8_t* r, uint8_t* g, uint8_t* b) {
+  if (tx_map_runtime_is_set()) {
+    uint8_t rgb[3];
+    if (tx_map_runtime_paint(paint_id, rgb)) {
+      *r = rgb[0]; *g = rgb[1]; *b = rgb[2];
+    } else { *r = 255; *g = 255; *b = 255; }
+    return;
+  }
   if (paint_id == 0 || paint_id > 30) { *r = 255; *g = 255; *b = 255; return; }
   uint32_t idx = (uint32_t)(paint_id - 1) * 3u;
   *r = TX_PAINT_COLORS[idx];
@@ -281,10 +289,25 @@ static void lerp_rgb(uint8_t out[4], int32_t r0, int32_t g0, int32_t b0, int32_t
 }
 
 static void background_color(uint32_t y, uint32_t world_h, uint32_t ground, uint32_t rock, uint8_t out[4]) {
+  const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
   if (ground == 0u) ground = world_h > 3u ? (world_h * 35u) / 100u : 1u;
   if (rock == 0u) rock = world_h > 2u ? (world_h * 65u) / 100u : ground + 1u;
   if (ground == 0u) ground = 1u;
   if (rock <= ground) rock = ground + 1u;
+  if (layout) {
+    uint32_t index;
+    if (y < ground) {
+      index = layout->sky_pos + (uint32_t)(((uint64_t)y * (layout->dirt_pos - layout->sky_pos)) / ground);
+    } else if (y < rock) {
+      index = layout->dirt_pos + (uint32_t)(((uint64_t)(y - ground) * (layout->rock_pos - layout->dirt_pos)) / (rock - ground));
+    } else if (y + 200u < world_h) {
+      uint32_t den = world_h - 200u > rock ? world_h - 200u - rock : 1u;
+      index = layout->rock_pos + (uint32_t)(((uint64_t)(y - rock) * (layout->hell_pos - layout->rock_pos)) / den);
+      if (index >= layout->hell_pos) index = layout->hell_pos - 1u;
+    } else index = layout->hell_pos;
+    tx_map_runtime_color(index, out);
+    return;
+  }
   if (y < ground) { lerp_rgb(out, 50, 40, 255, 145, 185, 255, y, ground); return; }
   if (y < rock) { lerp_rgb(out, 88, 61, 46, 37, 78, 123, y - ground, rock - ground); return; }
   if (y + 200u < world_h) { lerp_rgb(out, 74, 67, 60, 53, 70, 97, y - rock, (world_h - 200u > rock) ? (world_h - 200u - rock) : 1u); return; }
@@ -292,13 +315,56 @@ static void background_color(uint32_t y, uint32_t world_h, uint32_t ground, uint
 }
 
 static int tile_is_non_empty(const TxTile* t) {
+  const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+  if (layout) {
+    uint16_t base;
+    uint8_t options;
+    if (t->active && !t->invisible_block &&
+        tx_map_runtime_lookup(0, t->type, &base, &options)) return 1;
+    if (t->liquid_amount && t->liquid_type &&
+        t->liquid_type <= layout->sky_pos - layout->liquid_pos) return 1;
+    if (t->wall && !t->invisible_wall &&
+        tx_map_runtime_lookup(1, t->wall, &base, &options)) return 1;
+    return 0;
+  }
   if (t->active && !t->invisible_block) return 1;
   if (t->liquid_amount && t->liquid_type) return 1;
   if (t->wall && !t->invisible_wall) return 1;
   return 0;
 }
 
+int tx_render_has_foreground(const TxTile* tile) {
+  return tile && tile_is_non_empty(tile);
+}
+
 static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32_t ground, uint32_t rock, uint8_t out[4]) {
+  const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+  if (layout) {
+    uint16_t base;
+    uint8_t count;
+    if (t->active && !t->invisible_block &&
+        tx_map_runtime_lookup(0, t->type, &base, &count)) {
+      uint32_t variant = get_tile_variant_index(t->type, t->frame_x, t->frame_y);
+      if (variant >= count) variant = 0u;
+      tx_map_runtime_color((uint32_t)base + variant, out);
+      if (t->tile_color) blend_with_paint(out[0], out[1], out[2], t->tile_color, 0,
+                                           &out[0], &out[1], &out[2]);
+      return;
+    }
+    if (t->liquid_amount && t->liquid_type && t->liquid_type <= layout->sky_pos - layout->liquid_pos) {
+      tx_map_runtime_color(layout->liquid_pos + t->liquid_type - 1u, out);
+      return;
+    }
+    if (t->wall && !t->invisible_wall &&
+        tx_map_runtime_lookup(1, t->wall, &base, &count)) {
+      tx_map_runtime_color(base, out);
+      if (t->wall_color) blend_with_paint(out[0], out[1], out[2], t->wall_color, 1,
+                                           &out[0], &out[1], &out[2]);
+      return;
+    }
+    background_color(y, world_h, ground, rock, out);
+    return;
+  }
   /* External color table references (fallback) */
   const uint8_t* tile_colors = tx_get_tile_colors();
   uint32_t tile_color_count = tx_get_tile_color_count();
@@ -372,6 +438,14 @@ static void color_for_tile(const TxTile* t, uint32_t y, uint32_t world_h, uint32
   }
   background_color(y, world_h, ground, rock, out);
 }
+
+#ifdef TERRAX_TESTING
+void txw_test_map_runtime_render_color(const TxTile* tile, uint32_t y,
+                                       uint32_t height, uint32_t ground, uint32_t rock,
+                                       uint8_t rgba[4]) {
+  color_for_tile(tile, y, height, ground, rock, rgba);
+}
+#endif
 
 /* ====================================================================
  * Adler-32 checksum
@@ -738,6 +812,17 @@ static int render_full_preview_rgb_to(TxWorld* w, uint8_t* rgb,
   w->file_len = saved_len;
   return 1;
 }
+
+#ifdef TERRAX_TESTING
+int txw_test_render_full_preview_rgb_to(TxWorld* world, uint8_t* rgb,
+                                         uint32_t width, uint32_t height) {
+  return render_full_preview_rgb_to(world, rgb, width, height);
+}
+void txw_test_render_preview_rows_to(TxWorld* world, uint8_t* rgba,
+                                      uint32_t width, uint32_t height) {
+  render_preview_rows_to(world, rgba, width, height, 0u, height);
+}
+#endif
 
 static int compute_preview_size(TxWorld* w, uint32_t max_w, uint32_t max_h,
                                 uint32_t* out_pw, uint32_t* out_ph,

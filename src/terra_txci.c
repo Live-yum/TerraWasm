@@ -250,6 +250,12 @@ static void txci_read_item(const TxciIndex* idx, uint32_t index, TxciItem* out) 
     out->paint_id = item[4];
 }
 
+int txci_get_item(const TxciIndex* idx, uint32_t item_index, TxciItem* out) {
+    if (!idx || !idx->data || !out || item_index >= idx->item_count) return 0;
+    txci_read_item(idx, item_index, out);
+    return 1;
+}
+
 int txci_get_items(const TxciIndex* idx, uint32_t group_id,
                    TxciItem* out, int max_out) {
     if (!idx || !idx->data || !out || max_out <= 0) return 0;
@@ -376,12 +382,10 @@ static int txci_parse_header(TxciIndex* idx, uint8_t* buf, uint32_t buf_len) {
     uint32_t prior = 0u;
     for (uint32_t i = 0; i <= idx->color_count; i++) {
         uint32_t offset = idx->group_offsets[i];
-        if (offset < prior || offset > idx->item_count) {
+        if (offset < prior || offset > idx->item_count ||
+            (i == 0u && offset != 0u) ||
+            (i == idx->color_count && offset != idx->item_count)) {
             tx_set_error("TERRAX_PARSE_ERROR", "TXCI group offsets are invalid");
-            return 0;
-        }
-        if (offset - prior > TXCI_MAX_GROUP_OPTIONS) {
-            tx_set_error("TERRAX_PARSE_ERROR", "TXCI group contains too many options");
             return 0;
         }
         prior = offset;

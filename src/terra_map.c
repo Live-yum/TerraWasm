@@ -18,6 +18,7 @@
 #include "terra_map.h"
 #include "terra_icon.h"
 #include "terra_color_data.h"
+#include "terra_map_runtime.h"
 #include "terra_defaults.inc"
 
 /* ---------- Extern declarations from terra_mem.c ---------- */
@@ -512,6 +513,22 @@ static uint16_t get_tile_variant_index(uint16_t type, int16_t frame_x, int16_t f
 /* ================================================================ */
 
 static uint32_t map_type_for_tile(const TxTile* t) {
+    const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+    if (layout) {
+        uint16_t base;
+        uint8_t options;
+        if (t->active && !t->invisible_block &&
+            tx_map_runtime_lookup(0, t->type, &base, &options)) {
+            uint32_t variant = get_tile_variant_index(t->type, t->frame_x, t->frame_y);
+            return (uint32_t)base + (variant < options ? variant : 0u);
+        }
+        if (t->liquid_amount && t->liquid_type &&
+            t->liquid_type <= layout->sky_pos - layout->liquid_pos)
+            return layout->liquid_pos + t->liquid_type - 1u;
+        if (t->wall && !t->invisible_wall &&
+            tx_map_runtime_lookup(1, t->wall, &base, &options)) return base;
+        return 0u;
+    }
     if (t->active && !t->invisible_block && t->type < TX_MAP_TILE_COUNT && TX_MAP_TILE_ID_LIST[t->type])
         return TX_MAP_TILE_ID_LIST[t->type] + get_tile_variant_index(t->type, t->frame_x, t->frame_y);
     if (t->liquid_type) return (uint32_t)TX_MAP_MAX_WALL_ID + t->liquid_type;
@@ -527,6 +544,18 @@ static uint32_t map_value_for_type(uint32_t type, uint8_t paint_id) {
 static uint32_t map_value_for_tile(const TxTile* t) {
     uint32_t type = map_type_for_tile(t);
     uint32_t extra = t->active ? (t->tile_color & 31u) : (t->wall ? (t->wall_color & 31u) : 0u);
+    if (tx_map_runtime_is_set()) {
+        uint16_t base;
+        uint8_t options;
+        int tile_used = t->active && !t->invisible_block &&
+            tx_map_runtime_lookup(0, t->type, &base, &options);
+        const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+        int liquid_used = t->liquid_amount && t->liquid_type &&
+            t->liquid_type <= layout->sky_pos - layout->liquid_pos;
+        extra = tile_used ? (t->tile_color & 31u) :
+            (liquid_used ? 0u :
+             (t->wall && !t->invisible_wall ? (t->wall_color & 31u) : 0u));
+    }
     return map_value_for_type(type, (uint8_t)extra);
 }
 
@@ -572,6 +601,14 @@ static int map_value_for_txci_item(const TxciItem* item, uint32_t* out_value) {
 
     if (!item || !out_value) return 0;
     variant = item->variant;
+    if (tx_map_runtime_is_set()) {
+        uint16_t base;
+        uint8_t options;
+        if (!tx_map_runtime_lookup(item->is_wall, item->type_id, &base, &options) ||
+            variant >= options) return 0;
+        *out_value = map_value_for_type((uint32_t)base + variant, item->paint_id);
+        return 1;
+    }
     if (item->is_wall) {
         if (item->type_id >= TX_MAP_WALL_COUNT ||
             !TX_MAP_WALL_ID_LIST[item->type_id] ||
@@ -591,26 +628,34 @@ static int map_value_for_txci_item(const TxciItem* item, uint32_t* out_value) {
 static int map_value_for_txci_rgb(const TxciIndex* index, uint8_t r, uint8_t g, uint8_t b,
                                   uint32_t* out_value) {
     int group_id;
-    TxciItem candidates[TXCI_MAX_GROUP_OPTIONS];
-    int candidate_count;
+    uint32_t start, end;
 
     if (!index || !index->data || !out_value) return 0;
     group_id = txci_lookup_group(index, r, g, b);
-    if (group_id < 0) return 0;
-    candidate_count = txci_get_items(
-        index, (uint32_t)group_id, candidates, (int)TXCI_MAX_GROUP_OPTIONS);
+    if (group_id < 0 || (uint32_t)group_id >= index->color_count) return 0;
+    start = index->group_offsets[(uint32_t)group_id];
+    end = index->group_offsets[(uint32_t)group_id + 1u];
 
     /* TXCI stores its candidates in preference order. Keep tiles preferred for
      * marker pixels, then accept a wall if no valid map tile is available. */
     for (int pass = 0; pass < 2; pass++) {
-        for (int i = 0; i < candidate_count; i++) {
-            if ((pass == 0 && candidates[i].is_wall) ||
-                (pass == 1 && !candidates[i].is_wall)) continue;
-            if (map_value_for_txci_item(&candidates[i], out_value)) return 1;
+        for (uint32_t i = start; i < end; i++) {
+            TxciItem candidate;
+            if (!txci_get_item(index, i, &candidate)) return 0;
+            if ((pass == 0 && candidate.is_wall) ||
+                (pass == 1 && !candidate.is_wall)) continue;
+            if (map_value_for_txci_item(&candidate, out_value)) return 1;
         }
     }
     return 0;
 }
+
+#ifdef TERRAX_TESTING
+int txw_test_marker_map_value_for_rgb(const TxciIndex* index, uint8_t r, uint8_t g, uint8_t b,
+                                      uint32_t* out_value) {
+    return map_value_for_txci_rgb(index, r, g, b, out_value);
+}
+#endif
 
 static uint32_t nearest_map_value_for_rgb(
         const TxciIndex* marker_color_index,
@@ -633,6 +678,33 @@ static uint32_t nearest_map_value_for_rgb(
     }
 
     if (map_value_for_txci_rgb(marker_color_index, r, g, b, &best_value)) {
+        if (cache && cache_count && *cache_count < cache_capacity) {
+            cache[*cache_count].color_key = key;
+            cache[*cache_count].map_value = best_value;
+            (*cache_count)++;
+        }
+        return best_value;
+    }
+
+    if (tx_map_runtime_is_set()) {
+        const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
+        for (int wall = 0; wall < 2; wall++) {
+            uint32_t count = wall ? layout->wall_count : layout->tile_count;
+            for (uint32_t id = 0u; id < count; id++) {
+                uint16_t base;
+                uint8_t options;
+                if (!tx_map_runtime_lookup(wall, id, &base, &options)) continue;
+                for (uint32_t variant = 0u; variant < options; variant++) {
+                    uint8_t rgba[4];
+                    uint32_t distance;
+                    tx_map_runtime_color((uint32_t)base + variant, rgba);
+                    distance = map_color_distance_sq(r, g, b, rgba[0], rgba[1], rgba[2]);
+                    if (distance >= best_distance) continue;
+                    best_distance = distance;
+                    best_value = map_value_for_type((uint32_t)base + variant, 0u);
+                }
+            }
+        }
         if (cache && cache_count && *cache_count < cache_capacity) {
             cache[*cache_count].color_key = key;
             cache[*cache_count].map_value = best_value;
@@ -761,6 +833,7 @@ static void prefill_chunk_strip_background(uint32_t* strip, uint32_t cpc, uint32
                                            int32_t groundLevel, int32_t rockLevel) {
     const uint32_t world_x_base = chunk_x * 64u;
     const uint32_t padding_val = (255u << 16);
+    const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
     if (groundLevel <= 0) groundLevel = (int32_t)(height > 3u ? (height * 35u) / 100u : 1u);
     if (rockLevel <= groundLevel) {
         rockLevel = (int32_t)(height > 2u ? (height * 65u) / 100u : (uint32_t)groundLevel + 1u);
@@ -776,7 +849,17 @@ static void prefill_chunk_strip_background(uint32_t* strip, uint32_t cpc, uint32
                 continue;
             }
             uint32_t bg_type;
-            if ((int32_t)world_y < groundLevel) {
+            if (layout) {
+                if ((int32_t)world_y < groundLevel) {
+                    bg_type = layout->sky_pos +
+                        (uint32_t)(((uint64_t)world_y * (layout->dirt_pos - layout->sky_pos)) /
+                                   (uint32_t)groundLevel);
+                } else if ((int32_t)world_y < rockLevel) {
+                    bg_type = layout->dirt_pos;
+                } else if (world_y + 200u < height) {
+                    bg_type = layout->rock_pos;
+                } else bg_type = layout->hell_pos;
+            } else if ((int32_t)world_y < groundLevel) {
                 bg_type = TX_MAP_MAX_LIQUID_ID +
                     (uint32_t)(((uint64_t)world_y * (uint64_t)TX_MAP_SKY_GRADIENTS) /
                                (uint64_t)(uint32_t)groundLevel);
@@ -1058,6 +1141,7 @@ static const MapMarkerEntry* find_tile_marker(const MapMarkerEntry* markers, uin
 /* ================================================================ */
 
 static void write_map_header(TxBuf* out, TxWorld* w) {
+    const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
     buf_u32le(out, TX_MAP_VERSION);
     buf_bytes(out, w->magic[0] ? w->magic : "relogic", 7);
     buf_u8(out, 1u);
@@ -1067,6 +1151,37 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
     buf_u32le(out, (uint32_t)w->worldId);
     buf_u32le(out, (uint32_t)w->maxTilesY);
     buf_u32le(out, (uint32_t)w->maxTilesX);
+    if (layout) {
+        buf_u16le(out, layout->tile_count);
+        buf_u16le(out, layout->wall_count);
+        buf_u16le(out, layout->sky_pos - layout->liquid_pos);
+        buf_u16le(out, layout->dirt_pos - layout->sky_pos);
+        buf_u16le(out, layout->rock_pos - layout->dirt_pos);
+        buf_u16le(out, layout->hell_pos - layout->rock_pos);
+        for (int wall = 0; wall < 2; wall++) {
+            uint32_t count = wall ? layout->wall_count : layout->tile_count;
+            for (uint32_t byte_index = 0u; byte_index < (count + 7u) / 8u; byte_index++) {
+                uint8_t bits = 0u;
+                for (uint32_t bit = 0u; bit < 8u && byte_index * 8u + bit < count; bit++) {
+                    uint16_t base;
+                    uint8_t options;
+                    tx_map_runtime_lookup(wall, byte_index * 8u + bit, &base, &options);
+                    if (options != 1u) bits |= (uint8_t)(1u << bit);
+                }
+                buf_u8(out, bits);
+            }
+        }
+        for (int wall = 0; wall < 2; wall++) {
+            uint32_t count = wall ? layout->wall_count : layout->tile_count;
+            for (uint32_t id = 0u; id < count; id++) {
+                uint16_t base;
+                uint8_t options;
+                tx_map_runtime_lookup(wall, id, &base, &options);
+                if (options != 1u) buf_u8(out, options);
+            }
+        }
+        return;
+    }
     buf_u16le(out, TX_MAP_TILE_COUNT);
     buf_u16le(out, TX_MAP_WALL_COUNT);
     buf_u16le(out, TX_MAP_LIQUID_COUNT);
@@ -1080,6 +1195,15 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
     for (uint32_t i = 0; i < TX_MAP_WALL_COUNT; i++)
         if (TX_MAP_WALL_EXISTS[i]) buf_u8(out, TX_MAP_WALL_TYPE_COUNTS[i]);
 }
+
+#ifdef TERRAX_TESTING
+uint32_t txw_test_map_runtime_value_for_tile(const TxTile* tile) {
+    return map_value_for_tile(tile);
+}
+void txw_test_map_runtime_write_header(TxBuf* out, TxWorld* world) {
+    write_map_header(out, world);
+}
+#endif
 
 /* The TXCI buffer is copied into the active world's native allocation domain,
  * so operation reclamation cannot invalidate the palette while MAP is being

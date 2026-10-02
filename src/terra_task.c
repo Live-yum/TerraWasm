@@ -100,6 +100,15 @@ static int has_active_task(void) {
     return 0;
 }
 
+/* A staging task can render with TMRT before it publishes a world handle. */
+int tx_open_task_pending(void) {
+    for (uint32_t index = 0u; index < TX_MAX_OPEN_TASKS; index++) {
+        if (g_tasks[index].active &&
+            g_tasks[index].status == TERRAX_WORLD_STATUS_IN_PROGRESS) return 1;
+    }
+    return 0;
+}
+
 static TxOpenTask* claim_task_slot(void) {
     /* TerraWasm exposes a one-world runtime contract. Serializing open tasks
      * also makes native allocation rewind ownership unambiguous on cancel. */

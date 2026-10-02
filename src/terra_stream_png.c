@@ -9,6 +9,7 @@ extern unsigned long crc32(unsigned long, const uint8_t*, unsigned int);
 extern unsigned long adler32(unsigned long, const uint8_t*, unsigned int);
 extern void tx_set_error(const char*, const char*);
 extern void tx_render_stream_color(TxWorld*, const TxTile*, uint32_t, uint8_t*);
+extern int tx_render_has_foreground(const TxTile*);
 extern void tx_render_stream_markers(TxWorld*, uint8_t*, uint32_t, uint32_t,
     uint32_t, uint32_t, const MapMarkerEntry*, uint32_t,
     const MapMarkerEntry*, uint32_t, uint32_t);
@@ -91,8 +92,7 @@ int tx_stream_png_run(TxStreamPng* p, uint32_t x, uint32_t y, const TxTile* t, u
             p->start, p->rows, x, y, t, run, p->tiles, p->tile_count);
         return 1;
     }
-    if (!(t->active && !t->invisible_block) && !(t->liquid_amount && t->liquid_type)
-        && !(t->wall && !t->invisible_wall)) return 1;
+    if (!tx_render_has_foreground(t)) return 1;
     uint32_t first = y > p->start ? y : p->start;
     uint32_t end = y + run < p->start + p->rows ? y + run : p->start + p->rows;
     uint8_t c[4]; tx_render_stream_color(p->world, t, y, c);
@@ -100,6 +100,13 @@ int tx_stream_png_run(TxStreamPng* p, uint32_t x, uint32_t y, const TxTile* t, u
         memcpy(p->rgba + ((yy - p->start) * p->width + x) * 4u, c, 4u);
     return 1;
 }
+#ifdef TERRAX_TESTING
+int txw_test_stream_png_pixel(TxStreamPng* p, uint32_t y, uint8_t rgba[4]) {
+    if (!p || !p->active || y < p->start || y >= p->start + p->rows || !rgba) return 0;
+    memcpy(rgba, p->rgba + (y - p->start) * p->width * 4u, 4u);
+    return 1;
+}
+#endif
 int tx_stream_png_rgb(TxStreamPng* p, const uint8_t* rgb) {
     if(!p||!rgb||!p->active||p->output.len)return -1;
     if(p->phase)return 0;

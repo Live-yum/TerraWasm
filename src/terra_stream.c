@@ -26,10 +26,29 @@ extern int parse_header(TxWorld*);
 extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
 extern void write_tile(TxWorld*,TxBuf*,const TxTile*,uint32_t);
 extern void tx_render_stream_color(TxWorld*,const TxTile*,uint32_t,uint8_t*);
+extern int tx_render_has_foreground(const TxTile*);
 extern int same_tile(const TxTile*,const TxTile*);
 extern void buf_init(TxBuf*,uint32_t);
 extern int apply_pixel_art_at(TxWorld*,uint32_t,uint32_t,TxTile*);
 extern int tx_stream_activate_world(TxWorld*,uint32_t*);
+
+static void write_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
+                                uint32_t y, const TxTile* tile, uint32_t run) {
+    uint8_t color[4];
+    int foreground = tx_render_has_foreground(tile);
+    if (foreground) tx_render_stream_color(world, tile, y, color);
+    for (uint32_t row = y; row < y + run; row++) {
+        if (!foreground) tx_render_stream_color(world, NULL, row, color);
+        memcpy(rgb + ((uint64_t)row * world->maxTilesX + x) * 3u, color, 3u);
+    }
+}
+
+#ifdef TERRAX_TESTING
+void txw_test_stream_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
+                                   uint32_t y, const TxTile* tile, uint32_t run) {
+    write_rgb_cache_run(world, rgb, x, y, tile, run);
+}
+#endif
 
 enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN };
 typedef struct StreamTask {
@@ -68,6 +87,27 @@ typedef struct StreamTask {
 } StreamTask;
 static StreamTask* current;
 static uint32_t generation=1;
+
+int tx_stream_task_pending(void) {
+    return current && current->stage != CANCELLED && current->stage != ADOPTED;
+}
+
+#ifdef TERRAX_TESTING
+uint32_t txw_test_stream_begin_for_runtime(void) {
+    StreamTask* task;
+    if (current) return 0u;
+    task = (StreamTask*)tx_persistent_alloc(sizeof(*task));
+    if (!task) return 0u;
+    memset(task, 0, sizeof(*task));
+    task->candidate = (TxWorld*)tx_persistent_alloc(sizeof(TxWorld));
+    if (!task->candidate) { tx_internal_free(task); return 0u; }
+    memset(task->candidate, 0, sizeof(TxWorld));
+    task->id = generation++;
+    task->stage = OPEN_FORMAT;
+    current = task;
+    return task->id;
+}
+#endif
 
 static int fail(const char* code,const char* message) { tx_set_error(code,message);return -1; }
 static int valid_range(const void* ptr,uint32_t bytes) { return ptr&&tx_bridge_range_is_valid((uint32_t)(uintptr_t)ptr,bytes); }
@@ -448,14 +488,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             uint32_t run=(uint32_t)tile.same+1;
             if(t->stage==OP_REGION){if(!tx_region_stream_run(w,t->region_scan,t->x,t->y,&tile,run))return -1;}
             else if(!tx_output_stream_run(w,t->x,t->y,&tile,run)||!tx_marker_stream_run(t->marker_scan,t->x,t->y,&tile,run))return -1;
-            if(t->rgb_cache){
-                uint8_t c[4];int colored=(tile.active&&!tile.invisible_block)||(tile.liquid_amount&&tile.liquid_type)||(tile.wall&&!tile.invisible_wall);
-                if(colored)tx_render_stream_color(w,&tile,t->y,c);
-                for(uint32_t yy=t->y;yy<t->y+run;yy++){
-                    if(!colored)tx_render_stream_color(w,NULL,yy,c);
-                    memcpy(t->rgb_cache+((uint64_t)yy*w->maxTilesX+t->x)*3,c,3);
-                }
-            }
+            if(t->rgb_cache)write_rgb_cache_run(w,t->rgb_cache,t->x,t->y,&tile,run);
             t->y+=run;if(t->y==(uint32_t)w->maxTilesY){if(t->marker_scan&&!tx_marker_stream_column(t->marker_scan))return -1;t->x++;t->y=0;}
         }else if(t->stage==OP_MEDIA){
             uint32_t offset,length;const uint8_t* bytes;

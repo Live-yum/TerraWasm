@@ -11,6 +11,8 @@ extern int32_t txw_set_marker_color_index_from_buffer(
     TxWorld* world,
     const uint8_t* data,
     uint32_t data_len);
+extern int txw_test_marker_map_value_for_rgb(
+    const TxciIndex* index, uint8_t r, uint8_t g, uint8_t b, uint32_t* out_value);
 
 #define TEST_BRICK_COUNT 512u
 #define TEST_ITEMS_OFFSET 56u
@@ -21,7 +23,8 @@ extern int32_t txw_set_marker_color_index_from_buffer(
 #define INDEX_DATA_SIZE(item_count) (INDEX_PAYLOAD_OFFSET(item_count) + 2u)
 #define SINGLE_ITEM_COUNT 1u
 #define MANY_ITEM_COUNT 34u
-#define TOO_MANY_ITEM_COUNT (TXCI_MAX_GROUP_OPTIONS + 1u)
+#define LATE_WALL_ITEM_COUNT 306u
+#define LATE_TILE_ITEM_COUNT 307u
 
 static void write_u16le(uint8_t* data, uint32_t offset, uint16_t value) {
     data[offset] = (uint8_t)value;
@@ -89,6 +92,22 @@ static void make_many_options_index(uint8_t data[INDEX_DATA_SIZE(MANY_ITEM_COUNT
         (uint16_t)(TXCI_KIND_WALL | 77u));
 }
 
+static void make_late_candidate_index(uint8_t* data, uint32_t count,
+                                      uint8_t last_is_wall, uint16_t last_type) {
+    make_index(data, INDEX_DATA_SIZE(count), count);
+    for (uint32_t item = 0u; item < count; item++) {
+        uint32_t offset = TEST_ITEMS_OFFSET + item * TXCI_ITEM_SIZE;
+        /* Opposite-kind early candidates keep the preferred valid item last. */
+        write_u16le(data, offset,
+                    (uint16_t)(8000u | (last_is_wall ? 0u : TXCI_KIND_WALL)));
+        write_u16le(data, offset + 2u, 0u);
+        data[offset + 4u] = 0u;
+    }
+    uint32_t last = TEST_ITEMS_OFFSET + (count - 1u) * TXCI_ITEM_SIZE;
+    write_u16le(data, last, (uint16_t)(last_type | (last_is_wall ? TXCI_KIND_WALL : 0u)));
+    data[last + 4u] = 3u;
+}
+
 static void assert_known_lookup(const TxWorld* world) {
     TxciItem item;
     assert(txci_lookup_group(&world->marker_color_index, 17u, 34u, 51u) == 0);
@@ -109,6 +128,22 @@ static void assert_complete_group_selection(const TxWorld* world) {
     assert(item.type_id == 1u);
 }
 
+static void assert_late_map_candidate(const TxWorld* world, uint32_t count,
+                                      uint8_t is_wall, uint16_t type, uint16_t map_index) {
+    TxciItem item;
+    uint32_t map_value = 0u;
+    assert(world->marker_color_index.item_count == count);
+    assert(txci_get_item(&world->marker_color_index, count - 1u, &item) == 1);
+    assert(item.type_id == type && item.is_wall == is_wall && item.paint_id == 3u);
+    assert(txci_get_item(&world->marker_color_index, count, &item) == 0);
+    assert(txci_choose_tile(&world->marker_color_index, 17u, 34u, 51u,
+                            is_wall, &item) == 1);
+    assert(item.type_id == type && item.is_wall == is_wall);
+    assert(txw_test_marker_map_value_for_rgb(
+        &world->marker_color_index, 17u, 34u, 51u, &map_value) == 1);
+    assert(map_value == ((uint32_t)map_index | (255u << 16u) | (3u << 24u)));
+}
+
 static void assert_out_of_range_group_is_rejected(
         uint8_t data[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)]) {
     TxciIndex index = {0};
@@ -127,7 +162,9 @@ int main(void) {
     uint8_t invalid_group[INDEX_DATA_SIZE(SINGLE_ITEM_COUNT)];
     uint8_t truncated[TXCI_HEADER_SIZE - 1u];
     uint8_t many_options[INDEX_DATA_SIZE(MANY_ITEM_COUNT)];
-    uint8_t too_many_options[INDEX_DATA_SIZE(TOO_MANY_ITEM_COUNT)];
+    uint8_t late_wall[INDEX_DATA_SIZE(LATE_WALL_ITEM_COUNT)];
+    uint8_t late_tile[INDEX_DATA_SIZE(LATE_TILE_ITEM_COUNT)];
+    uint8_t invalid_offsets[INDEX_DATA_SIZE(LATE_TILE_ITEM_COUNT)];
     TxWorld world = {0};
     uint32_t baseline = tx_native_heap_used();
 
@@ -154,16 +191,30 @@ int main(void) {
         &world, many_options, sizeof(many_options)) == 0);
     assert_complete_group_selection(&world);
 
-    make_index(
-        too_many_options,
-        INDEX_DATA_SIZE(TOO_MANY_ITEM_COUNT),
-        TOO_MANY_ITEM_COUNT);
+    make_late_candidate_index(late_wall, LATE_WALL_ITEM_COUNT, 1u, 106u);
     assert(txw_set_marker_color_index_from_buffer(
-        &world, too_many_options, sizeof(too_many_options)) == -1);
-    assert_complete_group_selection(&world);
+        &world, late_wall, sizeof(late_wall)) == 0);
+    assert_late_map_candidate(&world, LATE_WALL_ITEM_COUNT, 1u, 106u, 1164u);
+
+    make_late_candidate_index(late_tile, LATE_TILE_ITEM_COUNT, 0u, 1u);
+    assert(txw_set_marker_color_index_from_buffer(
+        &world, late_tile, sizeof(late_tile)) == 0);
+    assert_late_map_candidate(&world, LATE_TILE_ITEM_COUNT, 0u, 1u, 2u);
+
+    memcpy(invalid_offsets, late_tile, sizeof(invalid_offsets));
+    write_u32le(invalid_offsets, 48u, 1u);
+    assert(txw_set_marker_color_index_from_buffer(
+        &world, invalid_offsets, sizeof(invalid_offsets)) == -1);
+    assert_late_map_candidate(&world, LATE_TILE_ITEM_COUNT, 0u, 1u, 2u);
+
+    memcpy(invalid_offsets, late_tile, sizeof(invalid_offsets));
+    write_u32le(invalid_offsets, 52u, LATE_TILE_ITEM_COUNT + 1u);
+    assert(txw_set_marker_color_index_from_buffer(
+        &world, invalid_offsets, sizeof(invalid_offsets)) == -1);
+    assert_late_map_candidate(&world, LATE_TILE_ITEM_COUNT, 0u, 1u, 2u);
 
     txw_clear_marker_color_index(&world);
     assert(tx_native_heap_used() == baseline);
-    puts("marker color index contract: replacements are transactional and complete groups are scanned");
+    puts("marker color index contract: 306/307 options, late MAP candidates and transactional replacement passed");
     return 0;
 }
