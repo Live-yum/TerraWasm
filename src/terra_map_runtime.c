@@ -143,7 +143,10 @@ int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len) 
         tx_clear_error();
         return 0;
     }
-    if (runtime_in_use()) return invalid("close worlds and tasks before replacing TMRT");
+    if (tx_open_task_pending() || tx_stream_task_pending())
+        return invalid("close tasks before installing TMRT");
+    if (runtime_data && tx_get_world_open_count())
+        return invalid("close worlds and tasks before replacing TMRT");
     copy = tx_persistent_alloc(data_len);
     if (!copy) {
         tx_set_error("TERRAX_WASM_OOM", "TMRT persistent allocation failed");

@@ -139,6 +139,30 @@ int main(int argc, char** argv) {
     uint16_t base;
     uint8_t options;
     assert(changed);
+    /* A parsed world can outlive the first TMRT install; active tasks cannot. */
+    tx_set_world_open_count(1u);
+    assert(txw_set_map_runtime_from_buffer(data, len) == 0);
+    assert(tx_map_runtime_is_set());
+    assert(txw_set_map_runtime_from_buffer(NULL, 0u) < 0);
+    tx_set_world_open_count(0u);
+    assert(txw_set_map_runtime_from_buffer(NULL, 0u) == 0);
+    {
+        uint8_t pending_input[16] = {0};
+        uint32_t task_id = terra_world_open_begin(pending_input, sizeof(pending_input));
+        assert(task_id && tx_get_world_open_count() == 0u);
+        assert(txw_set_map_runtime_from_buffer(data, len) < 0);
+        assert(!tx_map_runtime_is_set());
+        assert(terra_world_open_cancel(task_id) == TERRAX_WORLD_STATUS_CANCELLED);
+        assert(terra_world_task_close(task_id) == TERRAX_WORLD_STATUS_OK);
+    }
+    {
+        uint32_t task_id = txw_test_stream_begin_for_runtime();
+        assert(task_id && tx_get_world_open_count() == 0u);
+        assert(txw_set_map_runtime_from_buffer(data, len) < 0);
+        assert(!tx_map_runtime_is_set());
+        assert(terra_world_stream_cancel(task_id) == 0);
+        assert(terra_world_stream_close(task_id) == 0);
+    }
     assert(txw_set_map_runtime_from_buffer(data, len) == 0);
     assert(tx_map_runtime_is_set());
     tx_reset_heap(); /* persistent copy survives ordinary heap reset */
