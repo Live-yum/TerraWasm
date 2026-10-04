@@ -43,6 +43,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_json.c"
     "${SRC_DIR}/terra_wld.c"
     "${SRC_DIR}/terra_wld_guard.c"
+    "${SRC_DIR}/terra_future.c"
     "${SRC_DIR}/terra_api.c"
     "${SRC_DIR}/terra_commit.c"
     "${SRC_DIR}/terra_ops.c"
@@ -83,7 +84,15 @@ endif()
 set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI identity")
 set(TERRAX_BUILD_DIRTY "false" CACHE STRING "Dirty state embedded in ABI identity")
 set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in ABI identity")
-set(TERRAX_OPTIMIZE_FLAG "-O3" CACHE STRING "Optimization flag for release-style Wasm builds")
+# The combined module contains both schemas. Its measured compact profile
+# satisfies the same Web size gate; standalone viewer modules retain -O3.
+set(TERRAX_DEFAULT_OPTIMIZE_FLAG "-O3")
+set(TERRAX_DEFAULT_ENABLE_LTO OFF)
+if(TERRAWASM_FEATURE_SET STREQUAL "all")
+    set(TERRAX_DEFAULT_OPTIMIZE_FLAG "-Oz")
+    set(TERRAX_DEFAULT_ENABLE_LTO ON)
+endif()
+set(TERRAX_OPTIMIZE_FLAG "${TERRAX_DEFAULT_OPTIMIZE_FLAG}" CACHE STRING "Optimization flag for release-style Wasm builds")
 set(TERRAX_NODE_INITIAL_MEMORY "134217728" CACHE STRING "Node WASM initial linear memory in bytes")
 set(TERRAX_NODE_MAXIMUM_MEMORY "536870912" CACHE STRING "Node WASM maximum linear memory in bytes")
 set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "67108864")
@@ -93,7 +102,7 @@ if(TERRAWASM_FEATURE_SET STREQUAL "plr")
 endif()
 set(TERRAX_WEB_INITIAL_MEMORY "${TERRAX_WEB_INITIAL_MEMORY_DEFAULT}" CACHE STRING "Web/Mini Program WASM initial linear memory in bytes")
 set(TERRAX_WEB_MAXIMUM_MEMORY "167772160" CACHE STRING "Web/Mini Program WASM maximum linear memory in bytes")
-option(TERRAX_ENABLE_LTO "Enable link-time optimization for Wasm targets" OFF)
+option(TERRAX_ENABLE_LTO "Enable link-time optimization for Wasm targets" ${TERRAX_DEFAULT_ENABLE_LTO})
 
 foreach(TERRAX_MEMORY_VALUE IN ITEMS
     TERRAX_NODE_INITIAL_MEMORY
@@ -134,11 +143,18 @@ endfunction()
 
 if(EMSCRIPTEN)
     # Header/format and player patching are cold administrative paths. Keep
-    # the global release profile at -O3, but size-optimize enabled schema-heavy
+    # standalone viewer runtime paths at -O3, but size-optimize schema-heavy
     # encoders so each feature set remains inside the Mini Program budget.
     if(TERRAWASM_ENABLE_WLD)
         set_source_files_properties(
             "${SRC_DIR}/terra_mutators.c"
+            "${SRC_DIR}/terra_ops.c"
+            "${SRC_DIR}/terra_json.c"
+            "${SRC_DIR}/terra_wld_guard.c"
+            "${SRC_DIR}/terra_markers.c"
+            "${SRC_DIR}/terra_commands.c"
+            "${SRC_DIR}/terra_pixel_art_metadata.c"
+            "${SRC_DIR}/terra_future.c"
             "${SRC_DIR}/terra_wld_legacy.c"
             "${SRC_DIR}/terra_legacy_npc.c"
             PROPERTIES COMPILE_OPTIONS "-Oz"
@@ -329,6 +345,9 @@ else()
                 TERRAX_TESTING
                 TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
             )
+            add_terra_contract(terra_legacy_open_matrix_contract tests/legacy_open_matrix_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_future_readonly_contract tests/future_readonly_contract.c ZLIB::ZLIB)
+            target_compile_definitions(terra_future_readonly_contract PRIVATE TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
             add_terra_contract(terra_error_json_contract tests/error_json_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_zlib_bridge_contract tests/zlib_bridge_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_json_parser_contract tests/json_parser_contract.c ZLIB::ZLIB)
@@ -391,3 +410,4 @@ else()
         endif()
     endif()
 endif()
+

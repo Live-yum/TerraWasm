@@ -9,7 +9,7 @@
 #else
 #define TX_COLD_PARSER
 #endif
-extern int serialize_legacy_section_json(TxWorld*,int,TxBuf*);
+extern TX_COLD_PARSER int serialize_legacy_section_json(TxWorld*,int,TxBuf*);
 /* ==================================================================== * Extern declarations from terra_mem.c * ==================================================================== */extern uint32_t tx_strlen(const char *s);
 extern int tx_streq_c(const char *a,const char *b);
 extern int tx_streq_n(const char *a,uint32_t alen,const char *b);
@@ -189,12 +189,16 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     return (w->important[idx]>>(type&7u))&1u;
     }
 /* ==================================================================== * parse_format -- Extract format metadata from raw .wld bytes * ==================================================================== */int parse_format(TxWorld *w){
+    if (!w || !w->file || w->file_len < 4u) {
+        tx_set_error("TERRAX_TRUNCATED_FORMAT","world version word is truncated"); return 0;
+    }
     uint32_t off=0;
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
     w->version=rd_u32le(p,len,&off);
-    if (w->version==0u||w->version>326u){
-        tx_set_error("TERRAX_UNSUPPORTED_VERSION","unsupported .wld version");
+    if (!w->original_version) w->original_version=w->version;
+    if (w->version==0u||w->version>INT32_MAX){
+        tx_set_error("TERRAX_BAD_VERSION","world version must be a positive int32");
         return 0;
         }
     /* Releases 1..87 predate the section table entirely.  The old loader
@@ -240,14 +244,24 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
         i++)w->magic[i]=(char)p[off++];
         w->magic[7]=0;
         w->file_type=p[off++];
+        if ((!tx_streq_c(w->magic,"relogic") && !tx_streq_c(w->magic,"xindong")) || w->file_type!=2u) {
+            tx_set_error("TERRAX_BAD_METADATA","expected relogic or xindong world metadata (type 2)"); return 0;
+        }
         w->revision=rd_u32le(p,len,&off);
         w->favorite=rd_u64le(p,len,&off);
         }
+    if (!terra_reader_has(off,2u,len)) { tx_set_error("TERRAX_TRUNCATED_FORMAT","section count truncated"); return 0; }
     w->pointer_count=rd_u16le(p,len,&off);
     if (w->pointer_count==0u||w->pointer_count>TX_MAX_SECTIONS){
         tx_set_error("TERRAX_BAD_POINTERS","unsupported section pointer count");
         return 0;
         }
+    if (!terra_reader_has(off,(uint32_t)w->pointer_count*4u+2u,len)) {
+        tx_set_error("TERRAX_TRUNCATED_FORMAT","section pointer table truncated"); return 0;
+    }
+    if (w->pointer_count<2u || (tx_world_is_future(w) && w->pointer_count!=11u)) {
+        tx_set_error("TERRAX_BAD_POINTERS","section count does not match the attempted layout"); return 0;
+    }
     for (uint32_t i=0;
     i<w->pointer_count;
     i++)w->positions[i]=rd_u32le(p,len,&off);
@@ -260,6 +274,7 @@ void rd_skip_string_value(const uint8_t *p,uint32_t len,uint32_t *off){
     w->important=p+off;
     off+=w->important_len;
     w->format_len=off;
+    if (w->positions[0]!=off) { tx_set_error("TERRAX_BAD_POINTERS","first section must start exactly after format metadata"); return 0; }
     for (uint32_t i=0;
     i<w->pointer_count;
     i++){
@@ -643,7 +658,8 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         tx_set_error("TERRAX_BAD_HEADER","header layout does not end at the tile section pointer");
         return 0;
         }
-    if (w->maxTilesX<=0||w->maxTilesY<=0){
+    if (w->maxTilesX<=0||w->maxTilesY<=0||
+        (uint64_t)(uint32_t)w->maxTilesX*(uint32_t)w->maxTilesY>TX_MAX_WORLD_TILES){
         tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");
         return 0;
         }
@@ -837,9 +853,11 @@ int parse_header(TxWorld *w){
     if (f1&1u)TILE_U8(f2);
     if (f2&1u)TILE_U8(f3);
     if (f3&1u)TILE_U8(f4);
+    if (tx_world_is_future(w) && ((f4&0xe1u) || (f2&0x80u))) return 0;
     t->active=(f1>>1)&1u;
     if (t->active){
         if (f1&32u)TILE_U16(t->type); else TILE_U8(t->type);
+        if (tx_world_is_future(w) && t->type>=w->tile_type_count) return 0;
         if (tile_important(w,t->type)){
             TILE_U16(t->frame_x);
             TILE_U16(t->frame_y);
@@ -966,6 +984,7 @@ int section_index_by_name(const char *name,uint32_t len){
     if (tx_streq_n(name,len,"format"))return-2; return -1;
     }
 /* Directly set section override data without copying. Caller transfers ownership of the data buffer. */int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t len){
+    if (!tx_world_require_writable(w)) return 0;
     if (idx<0||(uint32_t)idx>=TX_MAX_SECTION_OVERRIDES){
         tx_set_error("TERRAX_SECTION_SET_NOT_SUPPORTED","section index out of range");
         return 0;
@@ -985,9 +1004,13 @@ int section_index_by_name(const char *name,uint32_t len){
     w->section_overrides[idx].active=1;
     w->heap_mark=tx_mark(); return 1;
     }
-/* ==================================================================== * JSON serializers for all 11 sections * * These produce JSON matching the TerraX V2 API exactly, as defined in * world_api_v318_format.cpp, world_api_v318_header.cpp, and * world_api_v318_sections.cpp. * ==================================================================== *//* --- format section --- */void serialize_format_json(TxWorld *w,TxBuf *b){
+/* ==================================================================== * JSON serializers for all 11 sections * * These produce JSON matching the TerraX V2 API exactly, as defined in * world_api_v318_format.cpp, world_api_v318_header.cpp, and * world_api_v318_sections.cpp. * ==================================================================== *//* --- format section --- */TX_COLD_PARSER void serialize_format_json(TxWorld *w,TxBuf *b){
     buf_cstr(b," { \"version\":");
     json_u32(b,w->version);
+    buf_cstr(b,",\"originalVersion\":"); json_u32(b,w->original_version ? w->original_version : w->version);
+    buf_cstr(b,",\"readOnly\":"); json_bool(b,w->legacy_wld || tx_world_is_future(w));
+    buf_cstr(b,",\"compatibility\":"); json_string(b,tx_world_is_future(w) ? "future-layout-readonly" : w->legacy_wld ? "legacy-readonly" : "known");
+    buf_cstr(b,",\"canExportOriginal\":true");
     buf_cstr(b,",\"magic\":");
     json_string(b,w->magic[0]?w->magic:"relogic");
     buf_cstr(b,",\"type\":");
@@ -1076,7 +1099,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_u8(b, (uint8_t)('0' + sec % 10));
     buf_u8(b, '"');
 }
-/* --- header section (all fields, matching buildHeaderJson order) --- */void serialize_header_json(TxWorld *w,TxBuf *b){
+/* --- header section (all fields, matching buildHeaderJson order) --- */TX_COLD_PARSER void serialize_header_json(TxWorld *w,TxBuf *b){
     uint8_t *p=w->file;
     uint32_t flen=w->file_len;
     uint32_t header_base=0u;
@@ -1560,7 +1583,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_cstr(b,"\n}\n");
     }
-/* --- chests section --- *//* * Binary format per chest (version >= 294): * i32 x, i32 y, 7bit-string name, i32 maxItems * For each item: u16 stack;  stack != 0: i32 itemType, u8 prefix */void serialize_chests_json(TxWorld *w,TxBuf *b){
+/* --- chests section --- *//* * Binary format per chest (version >= 294): * i32 x, i32 y, 7bit-string name, i32 maxItems * For each item: u16 stack;  stack != 0: i32 itemType, u8 prefix */TX_COLD_PARSER void serialize_chests_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,2);
     uint32_t off=w->section_overrides[2].active?0u:(section<0?0u:w->starts[section]);
     uint32_t end=w->section_overrides[2].active?w->section_overrides[2].len:(section<0?0u:w->ends[section]);
@@ -1613,7 +1636,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_u8(b,']');
     }
-/* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */void serialize_signs_json(TxWorld *w,TxBuf *b){
+/* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */TX_COLD_PARSER void serialize_signs_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,3); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -1639,7 +1662,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_u8(b,']');
     }
-/* --- npcs section --- *//* * Binary format: * Loop: i32 npcType;  >= 0: f32 x, f32 y, 7bit-string name, ... * Terminator: npcType < 0 * Then: u32 shimmeredCount, [i32 shimmeredNetId...] */void serialize_npcs_json(TxWorld *w,TxBuf *b){
+/* --- npcs section --- *//* * Binary format: * Loop: i32 npcType;  >= 0: f32 x, f32 y, 7bit-string name, ... * Terminator: npcType < 0 * Then: u32 shimmeredCount, [i32 shimmeredNetId...] */TX_COLD_PARSER void serialize_npcs_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,4); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -1800,7 +1823,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         }
     buf_cstr(b,"]\n}\n");
     }
-/* --- tile_entities section --- *//* * Binary format: * u16 count * For each entity: * u8 type, i32 id, u16 x, u16 y * Then type-specific data */static void serialize_item_stack_json(TxBuf *b,int16_t id,uint8_t prefix,uint16_t stack){
+/* --- tile_entities section --- *//* * Binary format: * u16 count * For each entity: * u8 type, i32 id, u16 x, u16 y * Then type-specific data */static TX_COLD_PARSER void serialize_item_stack_json(TxBuf *b,int16_t id,uint8_t prefix,uint16_t stack){
     buf_cstr(b," { \"itemType\":");
     json_i32(b,id);
     buf_cstr(b,",\"prefix\":");
@@ -1809,7 +1832,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,stack);
     buf_cstr(b,"\n}\n");
     }
-void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
+TX_COLD_PARSER void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,5); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2008,7 +2031,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- weighted_pressure_plates section --- */void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
+/* --- weighted_pressure_plates section --- */TX_COLD_PARSER void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,6); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2029,7 +2052,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- town_manager section --- */void serialize_town_manager_json(TxWorld *w,TxBuf *b){
+/* --- town_manager section --- */TX_COLD_PARSER void serialize_town_manager_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,7); uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
     uint8_t *p=w->file;
@@ -2053,7 +2076,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_u8(b,']');
     }
-/* --- bestiary section --- *//* * Binary format: * u32 killCount, [7bit-string name, u32 count...] * u32 sightingCount, [7bit-string name...] * u32 chatCount, [7bit-string name...] */void serialize_bestiary_json(TxWorld *w,TxBuf *b){
+/* --- bestiary section --- *//* * Binary format: * u32 killCount, [7bit-string name, u32 count...] * u32 sightingCount, [7bit-string name...] * u32 chatCount, [7bit-string name...] */TX_COLD_PARSER void serialize_bestiary_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,8);
     uint32_t off=w->section_overrides[8].active?0u:(section<0?0u:w->starts[section]);
     uint32_t end=w->section_overrides[8].active?w->section_overrides[8].len:(section<0?0u:w->ends[section]);
@@ -2103,7 +2126,7 @@ void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
         }
     buf_cstr(b,"]\n}\n");
     }
-/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */int serialize_creative_powers_json(TxWorld *w,TxBuf *b){
+/* --- creative_powers section (Journey mode) --- *//* * Binary format: * For each power: u16 powerId, then type-specific data * Read until section end. * * Known power IDs: * 0 = TimeSetFrozen (bool/u8) * 8 = TimeSetSpeed (f32) * 9 = RainSetFrozen (bool/u8) * 10 = WindSetFrozen (bool/u8) * 12 = SetDifficulty (f32) * 13 = BiomeSpreadSetFrozen (bool/u8) */TX_COLD_PARSER int serialize_creative_powers_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,9);
     uint32_t off=section<0?0u:w->starts[section];
     uint32_t end=section<0?0u:w->ends[section];
@@ -2138,7 +2161,7 @@ truncated:
     tx_set_error("TERRAX_TRUNCATED_CREATIVE_POWERS","creative power payload or terminator is truncated");
     return 0;
     }
-/* --- footer section --- */void serialize_footer_json(TxWorld *w,TxBuf *b){
+/* --- footer section --- */TX_COLD_PARSER void serialize_footer_json(TxWorld *w,TxBuf *b){
     int section=tx_actual_section_index(w,10);
     uint8_t overridden=section>=0 && w->section_overrides[section].active;
     uint32_t off=overridden?0u:(section<0?0u:w->starts[section]);
@@ -2163,7 +2186,7 @@ truncated:
     buf_cstr(b,",\"worldId\":"); json_i32(b,valid?id:0);
     buf_cstr(b,"\n}\n");
     }
-/* ==================================================================== * Unified section serializer -- dispatch by section index * ==================================================================== */int serialize_section_json(TxWorld *w,int idx,TxBuf *b){
+/* ==================================================================== * Unified section serializer -- dispatch by section index * ==================================================================== */TX_COLD_PARSER int serialize_section_json(TxWorld *w,int idx,TxBuf *b){
     if (w->legacy_wld && idx>=2 && idx<=10) return serialize_legacy_section_json(w,idx,b);
     /* API section names use the latest layout; old worlds omit sections. */
     if (idx>=2 && idx<=10) {
@@ -2217,3 +2240,4 @@ truncated:
 /* ==================================================================== * Same-tile comparison helper * ==================================================================== */int same_tile(const TxTile *a,const TxTile *b){
     return a->active==b->active&&a->type==b->type&&a->frame_x==b->frame_x&&a->frame_y==b->frame_y&&a->wall==b->wall&&a->liquid_amount==b->liquid_amount&&a->liquid_type==b->liquid_type&&a->brick_style==b->brick_style&&a->tile_color==b->tile_color&&a->wall_color==b->wall_color&&a->wire_red==b->wire_red&&a->wire_blue==b->wire_blue&&a->wire_green==b->wire_green&&a->wire_yellow==b->wire_yellow&&a->actuator==b->actuator&&a->inactive==b->inactive&&a->invisible_block==b->invisible_block&&a->invisible_wall==b->invisible_wall&&a->fullbright_block==b->fullbright_block&&a->fullbright_wall==b->fullbright_wall;
     }
+

@@ -744,10 +744,14 @@ test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses 
   for (const version of [327, 400]) {
     let handle = 0, reopened = 0;
     try {
-      handle = openJson(module, historicalModel(version));
-      const encoded = encode(module, handle);
+      handle = openJson(module, historicalModel(326));
+      const plain = decryptPlr(encode(module, handle));
+      plain.writeInt32LE(version);
+      const encoded = encryptPlr(plain);
       reopened = openBuffer(module, encoded);
       assert.equal(getField(module, reopened, "/version"), version);
+      assert.equal(setField(module, reopened, "/version", 326), 4);
+      assert.deepEqual(encode(module, reopened), encoded);
     } finally {
       if (reopened) module._terra_player_close(reopened);
       if (handle) module._terra_player_close(handle);
@@ -756,9 +760,10 @@ test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses 
 
   let handle = 0;
   try {
-    handle = openJson(module, historicalModel(327));
+    handle = openJson(module, historicalModel(326));
     const encoded = encode(module, handle);
     const plain = decryptPlr(encoded);
+    plain.writeInt32LE(328);
     const changedLayout = encryptPlr(Buffer.concat([plain, Buffer.from([0x7f])]));
     const input = allocBytes(module, changedLayout);
     const output = module._tx_malloc(4);
@@ -837,3 +842,4 @@ test("PLR legacy item edits reject fields that old releases cannot represent", a
   }
   assert.equal(module._tx_heap_used(), baseline);
 });
+

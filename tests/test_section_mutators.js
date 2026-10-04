@@ -376,7 +376,13 @@ test("header_patch re-encodes the complete current-version header model without 
     reopened = openBytes(M, saved);
 
     assert.deepEqual(getSection(M, reopened.handle, "header"), inMemoryHeader);
-    assert.deepEqual(getSection(M, reopened.handle, "format"), inMemoryFormat);
+    assert.equal(inMemoryFormat.originalVersion, beforeFormat.version);
+    // Reopening establishes a new source document whose original release is
+    // the version written by this known-layout edit.
+    assert.deepEqual(getSection(M, reopened.handle, "format"), {
+      ...inMemoryFormat,
+      originalVersion: patch.version,
+    });
   } finally {
     closeBytes(M, reopened);
     closeBytes(M, opened);
@@ -602,3 +608,4 @@ test("native encoder OOM leaves the active world byte-identical and close reclai
   assert.equal(M._tx_bridge_heap_used() >>> 0, 0);
   assert.equal(M._tx_heap_used() >>> 0, baseline);
 });
+

@@ -202,6 +202,7 @@ int txw_queue_pixel_art(
     int32_t skip_transparent)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w) {
         tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
         return -1;
@@ -291,6 +292,7 @@ int txw_begin_pixel_art_indexed(
     uint32_t default_palette_index)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w) {
         tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
         return -1;
@@ -434,6 +436,7 @@ int txw_add_pixel_art_chunk(
     uint32_t used)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w || !w->pixel_art_indexed || !w->pixel_art_chunk_table) {
         tx_set_error("TERRAX_STATE_ERROR", "indexed pixel art not initialized");
         return -1;
@@ -582,6 +585,7 @@ int txw_add_pixel_art_chunks_bulk(
     uint32_t record_count)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w || !w->pixel_art_indexed || !w->pixel_art_chunk_table) {
         tx_set_error("TERRAX_STATE_ERROR", "indexed pixel art not initialized");
         return -1;
@@ -726,6 +730,7 @@ int txw_apply_pixel_art(
     uint32_t overrides_count)
 {
     TxWorld* w = tx_get_world(handle);
+    if (w && !tx_world_require_writable(w)) return -1;
     if (!w) {
         tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
         return -1;
@@ -992,3 +997,4 @@ int txw_apply_pixel_art(
     tx_clear_error();
     return 0;
 }
+

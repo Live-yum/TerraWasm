@@ -142,3 +142,15 @@ jobs:
             build/terrax_world_wasm_web.js
             build/terrax_world_wasm_web.wasm
           if-no-files-found: error
+
+
+      - name: Upload PLR viewer artifacts
+        if: matrix.features == 'plr'
+        uses: actions/upload-artifact@v7
+        with:
+          name: terrawasm-plr-${{ github.sha }}
+          path: |
+            build/terra.manifest.json
+            build/terrax_world_wasm_web.js
+            build/terrax_world_wasm_web.wasm
+          if-no-files-found: error
