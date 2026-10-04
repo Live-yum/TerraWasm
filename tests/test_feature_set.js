@@ -72,7 +72,10 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    assert.equal(manifest.targets.web.exports.length, 37);
+    assert.equal(manifest.targets.web.exports.length, 39);
+    for (const name of ["_txw_set_map_runtime", "_txw_use_builtin_map_runtime"]) {
+      assert.equal(manifest.targets.web.exports.includes(name), true, `${name} must support shared local map resources`);
+    }
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunk"), true);
     assert.equal(manifest.targets.node.exports.includes("_txw_add_pixel_art_chunks_bulk"), true);
     assert.equal(manifest.targets.web.exports.includes("_txw_add_pixel_art_chunk"), false);
