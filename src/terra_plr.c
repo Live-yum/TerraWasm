@@ -2753,6 +2753,8 @@ static int plr_validate_model(const PlrJsonValue *root) {
         return plr_model_error("PLR version is missing or invalid");
     if (!plr_version_supported(model_version))
         return plr_model_error("PLR version must be a positive Terraria release number");
+    if (model_version > PLR_CURRENT_KNOWN_VERSION)
+        return plr_model_error("PLR creation and conversion require a known write layout");
 
     const PlrJsonValue *metadata = plr_json_object_get(root, "metadata");
     if (!metadata) return plr_model_error("PLR metadata is missing or invalid");
@@ -3530,6 +3532,7 @@ typedef struct PlrDocumentSlot {
     uint8_t *json_cache;
     uint32_t json_cache_length;
     uint8_t dirty;
+    int32_t original_version;
 } PlrDocumentSlot;
 
 static PlrDocumentSlot g_plr_documents[PLR_MAX_DOCUMENTS];
@@ -3594,6 +3597,9 @@ static void plr_normalize_metadata_magic(PlrJsonValue *root);
 static terrax_world_status plr_commit_root(
     PlrDocumentSlot *document, PlrJsonValue *root) {
     if (!document || !root) return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+    if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
+        "future-version player supports reading and original-byte export only");
     plr_normalize_metadata_magic(root);
     if (!plr_validate_model(root)) return TERRAX_WORLD_STATUS_VALIDATION_ERROR;
     plr_json_free(document->root);
@@ -3644,6 +3650,7 @@ static terrax_world_status plr_open_parsed(
     uint32_t slot = (uint32_t)(document - g_plr_documents);
     memset(document, 0, sizeof(*document));
     document->root = root;
+    (void)plr_value_i32(plr_json_object_get(root,"version"), &document->original_version);
     document->original_encrypted = original;
     document->original_length = original_length;
     document->dirty = original == NULL ? 1u : 0u;
@@ -4014,6 +4021,9 @@ terrax_world_status terra_plr_replace_json(
     uint32_t handle, const char *json_utf8) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
+    if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
+        "future-version player supports reading and original-byte export only");
     if (!json_utf8) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -4032,6 +4042,9 @@ terrax_world_status terra_plr_set(
     uint32_t handle, const char *pointer_utf8, const char *value_json_utf8) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
+    if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
+        "future-version player supports reading and original-byte export only");
     uint32_t pointer_length = 0u;
     if (!pointer_utf8 || !value_json_utf8 ||
         !plr_cstring_length_bounded(pointer_utf8, PLR_MAX_JSON_BYTES, &pointer_length)) {
@@ -4075,6 +4088,9 @@ terrax_world_status terra_plr_set_many(
     uint32_t handle, const char *edits_json_utf8) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
+    if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
+        "future-version player supports reading and original-byte export only");
     if (!edits_json_utf8) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -4508,6 +4524,9 @@ terrax_world_status terra_plr_apply_patch_json(
     uint32_t handle, const char *patch_json_utf8) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
+    if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
+        TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
+        "future-version player supports reading and original-byte export only");
     if (!patch_json_utf8) return plr_status_error(
         TERRAX_WORLD_STATUS_INVALID_ARGUMENT, "TERRAX_INVALID_ARGUMENT", "null PLR patch JSON");
     g_plr_oom = 0;
@@ -4582,3 +4601,20 @@ terrax_world_status terra_player_apply_patch_json(
     uint32_t handle, const char *patch_json_utf8) {
     return terra_plr_apply_patch_json(handle, patch_json_utf8);
 }
+
+
+#ifdef TERRAX_TESTING
+/* Native-test-only fixture transformation: decrypt existing bytes, change only
+ * the release word, then encrypt. No production writer/ABI can call this. */
+int terrax_test_plr_fixture_version(const uint8_t* input, uint32_t length,
+        int32_t version, uint8_t* output, uint32_t capacity) {
+    uint32_t n=0,encoded_length=0;
+    uint8_t* plain=plr_decrypt(input,length,&n);
+    if(!plain || n<4u){free(plain);return 0;}
+    for(uint32_t i=0;i<4u;i++)plain[i]=(uint8_t)((uint32_t)version>>(8u*i));
+    uint8_t* encrypted=plr_encrypt(plain,n,&encoded_length);free(plain);
+    if(!encrypted || encoded_length>capacity){free(encrypted);return 0;}
+    memcpy(output,encrypted,encoded_length);free(encrypted);
+    return (int)encoded_length;
+}
+#endif

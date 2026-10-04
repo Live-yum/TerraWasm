@@ -21,6 +21,10 @@ $DirtyOutput = (& git -C $ProjectDir status --porcelain -- . ':(exclude)build')
 $SourceState = $DirtyOutput -join "`n"
 $Dirty = -not [string]::IsNullOrWhiteSpace($SourceState)
 $DirtyFlag = if ($Dirty) { "true" } else { "false" }
+# Match CMake's measured all-only compact profile. Callers can override either
+# setting explicitly, including -EnableLto:$false for controlled comparisons.
+if (-not $OptimizeFlag) { $OptimizeFlag = if ($Features -eq "all") { "-Oz" } else { "-O3" } }
+if (-not $PSBoundParameters.ContainsKey("EnableLto")) { $EnableLto = ($Features -eq "all") }
 $EnableLtoFlag = if ($EnableLto) { "ON" } else { "OFF" }
 $CmakeOptions = [ordered]@{
     TERRAX_BUILD_COMMIT = $SourceCommit
@@ -129,6 +133,7 @@ if ($Test) {
         "tests/test_removed_api_contract.js",
         "tests/test_icon_atlas_bridge.js",
         "tests/test_open_task.js",
+        "tests/test_future_readonly.js",
         "tests/test_wld_legacy.js",
         "tests/test_wld_header_versions.js",
         "tests/test_wld_legacy_api.js",

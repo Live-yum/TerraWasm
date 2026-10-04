@@ -1,4 +1,4 @@
-﻿/*
+/*
  * terra_types.h -- Internal type definitions for TerraWasm.
  *
  * All structs are plain C, no dynamic allocation in constructors.
@@ -17,6 +17,10 @@
 #endif
 
 /* ---------- Constants ---------- */
+
+#define TX_CURRENT_KNOWN_VERSION 326u
+#define TX_MAX_INPUT_BYTES 200000000u
+#define TX_MAX_WORLD_TILES 200000000u
 
 #define TX_MAX_SECTIONS        16u
 #define TX_MAX_WORLDS          8u
@@ -128,6 +132,7 @@ typedef struct TxWorld {
 
     /* Format metadata (parsed from binary) */
     uint32_t version;
+    uint32_t original_version; /* immutable source release; never a write target */
     char     magic[8];          /* "relogic" or "xindong" */
     uint8_t  format_dirty;      /* version/magic changed and must be serialized */
     uint8_t  file_type;
@@ -462,6 +467,11 @@ typedef struct TxWorld {
     TxPixelArtChunk** pixel_art_chunk_table;
     TxPixelArtChunk* pixel_art_chunks;
 } TxWorld;
+
+int tx_world_is_future(const TxWorld* world);
+int tx_world_require_writable(const TxWorld* world);
+int tx_validate_future_sections(TxWorld* world);
+int tx_validate_future_tiles(TxWorld* world);
 
 /* ---------- Pixel art color mapping entry (12 bytes, matches JS DataView layout) ---------- */
 

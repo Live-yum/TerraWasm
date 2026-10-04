@@ -616,6 +616,7 @@ static int parse_material_frame(const char* json, int jlen, int pos, TxMaterialF
 }
 
 int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTileRule** out_rules, uint32_t* out_count) {
+    if (!tx_world_require_writable(w)) return -1;
     if (w->legacy_wld) {
         tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
         return -1;

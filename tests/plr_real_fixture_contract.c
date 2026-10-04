@@ -157,33 +157,37 @@ int main(void) {
     CHECK(text_equal(edited_name, "\"real-fixture-edited\""),
         "edited name did not survive semantic encoding");
 
-    /* 326 is the latest known layout, not a numeric maximum. A newer release
-     * that still uses the same persisted layout must remain readable/writable. */
-    CHECK(terra_plr_set(reopened, "/version", "327") ==
-        TERRAX_WORLD_STATUS_OK, "unchanged-layout future PLR version was rejected");
-    char *future_version = NULL;
-    CHECK(get_field(reopened, "/version", &future_version), "read future version after edit");
-    CHECK(text_equal(future_version, "327"), "future version edit was not committed");
-
-    uint32_t future_required = 0u;
-    CHECK(terra_plr_save_to_buffer(reopened, NULL, 0u, &future_required) ==
-        TERRAX_WORLD_STATUS_OK && future_required > 0u, "future-layout-compatible save probe");
-    uint8_t *future_bytes = (uint8_t *)malloc(future_required);
-    CHECK(future_bytes != NULL, "future output allocation");
-    CHECK(terra_plr_save_to_buffer(reopened, future_bytes, future_required, &future_required) ==
-        TERRAX_WORLD_STATUS_OK, "future-layout-compatible save fetch");
+    /* The read contract attempts unchanged future layouts, but never creates
+     * a future save by serializing a known schema. */
+    CHECK(terra_plr_set(reopened, "/version", "328") != TERRAX_WORLD_STATUS_OK,
+        "future creation/conversion unexpectedly allowed");
+    extern int terrax_test_plr_fixture_version(const uint8_t*,uint32_t,int32_t,uint8_t*,uint32_t);
+    uint8_t *future_bytes = malloc(fixture_length);
+    CHECK(future_bytes != NULL, "future fixture allocation");
+    uint32_t future_required = (uint32_t)terrax_test_plr_fixture_version(
+        fixture, fixture_length, 328, future_bytes, fixture_length);
+    CHECK(future_required == fixture_length, "change only encrypted fixture version");
     uint32_t future_handle = 0u;
     CHECK(terra_plr_open_from_buffer(future_bytes, future_required, &future_handle) ==
-        TERRAX_WORLD_STATUS_OK, "unchanged-layout future PLR did not reopen");
-    char *reopened_future_version = NULL;
-    CHECK(get_field(future_handle, "/version", &reopened_future_version),
-        "read reopened future version");
-    CHECK(text_equal(reopened_future_version, "327"),
-        "reopened future PLR version changed unexpectedly");
+        TERRAX_WORLD_STATUS_OK, "unchanged future layout rejected");
+    char *future_version = NULL;
+    CHECK(get_field(future_handle, "/version", &future_version) && text_equal(future_version,"328"),
+        "future source version was not preserved");
+    CHECK(terra_plr_set(future_handle,"/version","326") == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+        "future read-only bypass through version reset");
+    CHECK(terra_plr_set_many(future_handle,"[]") == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+        "future read-only bypass through set_many");
+    CHECK(terra_plr_replace_json(future_handle,"{}") == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+        "future read-only bypass through replace_json");
+    CHECK(terra_plr_apply_patch_json(future_handle,"{}") == TERRAX_WORLD_STATUS_NOT_SUPPORTED,
+        "future read-only bypass through patch");
+    uint8_t *future_output=malloc(future_required);
+    CHECK(future_output != NULL, "future output allocation");
+    uint32_t written=0;
+    CHECK(terra_plr_save_to_buffer(future_handle,future_output,future_required,&written)==TERRAX_WORLD_STATUS_OK &&
+        written==future_required && bytes_equal(future_output,future_bytes,written),"future original export changed bytes");
+    free(future_output);free(future_bytes);free(future_version);
 
-    free(reopened_future_version);
-    free(future_bytes);
-    free(future_version);
     free(edited_name);
     free(edited);
     free(voice_variant);

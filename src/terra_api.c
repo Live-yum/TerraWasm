@@ -202,7 +202,7 @@ static uint8_t* read_file_to_heap(const char* path, uint32_t* out_len) {
     if (!f) return NULL;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
     long file_size = ftell(f);
-    if (file_size <= 0 || (uint64_t)file_size > UINT32_MAX ||
+    if (file_size <= 0 || (uint64_t)file_size > TX_MAX_INPUT_BYTES ||
         fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return NULL;
@@ -400,7 +400,7 @@ static terrax_world_status tx_activate_owned_world(
     uint32_t* out_handle) {
     slot->file = file_data;
     slot->file_len = file_len;
-    if (!parse_format(slot) || !parse_header(slot)) {
+    if (!parse_format(slot) || !parse_header(slot) || !tx_validate_future_tiles(slot)) {
         tx_abort_world_open(slot, allocation_mark);
         return TERRAX_WORLD_STATUS_PARSE_ERROR;
     }
@@ -498,6 +498,19 @@ int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
 }
 
 static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
+    if (tx_world_is_future(world)) {
+        /* Stream metadata is not a complete original WLD. Use stream save. */
+        if (world->stream_source_id) {
+            tx_set_error("TERRAX_NOT_SUPPORTED","stream world original bytes require stream save");
+            return TERRAX_WORLD_STATUS_NOT_SUPPORTED;
+        }
+        int edited=world->format_dirty || world->pixel_art_maps;
+        for (uint32_t i=0;i<TX_MAX_SECTION_OVERRIDES;i++) edited |= world->section_overrides[i].active;
+        if (edited || world->version!=world->original_version) {
+            tx_world_require_writable(world); return TERRAX_WORLD_STATUS_NOT_SUPPORTED;
+        }
+        return TERRAX_WORLD_STATUS_OK;
+    }
     if (!world->file || world->file_len == 0) {
         tx_set_error("TERRAX_STATE_ERROR", "world has no file data");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
@@ -815,7 +828,7 @@ terrax_world_status terra_world_open_from_buffer(
     uint32_t buffer_len,
     uint32_t* out_handle) {
     if (out_handle) *out_handle = 0;
-    if (!buffer || !out_handle || buffer_len < 16) {
+    if (!buffer || !out_handle || buffer_len < 16 || buffer_len > TX_MAX_INPUT_BYTES) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "null buffer or output pointer");
         return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
     }

@@ -141,6 +141,9 @@ int tx_open_preview_step(TxWorld* world, TxOpenPreviewTask* task, uint32_t recor
   while (record_budget-- > 0u && task->x < task->source_width) {
     TxTile tile;
     if (!read_tile_at(world, &task->offset, task->tile_end, &tile)) {
+      if (tx_world_is_future(world)) {
+        tx_set_error("TERRAX_FUTURE_LAYOUT_ERROR", "future tile record is truncated"); return -1;
+      }
       /* Preserve the established preview behavior: a short tile stream yields
        * the partial image rather than converting open into a new parse error. */
       task->finished = 1u;
@@ -149,6 +152,9 @@ int tx_open_preview_step(TxWorld* world, TxOpenPreviewTask* task, uint32_t recor
 
     {
       uint32_t run = (uint32_t)tile.same + 1u;
+      if (tx_world_is_future(world) && run>task->source_height-task->y) {
+        tx_set_error("TERRAX_FUTURE_LAYOUT_ERROR", "future tile RLE crosses a column"); return -1;
+      }
       if (tile_is_non_empty(&tile)) {
         uint8_t color[4];
         uint32_t px = (uint32_t)(((uint64_t)task->x * task->preview_width)
@@ -195,7 +201,12 @@ int tx_open_preview_step(TxWorld* world, TxOpenPreviewTask* task, uint32_t recor
     }
   }
 
-  if (task->x >= task->source_width) task->finished = 1u;
+  if (task->x >= task->source_width) {
+    if (tx_world_is_future(world) && task->offset!=task->tile_end) {
+      tx_set_error("TERRAX_FUTURE_LAYOUT_ERROR", "future tile section has trailing bytes"); return -1;
+    }
+    task->finished = 1u;
+  }
   if (task->finished) {
     tx_open_preview_finalize_alpha(task);
     return 1;

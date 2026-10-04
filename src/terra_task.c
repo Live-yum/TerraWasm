@@ -164,7 +164,7 @@ static terrax_world_status fail_task(TxOpenTask* task, terrax_world_status statu
 }
 
 uint32_t terra_world_open_begin(const uint8_t* buffer, uint32_t buffer_len) {
-    if (!buffer || buffer_len < 16u) {
+    if (!buffer || buffer_len < 16u || buffer_len > TX_MAX_INPUT_BYTES) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "null or truncated world buffer");
         return 0u;
     }
@@ -313,7 +313,8 @@ static terrax_world_status advance_one_unit(TxOpenTask* task) {
                 &task->preview,
                 TX_OPEN_PREVIEW_RECORDS_PER_UNIT);
             if (result < 0) {
-                return fail_task(task, TERRAX_WORLD_STATUS_INTERNAL_ERROR);
+                return fail_task(task, tx_world_is_future(task->staging_world) ?
+                    TERRAX_WORLD_STATUS_PARSE_ERROR : TERRAX_WORLD_STATUS_INTERNAL_ERROR);
             }
             {
                 uint32_t preview = tx_open_preview_progress(&task->preview);

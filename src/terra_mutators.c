@@ -931,6 +931,7 @@ static void refresh_format_positions(TxWorld *w){
     }
 
 int tx_mutate_header_patch(TxWorld *w,const char *request_text,uint32_t request_len,TxBuf *response){
+    if (!tx_world_require_writable(w)) return -1;
     if(!w||!request_text||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)return mut_error("TERRAX_INVALID_ARGUMENT","invalid header_patch request");
     if(w->legacy_wld)return mut_error("TERRAX_NOT_SUPPORTED","pre-88 worlds support reading and original-byte export only");
     if(w->pointer_count<1u)return mut_error("TERRAX_NOT_SUPPORTED","world has no header section");
@@ -1104,6 +1105,7 @@ static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32
     }
 
 int tx_mutate_replace_chests(TxWorld *w,const char *request,uint32_t request_len,TxBuf *response){
+    if (!tx_world_require_writable(w)) return -1;
     if (!w||!request||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)
         return mut_error("TERRAX_INVALID_ARGUMENT","invalid replace_chests request");
     if (w->version<294u)
@@ -1174,6 +1176,7 @@ static int parse_bestiary_array(TxJsonParser *p,TxBuf *out,int with_count,uint32
     }
 
 int tx_mutate_replace_bestiary(TxWorld *w,const char *request,uint32_t request_len,TxBuf *response){
+    if (!tx_world_require_writable(w)) return -1;
     if (!w||!request||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)
         return mut_error("TERRAX_INVALID_ARGUMENT","invalid replace_bestiary request");
     if (w->version<210u||w->pointer_count<=8u)

@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -252,11 +253,17 @@ test("real-layout PLR accepts a newer release when the persisted layout is uncha
   try {
     handle = openBuffer(module, source);
     assert.equal(getField(module, handle, "/version"), 326);
-    assert.equal(setField(module, handle, "/version", 327), 0,
-      "release 327 must be accepted when it still matches the latest known layout");
-    const encoded = encode(module, handle, { expectCached: true });
+    assert.notEqual(setField(module, handle, "/version", 328), 0);
+    const key = Buffer.from("h3y_gUyZ", "utf16le");
+    const decipher = crypto.createDecipheriv("aes-128-cbc", key, key);
+    const plain = Buffer.concat([decipher.update(source), decipher.final()]);
+    plain.writeInt32LE(328);
+    const cipher = crypto.createCipheriv("aes-128-cbc", key, key);
+    const encoded = Buffer.concat([cipher.update(plain), cipher.final()]);
     reopened = openBuffer(module, encoded);
-    assert.equal(getField(module, reopened, "/version"), 327);
+    assert.equal(getField(module, reopened, "/version"), 328);
+    assert.equal(setField(module, reopened, "/name", "blocked"), 4);
+    assert.deepEqual(encode(module, reopened), encoded);
     assert.equal(getField(module, reopened, "/taxMoney"), 113750);
     assert.equal(getField(module, reopened, "/voiceVariant"), 2);
   } finally {

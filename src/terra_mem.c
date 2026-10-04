@@ -1,5 +1,5 @@
 /*
- * terra_mem.c -- Owned allocation domains, TxBuf, hand-rolled libc.
+ * terra_mem.c -- Owned allocation domains, TxBuf, toolchain libc.
  *
  * Bridge allocations are individually owned by the JS caller. Native
  * allocations are roots tracked by a monotonic sequence and can be rewound.
@@ -9,20 +9,11 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-/* ---------- Hand-rolled libc ---------- */
-
-void* memset(void* dst, int value, unsigned long n) {
-    unsigned char* p = (unsigned char*)dst;
-    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)value;
-    return dst;
-}
-
-void* memcpy(void* dst, const void* src, unsigned long n) {
-    unsigned char* d = (unsigned char*)dst;
-    const unsigned char* s = (const unsigned char*)src;
-    for (unsigned long i = 0; i < n; i++) d[i] = s[i];
-    return dst;
-}
+/* Use the compiler toolchain's libc on native and Emscripten targets. Defining
+ * memcpy/memset as C byte loops allows -O3 loop recognition to generate a call
+ * back to the same symbol, causing infinite recursion (observed on GCC 14).
+ * Toolchain implementations also retain the platform's optimized bulk copies. */
+#include <string.h>
 
 /* ---------- String utilities ---------- */
 
@@ -514,7 +505,7 @@ static void tx_error_append_json_text(const char* text, uint32_t* position, uint
 
 void tx_set_error(const char* code, const char* message) {
     /* Preserve public NOT_FOUND/NOT_SUPPORTED statuses through dispatch. */
-    if (tx_streq_c(code, "TERRAX_NOT_SUPPORTED"))
+    if (tx_streq_c(code, "TERRAX_NOT_SUPPORTED") || tx_streq_c(code, "TERRAX_FUTURE_VERSION_READ_ONLY"))
         tx_last_status = TERRAX_WORLD_STATUS_NOT_SUPPORTED;
     else if (tx_streq_c(code, "TERRAX_NOT_FOUND") ||
              tx_streq_c(code, "TERRAX_UNKNOWN_OPERATION"))

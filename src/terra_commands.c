@@ -105,6 +105,7 @@ terrax_world_status terra_world_apply_commands(
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
 
+    if (!tx_world_require_writable(world)) return TERRAX_WORLD_STATUS_NOT_SUPPORTED;
     uint32_t count = 0u;
     terrax_world_status status = validate_commands(commands, command_len, &count);
     if (status != TERRAX_WORLD_STATUS_OK) return status;

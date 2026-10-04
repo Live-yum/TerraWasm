@@ -50,7 +50,7 @@ void txw_test_stream_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
 }
 #endif
 
-enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN };
+enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY };
 typedef struct StreamTask {
     uint32_t id, stage, is_write, old_handle;
     TxStreamEvent event;
@@ -185,7 +185,7 @@ static int source_event(StreamTask* t,uint32_t offset,uint32_t limit){
 }
 int32_t terra_world_stream_open_begin(uint32_t source_id,uint32_t size,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
-    if(!source_id||size<16)return fail("TERRAX_INVALID_ARGUMENT","invalid stream source");
+    if(!source_id||size<16||size>TX_MAX_INPUT_BYTES)return fail("TERRAX_INVALID_ARGUMENT","invalid stream source");
     StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","stream open allocation failed");
     t->stage=OPEN_FORMAT;t->source_id=source_id;t->source_size=size;
     event(t,TX_STREAM_NEED_SOURCE,0,size<65536?size:65536,NULL);return 0;
@@ -212,6 +212,7 @@ static int compact_copy(TxWorld* dest,TxWorld* source){
 int32_t terra_world_stream_pixel_begin(uint32_t handle,const TxStreamPixelSpec* spec,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
     TxWorld* source=tx_get_world(handle);
+    if(source && !tx_world_require_writable(source))return -1;
     if(!source||!valid_range(spec,sizeof(*spec))||spec->abi_version!=1||spec->reserved||!spec->width||!spec->height||source->legacy_wld||
        !spec->resolved_maps_count||spec->resolved_maps_count>65536||spec->default_palette_index>=spec->resolved_maps_count||
        !tx_bridge_range_is_valid(spec->resolved_maps_ptr,spec->resolved_maps_count*sizeof(TxPixelMap)))
@@ -265,6 +266,12 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","operation task allocation failed");
     t->operation=copy_bridge_string(name,128);t->request=copy_bridge_string(request,WINDOW);
     if(!t->operation||!t->request||!json_validate_document(t->request,(int)strlen(t->request)))goto invalid;
+    if(tx_world_is_future(source) && (!strcmp(t->operation,"batch_update_tiles") ||
+       !strcmp(t->operation,"header_patch") || !strcmp(t->operation,"replace_chests") ||
+       !strcmp(t->operation,"replace_bestiary"))) {
+        terra_world_stream_cancel(t->id);terra_world_stream_close(t->id);*out=0;
+        tx_world_require_writable(source);return -1;
+    }
     t->source=source;t->old_handle=handle;t->source_id=source->stream_source_id;
     t->source_size=source->stream_source_size?source->stream_source_size:source->file_len;
     t->original_start=t->source_id?source->stream_tile_start:source->starts[1];
@@ -277,6 +284,12 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     if(!w->stream_columns)goto invalid;
     if(source->stream_columns)memcpy(w->stream_columns,source->stream_columns,((uint32_t)w->maxTilesX+1)*4);
     int jlen=(int)strlen(t->request);
+    if(tx_world_is_future(source) && !strcmp(t->operation,"save")) {
+        /* Export immutable source ranges without rebuilding format or tiles. */
+        t->is_write=1;t->stage=ORIGINAL_COPY;t->output_offset=0;
+        w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
+        return 0;
+    }
     if(!strcmp(t->operation,"batch_update_tiles")||!strcmp(t->operation,"save")||!strcmp(t->operation,"header_patch")||!strcmp(t->operation,"replace_chests")||!strcmp(t->operation,"replace_bestiary")){
         t->is_write=1;t->output.data=tx_persistent_alloc(WINDOW);t->output.cap=WINDOW;t->output.ok=t->output.data!=NULL;if(!t->output.ok)goto invalid;
         if(!strcmp(t->operation,"batch_update_tiles")){
@@ -337,9 +350,13 @@ int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t
         if(length<16)return fail("TERRAX_TRUNCATED_FORMAT","format truncated");
         uint32_t version=u32(bytes),table=version>=135?26:6;
         if(version<88||table>length||u16(bytes+table-2)<3||u16(bytes+table-2)>TX_MAX_SECTIONS)return fail("TERRAX_BAD_POINTERS","stream requires a modern WLD");
+        if(version>INT32_MAX || (version>=135 &&
+            ((memcmp(bytes+4,"relogic",7)&&memcmp(bytes+4,"xindong",7))||bytes[11]!=2)))
+            return fail("TERRAX_BAD_METADATA","invalid world version or metadata");
         uint32_t count=u16(bytes+table-2);if(table+count*4+2>length)return fail("TERRAX_TRUNCATED_FORMAT","format pointer table truncated");
         uint32_t prior=table+count*4+2+(u16(bytes+table+count*4)+7)/8;
         if(prior>length)return fail("TERRAX_TRUNCATED_FORMAT","important bitmap truncated");
+        if(u32(bytes+table)!=prior)return fail("TERRAX_BAD_POINTERS","first pointer does not end the format");
         for(uint32_t i=0;i<count;i++){uint32_t pos=u32(bytes+table+4*i);if(pos<prior||pos>t->source_size)return fail("TERRAX_BAD_POINTERS","invalid source pointers");prior=pos;}
         t->original_start=u32(bytes+table+4);t->original_end=u32(bytes+table+8);
         t->prefix_length=t->original_start;t->suffix_length=t->source_size-t->original_end;
@@ -448,7 +465,13 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
     uint32_t budget=units?units:1;if(budget>4096)budget=4096;budget*=256;
     TxWorld* w=t->candidate;
     while(budget--&&!t->event.kind){
-        if(t->stage==OPEN_PREFIX){
+        if(t->stage==ORIGINAL_COPY){
+            if(t->output_offset==t->source_size){t->stage=DONE;continue;}
+            uint32_t n=t->source_size-t->output_offset;if(n>WINDOW)n=WINDOW;
+            if(!t->source_id){event(t,TX_STREAM_OUTPUT,t->output_offset,n,t->source->file+t->output_offset);break;}
+            if(t->input_offset!=t->output_offset || t->input_length!=n){source_event(t,t->output_offset,t->source_size);break;}
+            event(t,TX_STREAM_OUTPUT,t->output_offset,n,t->input);break;
+        }else if(t->stage==OPEN_PREFIX){
             if(t->load_offset<t->prefix_length){event(t,TX_STREAM_NEED_SOURCE,t->load_offset,t->prefix_length-t->load_offset>WINDOW?WINDOW:t->prefix_length-t->load_offset,NULL);break;}
             t->stage=OPEN_SUFFIX;t->load_offset=t->original_end;
         }else if(t->stage==OPEN_SUFFIX){
