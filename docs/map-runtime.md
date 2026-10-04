@@ -10,6 +10,16 @@ snapshot is accepted while they exist; a different snapshot or clear is
 rejected until they are no longer using the runtime. The native test entry
 `txw_set_map_runtime_from_buffer(data, len)` has the same copy semantics.
 
+`txw_use_builtin_map_runtime()` explicitly selects the compiled palette while
+preserving open world handles and unsaved edits. It releases the installed TMRT
+only when no open/stream task is pending. Worlds do not retain palette pointers;
+subsequent MAP and PNG operations read the selected palette. Selecting an already
+active compiled palette is idempotent. The original clear and replacement guards
+still apply to the setter. An adapter must discard derived media and validate its
+resource lease before and after asynchronous rendering when switching sources.
+Every changed palette invalidates the world's TXCI, icon atlas and pending
+two-call media/operation response caches. Pixel edits and world metadata remain.
+
 All integers are unsigned little-endian. The file is at most 1 MiB and has no
 padding or trailing bytes. The 96-byte header has 16 `u32` words at offsets
 0..63:

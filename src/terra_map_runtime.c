@@ -13,6 +13,7 @@ extern int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern uint32_t tx_bridge_allocation_size(uint32_t ptr);
 extern void tx_set_error(const char* code, const char* message);
 extern void tx_clear_error(void);
+extern void tx_invalidate_map_resources(void);
 
 static uint8_t* runtime_data;
 static uint32_t runtime_len;
@@ -20,6 +21,13 @@ static TxMapRuntimeLayout runtime_layout;
 
 static int runtime_in_use(void) {
     return tx_get_world_open_count() || tx_open_task_pending() || tx_stream_task_pending();
+}
+
+static void release_runtime(void) {
+    tx_persistent_free(runtime_data);
+    runtime_data = NULL;
+    runtime_len = 0u;
+    memset(&runtime_layout, 0, sizeof(runtime_layout));
 }
 
 static uint32_t le32(const uint8_t* p) {
@@ -130,10 +138,7 @@ int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len) 
     uint8_t* copy;
     if (!data && data_len == 0u) {
         if (runtime_in_use()) return invalid("close worlds and tasks before clearing TMRT");
-        tx_persistent_free(runtime_data);
-        runtime_data = NULL;
-        runtime_len = 0u;
-        memset(&runtime_layout, 0, sizeof(runtime_layout));
+        release_runtime();
         tx_clear_error();
         return 0;
     }
@@ -153,6 +158,7 @@ int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len) 
         return -1;
     }
     memcpy(copy, data, data_len);
+    tx_invalidate_map_resources();
     tx_persistent_free(runtime_data);
     runtime_data = copy;
     runtime_len = data_len;
@@ -167,6 +173,17 @@ int32_t txw_set_map_runtime(uint32_t data_ptr, uint32_t data_len) {
         tx_bridge_allocation_size(data_ptr) != data_len)
         return invalid("TMRT payload exceeds its bridge allocation");
     return txw_set_map_runtime_from_buffer((const uint8_t*)(uintptr_t)data_ptr, data_len);
+}
+
+int32_t txw_use_builtin_map_runtime(void) {
+    /* Worlds read the process palette at use time. Tasks may retain rendered
+     * rows, so never change palettes during an open or streaming task. */
+    if (runtime_data && (tx_open_task_pending() || tx_stream_task_pending()))
+        return invalid("close tasks before selecting the built-in map palette");
+    if (runtime_data) tx_invalidate_map_resources();
+    release_runtime();
+    tx_clear_error();
+    return 0;
 }
 
 int tx_map_runtime_is_set(void) { return runtime_data != NULL; }

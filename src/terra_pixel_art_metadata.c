@@ -4,7 +4,6 @@
 #include "terra_reader.h"
 #include "terra_stream_metadata.h"
 extern uint8_t* tx_persistent_alloc(uint32_t);
-extern void* memmove(void*,const void*,unsigned long);
 extern int apply_pixel_art_at(TxWorld*,uint32_t,uint32_t,TxTile*);
 extern uint16_t rd_u16le(const uint8_t*,uint32_t,uint32_t*);
 extern uint32_t rd_u32le(const uint8_t*,uint32_t,uint32_t*);

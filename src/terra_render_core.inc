@@ -13,13 +13,11 @@
 #include "terra_icon.h"
 #include "terra_color_data.h"
 #include "terra_map_runtime.h"
+#include <string.h>
 
 /* ====================================================================
  * Extern declarations from terra_mem.c
  * ==================================================================== */
-
-extern void* memset(void* dst, int value, unsigned long n);
-extern void* memcpy(void* dst, const void* src, unsigned long n);
 
 extern void  buf_init(TxBuf* b, uint32_t cap);
 extern void  buf_u8(TxBuf* b, uint8_t v);

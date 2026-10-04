@@ -29,6 +29,8 @@ typedef struct TxMapRuntimeLayout {
 int32_t txw_set_map_runtime(uint32_t data_ptr, uint32_t data_len);
 /* Native/test setter; copies data and never retains the caller's buffer. */
 int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len);
+/* Select compiled colors without closing edited worlds; requires idle tasks. */
+int32_t txw_use_builtin_map_runtime(void);
 
 int tx_map_runtime_is_set(void);
 const TxMapRuntimeLayout* tx_map_runtime_layout(void);

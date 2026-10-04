@@ -255,6 +255,7 @@ int main(int argc, char** argv) {
         assert(txw_set_map_runtime_from_buffer(data, len) == 0); /* identical bytes */
         assert(txw_set_map_runtime_from_buffer(changed, len) < 0);
         assert(txw_set_map_runtime_from_buffer(NULL, 0u) < 0);
+        assert(txw_use_builtin_map_runtime() < 0);
         assert(terra_world_open_cancel(task_id) == TERRAX_WORLD_STATUS_CANCELLED);
         assert(txw_set_map_runtime_from_buffer(changed, len) == 0);
         assert(txw_set_map_runtime_from_buffer(data, len) == 0);
@@ -266,6 +267,7 @@ int main(int argc, char** argv) {
         assert(txw_set_map_runtime_from_buffer(data, len) == 0); /* identical bytes */
         assert(txw_set_map_runtime_from_buffer(changed, len) < 0);
         assert(txw_set_map_runtime_from_buffer(NULL, 0u) < 0);
+        assert(txw_use_builtin_map_runtime() < 0);
         assert(terra_world_stream_cancel(task_id) == 0);
         assert(txw_set_map_runtime_from_buffer(changed, len) == 0);
         assert(terra_world_stream_close(task_id) == 0);
@@ -276,6 +278,11 @@ int main(int argc, char** argv) {
     data[64] = 0x7bu;
     assert(txw_set_map_runtime_from_buffer(data, len) < 0);
     assert(txw_set_map_runtime_from_buffer(NULL, 0u) < 0);
+    assert(txw_use_builtin_map_runtime() == 0);
+    assert(!tx_map_runtime_is_set() && tx_map_runtime_layout() == NULL);
+    assert(tx_get_world_open_count() == 1u);
+    assert(txw_use_builtin_map_runtime() == 0); /* already compiled */
+    assert(txw_set_map_runtime_from_buffer(data, len) == 0); /* first install again */
     tx_set_world_open_count(0u);
     assert(txw_set_map_runtime_from_buffer(data, len) == 0);
     assert(txw_set_map_runtime_from_buffer(NULL, 0u) == 0);

@@ -7,6 +7,7 @@
  */
 #include "terra_types.h"
 #include "terra_map.h"
+#include "terra_icon.h"
 #include "terra_world.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -1071,6 +1072,18 @@ static void tx_clear_media_result(TxWorld* world, int release_root) {
     world->media_result_width = 0;
     world->media_result_height = 0;
     world->media_result_kind = 0;
+}
+
+/* Palette switches invalidate only derived resources, never world edits. */
+void tx_invalidate_map_resources(void) {
+    for (uint32_t i = 0; i < TX_MAX_WORLDS; i++) {
+        TxWorld* world = &g_worlds[i];
+        if (!world->active) continue;
+        txw_clear_marker_color_index(world);
+        txw_clear_icon_atlas(world->handle);
+        tx_clear_media_result(world, 1);
+        tx_clear_cached_response(world, 1);
+    }
 }
 
 terrax_world_status terra_op_execute_json(
