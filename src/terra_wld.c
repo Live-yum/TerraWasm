@@ -624,8 +624,16 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     /* dualDungeonsSeed (>=304) */if (w->version>=304u)TX_RD_HEADER_BOOL(dualdungeonsSeed,"dualDungeonsSeed");
     if (w->version>=323u){
-        TX_RD_HEADER_BOOL(moreLightningSeed,"moreLightningSeed");
-        TX_RD_HEADER_BOOL(noLightningSeed,"noLightningSeed");
+        /* ponytail: only the old xindong empty-manifest tail is supported;
+         * other omitted-field layouts need their own fixtures. */
+        if (tx_streq_n(w->magic,7u,"xindong")&&off<len&&len-off==1u&&p[off]==0u){
+            w->moreLightningSeed=0u;
+            w->noLightningSeed=0u;
+            }
+        else{
+            TX_RD_HEADER_BOOL(moreLightningSeed,"moreLightningSeed");
+            TX_RD_HEADER_BOOL(noLightningSeed,"noLightningSeed");
+            }
         }
     /* legacySkip (>=299 && <313) */if (w->version>=299u&&w->version<313u)w->legacySkip=rd_u32le(p,len,&off);
     /* manifestJson (>=299) */if (w->version>=299u){
