@@ -1081,6 +1081,7 @@ void tx_invalidate_map_resources(void) {
         if (!world->active) continue;
         txw_clear_marker_color_index(world);
         txw_clear_icon_atlas(world->handle);
+        tx_output_clear(world);
         tx_clear_media_result(world, 1);
         tx_clear_cached_response(world, 1);
     }
