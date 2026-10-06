@@ -32,7 +32,7 @@ test("header JSON preserves the complete long manifest from original, patched an
   const expected = original.subarray(2455, original.readUInt32LE(30)).toString("utf8");
   assert.equal(Buffer.byteLength(expected), 9571);
   const parsed = JSON.parse(expected);
-  let h = 0, reopened = 0;
+  let h = 0;
   try {
     h = open(M, original);
     assert.equal(header(M, h).manifestJson, expected);
@@ -40,9 +40,9 @@ test("header JSON preserves the complete long manifest from original, patched an
     op(M, h, { patch: { spawnTileX: 123 } });
     assert.equal(header(M, h).manifestJson, expected, "metadata changes must retain the entire active-header manifest");
     const saved = save(M, h);
-    reopened = open(M, saved);
-    assert.equal(header(M, reopened).manifestJson, expected);
-    M._terra_world_close(reopened); reopened = 0;
+    assert.equal(M._terra_world_close(h), 0); h = 0;
+    h = open(M, saved);
+    assert.equal(header(M, h).manifestJson, expected);
 
     const longManifest = "\n\t" + JSON.stringify({
       padding: "电路实验😀".repeat(1800),
@@ -52,11 +52,13 @@ test("header JSON preserves the complete long manifest from original, patched an
     assert.ok(Buffer.byteLength(longManifest) > 4095);
     op(M, h, { patch: { manifestJson: longManifest } });
     assert.equal(header(M, h).manifestJson, longManifest);
-    reopened = open(M, save(M, h));
-    const actual = header(M, reopened).manifestJson;
+    const escapedSaved = save(M, h);
+    assert.equal(M._terra_world_close(h), 0); h = 0;
+    h = open(M, escapedSaved);
+    const actual = header(M, h).manifestJson;
     assert.equal(actual, longManifest, "length-bound serialization must preserve UTF-8 and JSON escapes");
     assert.deepEqual(JSON.parse(actual), JSON.parse(longManifest));
-  } finally { if (reopened) M._terra_world_close(reopened); if (h) M._terra_world_close(h); }
+  } finally { if (h) M._terra_world_close(h); }
 });
 
 test("old xindong v326 exports omit lightning flags only before an empty manifest", async () => {
