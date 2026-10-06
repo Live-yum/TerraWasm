@@ -208,6 +208,51 @@ test("header_patch changes only whitelisted booleans and survives save/reopen", 
   }
 });
 
+test("header_patch preserves WLD type 2 for both identities and rejects other types atomically", async () => {
+  const M = await TerraWorldWasm();
+  assert.ok(TEST_BYTES.readUInt32LE(0) >= 135);
+  for (const magic of ["relogic", "xindong"]) {
+    const source = Buffer.from(TEST_BYTES);
+    source.write(magic, 4, "ascii");
+    let opened = openBytes(M, source);
+    let reopened;
+    try {
+      const beforeFormat = getSection(M, opened.handle, "format");
+      const beforeHeader = getSection(M, opened.handle, "header");
+      for (const type of [0, 1, 3, 255]) {
+        const request = { patch: { type, worldName: "invalid type must not change header" } };
+        const rejected = executeOperation(M, opened.handle, "header_patch", request, { expectFailure: true });
+        assert.equal(rejected.error.code, "TERRAX_VALIDATION_ERROR");
+        const namePtr = writeCString(M, "header_patch", "stream operation");
+        const requestPtr = writeCString(M, JSON.stringify(request), "stream request");
+        const streamPtr = mustAlloc(M, 4, "stream output");
+        try {
+          M.HEAPU32[streamPtr >>> 2] = 0;
+          assert.notEqual(M._terra_world_stream_operation_begin(opened.handle, namePtr, requestPtr, streamPtr), 0);
+          assert.equal(readU32(M, streamPtr), 0, "invalid type must not publish a stream task");
+        } finally {
+          M._tx_free(streamPtr); M._tx_free(requestPtr); M._tx_free(namePtr);
+        }
+        assert.deepEqual(getSection(M, opened.handle, "format"), beforeFormat);
+        assert.deepEqual(getSection(M, opened.handle, "header"), beforeHeader);
+        assert.deepEqual(saveBytes(M, opened.handle), source, "rejected type must preserve original bytes");
+      }
+      const targetMagic = magic === "relogic" ? "xindong" : "relogic";
+      executeOperation(M, opened.handle, "header_patch", { patch: { magic: targetMagic, type: 2 } });
+      const saved = saveBytes(M, opened.handle);
+      assert.equal(saved.subarray(4, 11).toString("ascii"), targetMagic);
+      assert.equal(saved[11], 2);
+      closeBytes(M, opened);
+      opened = null;
+      reopened = openBytes(M, saved);
+      assert.equal(getSection(M, reopened.handle, "format").magic, targetMagic);
+      assert.equal(getSection(M, reopened.handle, "format").type, 2);
+    } finally {
+      closeBytes(M, reopened); closeBytes(M, opened);
+    }
+  }
+});
+
 test("header_patch accepts a magic-only string patch and preserves it after reopen", async () => {
   const M = await TerraWorldWasm();
   let opened;

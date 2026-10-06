@@ -944,6 +944,7 @@ int tx_mutate_header_patch(TxWorld *w,const char *request_text,uint32_t request_
        !patch_u64(&request,fields,field_count,"favoriteFlags",w->favorite,&favorite)||
        !patch_i64(&request,fields,field_count,"tileTypeCount",w->tile_type_count,0,UINT16_MAX,&tile_count_value))return -1;
     uint32_t next_version=(uint32_t)version_value;
+    if(next_version>=135u&&type_value!=2)return mut_error("TERRAX_VALIDATION_ERROR","WLD metadata must use world file type 2");
     if(!header_versions_compatible(w->version,next_version))return mut_error("TERRAX_NOT_SUPPORTED","version change crosses an unsupported header layout boundary");
     char magic[8];uint32_t magic_len=0u;
     if(!patch_string(&request,fields,field_count,"magic",w->magic[0]?w->magic:"relogic",magic,sizeof(magic),&magic_len))return -1;
