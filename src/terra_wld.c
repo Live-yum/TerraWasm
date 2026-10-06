@@ -1583,11 +1583,41 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->legacySkip);
     /* manifestJson */buf_cstr(b,",\"manifestJson\":");
     {
-        uint32_t moff=w->maniFestOff-header_base;
-        char manifest_buf[4096];
-        uint32_t cap=w->maniFestLen<4095u?w->maniFestLen+1u:4096u;
-        rd_string_copy(p,flen,&moff,manifest_buf,cap);
-        json_string(b,manifest_buf);
+        uint32_t moff=0u,mlen=0u;
+        if (w->version>=299u){
+            uint32_t end=w->section_overrides[0].active?flen:w->starts[1];
+            int ok=0;
+            if (w->maniFestOff>=header_base&&end<=flen){
+                moff=w->maniFestOff-header_base;
+                mlen=rd_7bit(p,end,&moff,&ok);
+                }
+            if (!ok||mlen!=w->maniFestLen||!terra_reader_has(moff,mlen,end)){
+                tx_set_error("TERRAX_STATE_ERROR","manifest is outside the active header");
+                b->ok=0;
+                return;
+                }
+            }
+        /* Copy source spans directly: manifests exceed 4 KiB, and a bounded
+         * string need not have a NUL terminator. Only JSON escapes add bytes. */
+        buf_u8(b,'"');
+        uint32_t run=0u;
+        for (uint32_t i=0u;i<mlen&&b->ok;i++){
+            uint8_t c=p[moff+i];
+            if (c=='"'||c=='\\'||c<32u){
+                buf_bytes(b,p+moff+run,i-run);
+                if (c=='"'||c=='\\'){buf_u8(b,'\\');buf_u8(b,c);}
+                else if (c=='\n')buf_cstr(b,"\\n");
+                else if (c=='\r')buf_cstr(b,"\\r");
+                else if (c=='\t')buf_cstr(b,"\\t");
+                else{
+                    static const char hex[]="0123456789abcdef";
+                    buf_cstr(b,"\\u00");buf_u8(b,hex[c>>4]);buf_u8(b,hex[c&15u]);
+                    }
+                run=i+1u;
+                }
+            }
+        if (mlen>run)buf_bytes(b,p+moff+run,mlen-run);
+        buf_u8(b,'"');
         }
     buf_cstr(b,"\n}\n");
     }
