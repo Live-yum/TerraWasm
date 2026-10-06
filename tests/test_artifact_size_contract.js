@@ -23,7 +23,7 @@ function exportHash(values) {
 }
 
 test("artifact size gate rejects manifest drift, digest drift, and oversized web artifacts", async () => {
-  const { verifyArtifactSizes, WEB_ARTIFACT_LIMITS } = await loadSizeGate();
+  const { verifyArtifactSizes, WEB_ARTIFACT_LIMITS, WEB_ARTIFACT_LIMITS_BY_FEATURE } = await loadSizeGate();
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "terrawasm-size-"));
   try {
     const wrapperPath = path.join(temp, "wrapper.js");
@@ -104,6 +104,26 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
     manifest.artifacts[0].sha256 = sha256(oversizedWrapper);
     manifest.targets.web.artifacts[0].sha256 = sha256(oversizedWrapper);
     assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wrapper size/i);
+    fs.writeFileSync(wrapperPath, wrapperBytes);
+    for (const entry of [manifest.artifacts[0], manifest.targets.web.artifacts[0]]) {
+      entry.bytes = wrapperBytes.byteLength; entry.sha256 = sha256(wrapperBytes);
+    }
+    const setWasmSize = bytes => {
+      const payload = Buffer.alloc(bytes, 7); fs.writeFileSync(wasmPath, payload);
+      for (const entry of [manifest.artifacts[1], manifest.targets.web.artifacts[1]]) {
+        entry.bytes = payload.byteLength; entry.sha256 = sha256(payload);
+      }
+    };
+    setWasmSize(WEB_ARTIFACT_LIMITS.wasmBytes + 1);
+    for (const featureSet of ["wld", "plr", "future-profile"]) {
+      manifest.build.featureSet = featureSet;
+      assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i,
+        `${featureSet} must not inherit the combined compatibility module budget`);
+    }
+    manifest.build.featureSet = "all";
+    assert.equal(verifyArtifactSizes({ root: temp, manifest }).limits.wasmBytes, 344 * 1024);
+    setWasmSize(WEB_ARTIFACT_LIMITS_BY_FEATURE.all.wasmBytes + 1);
+    assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

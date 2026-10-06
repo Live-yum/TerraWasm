@@ -6,10 +6,17 @@ import { validateManifest } from './generate-manifest.mjs'
 
 export const WEB_ARTIFACT_LIMITS = Object.freeze({
   wrapperBytes: 128 * 1024,
-  // PLR editing adds the AES/JSON implementation to the shared artifact.
-  // The default O3 build keeps the cold schema paths at -Oz and remains
-  // below this revised Mini Program budget.
+  // The production WLD and standalone PLR Mini Program modules retain this cap.
   wasmBytes: 320 * 1024,
+})
+// The combined compatibility module includes every WLD and PLR API. With the
+// pinned Emscripten 5.0.7 -Oz/LTO profile, master 8579be1 is 344389 bytes and
+// circuit ABI v1 adds 3807 bytes (348196 total). 344 KiB is the smallest 8 KiB
+// budget increment containing that measured artifact. WLD/PLR do not inherit it.
+export const WEB_ARTIFACT_LIMITS_BY_FEATURE = Object.freeze({
+  all: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 344 * 1024 }),
+  wld: WEB_ARTIFACT_LIMITS,
+  plr: WEB_ARTIFACT_LIMITS,
 })
 
 function fail(message) {
@@ -42,6 +49,7 @@ function sha256(bytes) {
 
 export function verifyArtifactSizes({ root, manifest }) {
   const validatedManifest = validateManifest(manifest)
+  const limits = WEB_ARTIFACT_LIMITS_BY_FEATURE[validatedManifest.build.featureSet] || WEB_ARTIFACT_LIMITS
   const repositoryRoot = path.resolve(root)
   const targets = [
     { label: 'Node', artifacts: validatedManifest.targets.node.artifacts },
@@ -66,11 +74,11 @@ export function verifyArtifactSizes({ root, manifest }) {
 
   const webWrapper = findArtifact(validatedManifest.targets.web.artifacts, 'wrapper')
   const webWasm = findArtifact(validatedManifest.targets.web.artifacts, 'wasm')
-  if (webWrapper.bytes > WEB_ARTIFACT_LIMITS.wrapperBytes) {
-    fail(`wrapper size ${webWrapper.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wrapperBytes} bytes`)
+  if (webWrapper.bytes > limits.wrapperBytes) {
+    fail(`wrapper size ${webWrapper.bytes} exceeds ${limits.wrapperBytes} bytes`)
   }
-  if (webWasm.bytes > WEB_ARTIFACT_LIMITS.wasmBytes) {
-    fail(`wasm size ${webWasm.bytes} exceeds ${WEB_ARTIFACT_LIMITS.wasmBytes} bytes`)
+  if (webWasm.bytes > limits.wasmBytes) {
+    fail(`wasm size ${webWasm.bytes} exceeds ${limits.wasmBytes} bytes`)
   }
 
   return {
@@ -84,7 +92,7 @@ export function verifyArtifactSizes({ root, manifest }) {
       wrapperBytes: webWrapper.bytes,
       wasmBytes: webWasm.bytes,
     },
-    limits: WEB_ARTIFACT_LIMITS,
+    limits,
   }
 }
 

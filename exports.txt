@@ -134,3 +134,13 @@ _terra_world_workspace_begin
 _terra_world_workspace_commit
 _terra_world_workspace_rollback
 _terra_world_workspace_save_to_buffer
+_terra_circuit_abi_version
+_terra_circuit_create
+_terra_circuit_close
+_terra_circuit_stats
+_terra_circuit_load
+_terra_circuit_compile
+_terra_circuit_patch
+_terra_circuit_begin
+_terra_circuit_step
+_terra_circuit_cancel

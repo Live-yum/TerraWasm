@@ -149,6 +149,7 @@ if ($Test) {
         "tests/test_section_mutators.js",
         "tests/test_signs.js",
         "tests/test_sha256.js",
+        "tests/test_circuit.js",
         "tests/test_fixture_contract.js"
     )
     $regressionTests = @($commonTests)
