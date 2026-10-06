@@ -72,7 +72,8 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    assert.equal(manifest.targets.web.exports.length, 44);
+    const configured = fs.readFileSync(path.join(ROOT, "exports.wld.web.txt"), "utf8").trim().split(/\r?\n/).filter(Boolean).sort();
+    assert.deepEqual([...manifest.targets.web.exports].sort(), configured, "verified WLD Web artifact must match the complete declared export profile");
     for (const name of ["_txw_set_map_runtime", "_txw_use_builtin_map_runtime"]) {
       assert.equal(manifest.targets.web.exports.includes(name), true, `${name} must support shared local map resources`);
     }

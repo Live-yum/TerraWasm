@@ -9,6 +9,7 @@
 #include "terra_map.h"
 #include "terra_icon.h"
 #include "terra_world.h"
+#include "terra_checkpoint.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -89,6 +90,10 @@ extern void txw_clear_pixel_art_state(TxWorld* w);
 static TxWorld g_worlds[TX_MAX_WORLDS];
 extern void tx_stream_release_world(TxWorld* world);
 static uint32_t g_next_generation = 1;
+static TxWorld g_workspace_checkpoint;
+static uint32_t g_workspace_token = 0, g_next_workspace_token = 1;
+extern int tx_stream_has_task(void);
+extern int tx_world_has_task(void);
 
 #define TX_HANDLE_SLOT_BITS 8u
 #define TX_HANDLE_SLOT_MASK ((1u << TX_HANDLE_SLOT_BITS) - 1u)
@@ -468,6 +473,10 @@ terrax_world_status terra_world_close(
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
 
+    if (g_workspace_token) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction before closing its world");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     uint32_t allocation_mark = world->allocation_mark;
     tx_output_clear(world);
     if (world->icon_atlas.rgba) tx_internal_free(world->icon_atlas.rgba);
@@ -496,6 +505,65 @@ int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
     *out_handle = g_worlds[0].handle;
     return 1;
 }
+
+
+uint32_t terra_world_workspace_abi_version(void) { return 1u; }
+terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint32_t* out_bytes) {
+    if (out_bytes) *out_bytes = 0;
+    TxWorld* world = tx_get_world(handle);
+    if (!world) return tx_invalid_handle();
+    if (!out_bytes) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    if (g_workspace_token || tx_stream_has_task() || tx_world_has_task()) {
+        tx_set_error("TERRAX_STATE_ERROR", "workspace checkpoint requires an idle owner");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
+    void* roots[] = { world->stream_owned ? world->file : NULL, world->stream_owned ? world->stream_columns : NULL };
+    *out_bytes = tx_checkpoint_bytes(roots, 2);
+    return *out_bytes ? TERRAX_WORLD_STATUS_OK : TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+}
+terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_bytes, uint32_t* out_token) {
+    if (out_token) *out_token = 0;
+    if (!out_token) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    uint32_t required = 0;
+    terrax_world_status status = terra_world_workspace_checkpoint_size(handle, &required);
+    if (status != TERRAX_WORLD_STATUS_OK) return status;
+    TxWorld* world = tx_get_world(handle);
+    if (required > max_bytes) {
+        tx_set_error("TERRAX_WASM_OOM", "workspace rollback checkpoint exceeds reserved memory");
+        return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+    }
+    /* Derived output caches are rebuildable, unlike edits and undo state. Drop
+     * them before the snapshot so independent persistent caches need no copies. */
+    tx_output_clear(world);
+    tx_reclaim_transients();
+    void* roots[] = { world->stream_owned ? world->file : NULL, world->stream_owned ? world->stream_columns : NULL };
+    if (!tx_checkpoint_begin(roots, 2, max_bytes)) {
+        tx_set_error("TERRAX_WASM_OOM", "cannot allocate workspace rollback checkpoint");
+        return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+    }
+    g_workspace_checkpoint = *world;
+    g_workspace_token = g_next_workspace_token++;
+    if (!g_workspace_token) g_workspace_token = g_next_workspace_token++;
+    *out_token = g_workspace_token;
+    return TERRAX_WORLD_STATUS_OK;
+}
+static terrax_world_status tx_finish_workspace(uint32_t handle, uint32_t token, int rollback) {
+    TxWorld* world = tx_get_world(handle);
+    if (!world) return tx_invalid_handle();
+    if (!token || token != g_workspace_token || handle != g_workspace_checkpoint.handle) {
+        tx_set_error("TERRAX_STATE_ERROR", "workspace checkpoint token is stale or invalid");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
+    tx_checkpoint_finish(rollback);
+    if (rollback) *world = g_workspace_checkpoint;
+    memset(&g_workspace_checkpoint, 0, sizeof(g_workspace_checkpoint));
+    g_workspace_token = 0;
+    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
+    tx_clear_error();
+    return TERRAX_WORLD_STATUS_OK;
+}
+terrax_world_status terra_world_workspace_commit(uint32_t handle, uint32_t token) { return tx_finish_workspace(handle, token, 0); }
+terrax_world_status terra_world_workspace_rollback(uint32_t handle, uint32_t token) { return tx_finish_workspace(handle, token, 1); }
 
 static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
     if (tx_world_is_future(world)) {

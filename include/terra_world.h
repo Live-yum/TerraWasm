@@ -41,6 +41,15 @@ terrax_world_status terra_world_open_from_buffer(
     uint32_t buffer_len,
     uint32_t* out_handle);
 
+/* One idle-owner transaction; rollback/commit allocate nothing. The token
+ * protects this exact handle, rejects nesting and cannot outlive the world. */
+uint32_t terra_world_workspace_abi_version(void);
+terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint32_t* out_bytes);
+terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_bytes, uint32_t* out_token);
+terrax_world_status terra_world_workspace_save_to_buffer(uint32_t handle, uint8_t* output, uint32_t capacity, uint32_t* out_required);
+terrax_world_status terra_world_workspace_commit(uint32_t handle, uint32_t token);
+terrax_world_status terra_world_workspace_rollback(uint32_t handle, uint32_t token);
+
 /*
  * Info
  */

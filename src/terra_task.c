@@ -2,6 +2,7 @@
  * terra_task.c -- Cooperative, resumable world-open task ABI.
  */
 #include "terra_task.h"
+#include "terra_checkpoint.h"
 #include "terra_types.h"
 #include "terra_world.h"
 #include "terra_render_task.h"
@@ -109,7 +110,10 @@ int tx_open_task_pending(void) {
     return 0;
 }
 
+int tx_world_has_task(void) { return has_active_task(); }
+
 static TxOpenTask* claim_task_slot(void) {
+    if (tx_checkpoint_active()) { tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction before opening another task"); return NULL; }
     /* TerraWasm exposes a one-world runtime contract. Serializing open tasks
      * also makes native allocation rewind ownership unambiguous on cancel. */
     if (has_active_task()) {

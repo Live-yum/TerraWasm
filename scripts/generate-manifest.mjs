@@ -56,6 +56,8 @@ function validateStreamAbi(stream, exports, label) {
   for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
 }
 
+export const WORLD_WORKSPACE_EXPORTS = ['abi_version','checkpoint_size','begin','commit','rollback','save_to_buffer'].map(name => `_terra_world_workspace_${name}`)
+const WORLD_WORKSPACE = {version:1,checkpoint:true,rollback:true}
 export const PIXEL_WORKSPACE_EXPORTS = ['abi_version', 'create', 'close', 'stats', 'tx_begin', 'tx_commit', 'tx_rollback', 'palette_add', 'palette_read', 'nearest', 'match_colors', 'cells', 'stroke', 'fill', 'replace', 'transform', 'import_rgba', 'read_rect', 'read_block', 'raster_block', 'block_versions', 'undo', 'redo', 'checkpoint', 'clear_history'].map(name => `_terra_pixel_workspace_${name}`)
 export const PLAYER_WORKSPACE_EXPORTS = ['workspace_abi_version', 'get_keys', 'get', 'set_many', 'replace_json', 'release_caches'].map(name => `_terra_plr_${name}`)
 const PIXEL_WORKSPACE = {version:1,blockSide:64,authoritative:true}
@@ -67,6 +69,8 @@ function workspaceAbi(value, expected, exports, required, label) {
   for (const name of required) if (!exports.includes(name)) fail(`${label} workspace export ${name} is missing`)
 }
 function validateWorkspaces(abi, exports, featureSet, label) {
+  workspaceAbi(abi.worldWorkspace, WORLD_WORKSPACE, exports, WORLD_WORKSPACE_EXPORTS, `${label} world`)
+  if (abi.worldWorkspace && !['all','wld'].includes(featureSet)) fail(`${label} world workspace feature mismatch`)
   workspaceAbi(abi.pixelWorkspace, PIXEL_WORKSPACE, exports, PIXEL_WORKSPACE_EXPORTS, `${label} pixel`)
   workspaceAbi(abi.playerWorkspace, PLAYER_WORKSPACE, exports, PLAYER_WORKSPACE_EXPORTS, `${label} player`)
   if (abi.pixelWorkspace && !['all','wld'].includes(featureSet)) fail(`${label} pixel workspace feature mismatch`)
@@ -74,12 +78,12 @@ function validateWorkspaces(abi, exports, featureSet, label) {
 }
 function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
-  for (const [kind, expected, enabled] of [['pixel',PIXEL_WORKSPACE,['all','wld'].includes(identity.featureSet)],['player',PLAYER_WORKSPACE,['all','plr'].includes(identity.featureSet)]]) {
+  for (const [kind, expected, enabled] of [['world',WORLD_WORKSPACE,['all','wld'].includes(identity.featureSet)],['pixel',PIXEL_WORKSPACE,['all','wld'].includes(identity.featureSet)],['player',PLAYER_WORKSPACE,['all','plr'].includes(identity.featureSet)]]) {
     const version = identity[`${kind}WorkspaceAbiVersion`]
     if (version === undefined) continue // genuine older producer, no workspace claim
     if (version !== (enabled ? 1 : 0)) fail(`${label} ${kind} workspace identity version mismatch`)
     if (version === 1) {
-      const marker = kind === 'pixel' ? '_terra_pixel_workspace_abi_version' : '_terra_plr_workspace_abi_version'
+      const marker = kind === 'world' ? '_terra_world_workspace_abi_version' : kind === 'pixel' ? '_terra_pixel_workspace_abi_version' : '_terra_plr_workspace_abi_version'
       if (typeof module[marker] !== 'function' || module[marker]() !== version) fail(`${label} compiled ${kind} workspace version mismatch`)
       abi[`${kind}Workspace`] = {...expected}
     }
@@ -276,7 +280,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   }
   if (!targets.node || !targets.web) fail('both Node and Web builds are required')
   const identity = identities.web
-  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion']) {
+  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')
