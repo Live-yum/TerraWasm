@@ -89,6 +89,7 @@ static const char g_capabilities[] =
 static const char g_build_info_json[] =
     "{\"abiVersion\":" TERRAX_STRINGIFY(TERRAX_ABI_VERSION)
     TERRAX_STREAM_IDENTITY_JSON
+    ",\"worldWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"pixelWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"playerWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_PLR)
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""

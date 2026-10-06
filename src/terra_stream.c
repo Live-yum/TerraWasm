@@ -1,5 +1,6 @@
 /* Cooperative file-backed WLD reader/writer. No whole tile or output buffer. */
 #include "terra_stream.h"
+#include "terra_checkpoint.h"
 #include "terra_stream_metadata.h"
 #include "terra_world.h"
 #include "terra_render_task.h"
@@ -132,7 +133,7 @@ int tx_stream_task_pending(void) {
 #ifdef TERRAX_TESTING
 uint32_t txw_test_stream_begin_for_runtime(void) {
     StreamTask* task;
-    if (current) return 0u;
+    if (current || tx_checkpoint_active()) return 0u;
     task = (StreamTask*)tx_persistent_alloc(sizeof(*task));
     if (!task) return 0u;
     memset(task, 0, sizeof(*task));
@@ -166,6 +167,7 @@ static int validate_footer(TxWorld* w){
         return fail("TERRAX_BAD_FOOTER","world footer identity is invalid");
     return 0;
 }
+int tx_stream_has_task(void) { return current != NULL; }
 static StreamTask* task(uint32_t id){return current&&current->id==id&&current->stage!=CANCELLED?current:NULL;}
 static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;}
 static void event(StreamTask* t,uint32_t kind,uint32_t offset,uint32_t length,const void* data){
@@ -209,6 +211,7 @@ static char* copy_bridge_string(const char* p,uint32_t maximum){
     char* result=(char*)tx_persistent_alloc(n+1);if(result)memcpy(result,p,n+1);return result;
 }
 static StreamTask* new_task(uint32_t* out){
+    if(tx_checkpoint_active()){fail("TERRAX_STATE_ERROR","finish workspace transaction before streaming");return NULL;}
     if(out&&valid_range(out,4))*out=0;
     if(!valid_range(out,4)||current){fail("TERRAX_STATE_ERROR","invalid stream output pointer or another task is active");return NULL;}
     StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t)return NULL;

@@ -365,6 +365,8 @@ else()
             add_terra_contract(terra_wld_version_patch_contract tests/wld_version_patch_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_map_runtime_contract tests/map_runtime_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_world_checkpoint_contract tests/world_checkpoint_contract.c ZLIB::ZLIB)
+            target_compile_definitions(terra_world_checkpoint_contract PRIVATE TERRAX_TESTING)
             add_terra_contract(terra_pixel_workspace_contract tests/pixel_workspace_contract.c)
             target_compile_definitions(terra_pixel_workspace_contract PRIVATE TERRAX_TESTING)
 

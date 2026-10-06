@@ -5,6 +5,7 @@
  * allocations are roots tracked by a monotonic sequence and can be rewound.
  */
 #include "terra_types.h"
+#include "terra_checkpoint.h"
 #include <limits.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -69,6 +70,16 @@ union TxAllocHeader {
 static uint32_t tx_test_allocation_limit=UINT32_MAX;
 void txw_test_allocation_limit(uint32_t n){tx_test_allocation_limit=n;}
 #endif
+typedef struct TxCheckpointEntry {
+    TxAllocHeader* root;
+    uint8_t* saved;
+    uint32_t freed;
+} TxCheckpointEntry;
+typedef struct TxCheckpoint {
+    uint32_t count;
+    TxCheckpointEntry entries[];
+} TxCheckpoint;
+static TxCheckpoint* tx_checkpoint = NULL;
 static uint32_t tx_world_open_count = 0;
 static TxAllocHeader* tx_bridge_head = NULL;
 static TxAllocHeader* tx_bridge_tail = NULL;
@@ -194,6 +205,10 @@ static void tx_unlink_root(TxAllocHeader* header, uint32_t domain) {
 
 static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
     if (!header) return;
+    if (tx_checkpoint && header->root.reserved > 1u) {
+        ((TxCheckpointEntry*)header->root.reserved)->freed = 1u;
+        return; /* Pinned baseline memory must survive OOM and rollback. */
+    }
     tx_unlink_root(header, domain);
     uint64_t* live = tx_domain_live(domain);
     if (*live >= header->root.size) *live -= header->root.size;
@@ -219,7 +234,7 @@ static void* tx_new_root(uint32_t size, uint32_t domain) {
     header->root.self = (uintptr_t)header;
     header->root.prev = NULL;
     header->root.next = NULL;
-    header->root.reserved = 0;
+    header->root.reserved = tx_checkpoint && domain != TX_DOMAIN_BRIDGE ? 1u : 0u;
     tx_append_root(header, domain);
     if (domain == TX_DOMAIN_NATIVE) header->root.sequence = ++tx_native_sequence;
     uint64_t* live = tx_domain_live(domain);
@@ -289,6 +304,13 @@ static void* tx_internal_realloc_domain(
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
     uint32_t old_size = old->root.size;
+    if (tx_checkpoint && old->root.reserved > 1u) {
+        void* replacement = tx_new_root(size ? size : 1u, domain);
+        if (!replacement) return NULL;
+        memcpy(replacement, payload, size < old_size ? size : old_size);
+        ((TxCheckpointEntry*)old->root.reserved)->freed = 1u;
+        return replacement;
+    }
     TxAllocHeader* prev = old->root.prev;
     TxAllocHeader* next = old->root.next;
     TxAllocHeader* resized = (TxAllocHeader*)realloc(old, total);
@@ -370,9 +392,11 @@ uint32_t tx_mark(void) {
 }
 
 void tx_rewind(uint32_t mark) {
-    while (tx_native_tail && tx_native_tail->root.sequence > mark) {
-        TxAllocHeader* tail = tx_native_tail;
-        tx_release_root(tail, TX_DOMAIN_NATIVE);
+    TxAllocHeader* root = tx_native_tail;
+    while (root && root->root.sequence > mark) {
+        TxAllocHeader* previous = root->root.prev;
+        tx_release_root(root, TX_DOMAIN_NATIVE);
+        root = previous;
     }
     if (!tx_native_head && mark == 0u) tx_native_sequence = 0u;
 }
@@ -384,6 +408,77 @@ void tx_reset_heap(void) {
     tx_last_len = 0;
     tx_last_width = 0;
     tx_last_height = 0;
+}
+
+
+/* A world checkpoint never relocates its baseline roots. Existing realloc/free
+ * operations become copy/deferred-free, while subsequent allocations can be
+ * discarded without allocating on rollback. Independent persistent owners are
+ * neither copied nor pinned. The owner serializes all mutations until finish. */
+int tx_checkpoint_active(void) { return tx_checkpoint != NULL; }
+static int tx_checkpoint_selected(TxAllocHeader* root, void* const* roots, uint32_t count) {
+    if (root->root.domain == TX_DOMAIN_NATIVE) return 1;
+    void* payload = (uint8_t*)root + sizeof(TxAllocHeader);
+    for (uint32_t i = 0; i < count; i++) if (roots[i] == payload) return 1;
+    return 0;
+}
+uint32_t tx_checkpoint_bytes(void* const* roots, uint32_t count) {
+    if (tx_checkpoint || (count && !roots)) return 0;
+    uint64_t bytes = sizeof(TxCheckpoint);
+    for (uint32_t domain_index = 0; domain_index < 2; domain_index++) {
+        TxAllocHeader* root = domain_index ? tx_persistent_head : tx_native_head;
+        for (; root; root = root->root.next) if (tx_checkpoint_selected(root, roots, count)) {
+            bytes += sizeof(TxCheckpointEntry) + root->root.size;
+            if (bytes > UINT32_MAX) return 0;
+        }
+    }
+    return (uint32_t)bytes;
+}
+int tx_checkpoint_begin(void* const* roots, uint32_t count, uint32_t max_bytes) {
+    uint32_t required = tx_checkpoint_bytes(roots, count);
+    if (!required || required > max_bytes) return 0;
+    TxCheckpoint* checkpoint = (TxCheckpoint*)tx_new_root(required, TX_DOMAIN_PERSISTENT);
+    if (!checkpoint) return 0;
+    uint32_t entries = 0;
+    for (uint32_t d = 0; d < 2; d++) for (TxAllocHeader* root = d ? tx_persistent_head : tx_native_head; root; root = root->root.next)
+        if (tx_checkpoint_selected(root, roots, count)) entries++;
+    checkpoint->count = entries;
+    uint8_t* bytes = (uint8_t*)(checkpoint->entries + entries);
+    uint32_t i = 0;
+    for (uint32_t d = 0; d < 2; d++) for (TxAllocHeader* root = d ? tx_persistent_head : tx_native_head; root; root = root->root.next) {
+        if (!tx_checkpoint_selected(root, roots, count)) continue;
+        TxCheckpointEntry* entry = &checkpoint->entries[i++];
+        entry->root = root; entry->saved = bytes; entry->freed = 0;
+        memcpy(bytes, (uint8_t*)root + sizeof(TxAllocHeader), root->root.size);
+        bytes += root->root.size; root->root.reserved = (uintptr_t)entry;
+    }
+    tx_checkpoint = checkpoint;
+    return 1;
+}
+int tx_checkpoint_finish(int rollback) {
+    TxCheckpoint* checkpoint = tx_checkpoint;
+    if (!checkpoint) return 0;
+    tx_checkpoint = NULL; /* All following frees are physical; none allocate. */
+    for (uint32_t d = 0; d < 2; d++) {
+        TxAllocHeader* root = d ? tx_persistent_head : tx_native_head;
+        while (root) {
+            TxAllocHeader* next = root->root.next;
+            if (root->root.reserved == 1u) {
+                root->root.reserved = 0;
+                if (rollback) tx_release_root(root, root->root.domain);
+            }
+            root = next;
+        }
+    }
+    for (uint32_t i = 0; i < checkpoint->count; i++) {
+        TxCheckpointEntry* entry = &checkpoint->entries[i];
+        TxAllocHeader* root = entry->root;
+        root->root.reserved = 0;
+        if (rollback) memcpy((uint8_t*)root + sizeof(TxAllocHeader), entry->saved, root->root.size);
+        else if (entry->freed) tx_release_root(root, root->root.domain);
+    }
+    tx_release_root(tx_root_from_owned_payload(checkpoint, TX_DOMAIN_PERSISTENT), TX_DOMAIN_PERSISTENT);
+    return 1;
 }
 
 /* ---------- Heap mark management ---------- */
