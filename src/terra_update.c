@@ -660,29 +660,46 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
         for (int r = 0; r < rule_count; r++) {
             init_tile_rule(&rules[r]);
             int elem_pos = json_array_element(request, jlen, rules_pos, r);
-            if (elem_pos < 0) continue;
+            if (elem_pos < 0 || request[elem_pos] != '{') {
+                tx_internal_free(rules);
+                tx_set_error("TERRAX_VALIDATION_ERROR", "each tile rule must be an object");
+                return -1;
+            }
             int elem_end = json_skip_value(request, jlen, elem_pos);
             int elem_len = elem_end > elem_pos ? elem_end - elem_pos : 0;
 
             int where_pos = json_find_key(request + elem_pos, elem_len, "where");
             if (where_pos >= 0) {
                 where_pos += elem_pos;
+                if (request[where_pos] != '{' && !json_is_null(request, jlen, where_pos)) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "where must be an object or null");
+                    return -1;
+                }
                 int where_end = json_skip_value(request, elem_end, where_pos);
                 int where_len = where_end > where_pos ? where_end - where_pos : 0;
                 int32_t iv; int bv; int wp;
-                #define TRY_MATCH_INT(field, key) \
+                /* A malformed predicate must fail closed, never retain the -1
+                 * wildcard and broaden a destructive update to every tile.
+                 * Preserve explicit null/-1 sentinels and bound stored fields
+                 * before apply_tile_patch narrows them to WLD integers. */
+                #define TRY_MATCH_INT(field, key, maximum) \
                     wp = json_find_key(request + where_pos, where_len, key); \
                     if (wp >= 0 && !json_is_null(request, jlen, wp + where_pos)) { \
-                        if (json_extract_int(request, jlen, wp + where_pos, &iv)) \
-                            rules[r].field = iv; \
+                        if (!json_extract_int(request, jlen, wp + where_pos, &iv) || iv < -1 || iv > maximum) { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", "where." key " must be an integer from -1 to " #maximum); \
+                            return -1; \
+                        } \
+                        rules[r].field = iv; \
                     }
-                TRY_MATCH_INT(type, "type")
-                TRY_MATCH_INT(wall, "wall")
-                TRY_MATCH_INT(liquid_amount, "liquid_amount")
-                TRY_MATCH_INT(liquid_type, "liquid_type")
-                TRY_MATCH_INT(brick_style, "brick_style")
-                TRY_MATCH_INT(tile_color, "tile_color")
-                TRY_MATCH_INT(wall_color, "wall_color")
+                TRY_MATCH_INT(type, "type", 65535)
+                TRY_MATCH_INT(wall, "wall", 65535)
+                TRY_MATCH_INT(liquid_amount, "liquid_amount", 255)
+                TRY_MATCH_INT(liquid_type, "liquid_type", 4)
+                TRY_MATCH_INT(brick_style, "brick_style", 7)
+                TRY_MATCH_INT(tile_color, "tile_color", 255)
+                TRY_MATCH_INT(wall_color, "wall_color", 255)
                 #undef TRY_MATCH_INT
                 wp = json_find_key(request + where_pos, where_len, "platform_style");
                 if (wp >= 0) {
@@ -719,8 +736,13 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                     if (wp >= 0 && !json_is_null(request, jlen, wp + where_pos)) { \
                         if (json_extract_bool(request, jlen, wp + where_pos, &bv)) \
                             rules[r].field = bv; \
-                        else if (json_extract_int(request, jlen, wp + where_pos, &iv)) \
+                        else if (json_extract_int(request, jlen, wp + where_pos, &iv) && iv >= -1 && iv <= 1) \
                             rules[r].field = iv; \
+                        else { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", "where." key " must be boolean, 0/1, or -1"); \
+                            return -1; \
+                        } \
                     }
                 TRY_MATCH_BOOL(is_active, "is_active")
                 TRY_MATCH_BOOL(wire_red, "wire_red")
@@ -767,22 +789,31 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
             int patch_pos = json_find_key(request + elem_pos, elem_len, "patch");
             if (patch_pos >= 0) {
                 patch_pos += elem_pos;
+                if (request[patch_pos] != '{' && !json_is_null(request, jlen, patch_pos)) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "patch must be an object or null");
+                    return -1;
+                }
                 int patch_end = json_skip_value(request, elem_end, patch_pos);
                 int patch_len = patch_end > patch_pos ? patch_end - patch_pos : 0;
                 int32_t iv; int bv; int pp;
-                #define TRY_PATCH_INT(field, key) \
+                #define TRY_PATCH_INT(field, key, maximum) \
                     pp = json_find_key(request + patch_pos, patch_len, key); \
                     if (pp >= 0 && !json_is_null(request, jlen, pp + patch_pos)) { \
-                        if (json_extract_int(request, jlen, pp + patch_pos, &iv)) \
-                            rules[r].field = iv; \
+                        if (!json_extract_int(request, jlen, pp + patch_pos, &iv) || iv < -1 || iv > maximum) { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", "patch." key " must be an integer from -1 to " #maximum); \
+                            return -1; \
+                        } \
+                        rules[r].field = iv; \
                     }
-                TRY_PATCH_INT(patch_type, "type")
-                TRY_PATCH_INT(patch_wall, "wall")
-                TRY_PATCH_INT(patch_liquid_amount, "liquid_amount")
-                TRY_PATCH_INT(patch_liquid_type, "liquid_type")
-                TRY_PATCH_INT(patch_brick_style, "brick_style")
-                TRY_PATCH_INT(patch_tile_color, "tile_color")
-                TRY_PATCH_INT(patch_wall_color, "wall_color")
+                TRY_PATCH_INT(patch_type, "type", 65535)
+                TRY_PATCH_INT(patch_wall, "wall", 65535)
+                TRY_PATCH_INT(patch_liquid_amount, "liquid_amount", 255)
+                TRY_PATCH_INT(patch_liquid_type, "liquid_type", 4)
+                TRY_PATCH_INT(patch_brick_style, "brick_style", 7)
+                TRY_PATCH_INT(patch_tile_color, "tile_color", 255)
+                TRY_PATCH_INT(patch_wall_color, "wall_color", 255)
                 #undef TRY_PATCH_INT
                 pp = json_find_key(request + patch_pos, patch_len, "platform_style");
                 if (pp >= 0) {
@@ -832,8 +863,13 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                     if (pp >= 0 && !json_is_null(request, jlen, pp + patch_pos)) { \
                         if (json_extract_bool(request, jlen, pp + patch_pos, &bv)) \
                             rules[r].field = bv; \
-                        else if (json_extract_int(request, jlen, pp + patch_pos, &iv)) \
+                        else if (json_extract_int(request, jlen, pp + patch_pos, &iv) && iv >= -1 && iv <= 1) \
                             rules[r].field = iv; \
+                        else { \
+                            tx_internal_free(rules); \
+                            tx_set_error("TERRAX_VALIDATION_ERROR", "patch." key " must be boolean, 0/1, or -1"); \
+                            return -1; \
+                        } \
                     }
                 TRY_PATCH_BOOL(patch_is_active, "is_active")
                 TRY_PATCH_BOOL(patch_wire_red, "wire_red")
@@ -889,10 +925,14 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                 return -1;
             }
             int limit_pos = json_find_key(request + elem_pos, elem_len, "limit");
-            if (limit_pos >= 0) {
+            if (limit_pos >= 0 && !json_is_null(request, jlen, limit_pos + elem_pos)) {
                 int32_t lv;
-                if (json_extract_int(request, jlen, limit_pos + elem_pos, &lv) && lv >= 0)
-                    rules[r].limit = (uint32_t)lv;
+                if (!json_extract_int(request, jlen, limit_pos + elem_pos, &lv) || lv < 0) {
+                    tx_internal_free(rules);
+                    tx_set_error("TERRAX_VALIDATION_ERROR", "limit must be an integer from 0 to 2147483647");
+                    return -1;
+                }
+                rules[r].limit = (uint32_t)lv;
             }
             if (rules[r].material.present &&
                 (rules[r].material.width != 1 || rules[r].material.height != 1) && rules[r].limit != 0) {
