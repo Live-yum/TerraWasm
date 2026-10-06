@@ -1,6 +1,52 @@
 'use strict';
 const test=require('node:test'), assert=require('node:assert/strict'),fs=require('node:fs');
 const {getPrimaryWorldPath}=require('./helpers/fixtures');
+test('streamed sources above 200 MB retain a bounded metadata image and signed WLD offsets',async()=>{
+ const {fixture}=require('./generate-stream-fixtures');
+ const base=fixture(123,321,true),count=base.readUInt16LE(24),tileStart=base.readUInt32LE(30),tileEnd=base.readUInt32LE(34);
+ const prefix=Buffer.from(base.subarray(0,tileStart)),suffix=base.subarray(tileEnd),dimensions=Buffer.alloc(8);
+ dimensions.writeInt32LE(321);dimensions.writeInt32LE(123,4);
+ const position=prefix.indexOf(dimensions,base.readUInt32LE(26));assert.ok(position>=0);
+ prefix.writeInt32LE(7200,position);prefix.writeInt32LE(15200,position+4);
+ // 109,440,000 independent two-byte tile records. The virtual range source
+ // represents a valid 218 MB world, but never allocates the tile section.
+ const tileBytes=15200*7200*2,delta=tileBytes-(tileEnd-tileStart),size=prefix.length+tileBytes+suffix.length;
+ for(let index=2;index<count;index++)prefix.writeUInt32LE(base.readUInt32LE(26+index*4)+delta,26+index*4);
+ assert.ok(size>200000000&&size<0x80000000);
+ function range(offset,length){
+  const out=Buffer.alloc(length);assert.ok(length<=1048576&&offset+length<=size);
+  for(let i=0;i<length;i++){
+   const at=offset+i;
+   out[i]=at<prefix.length?prefix[at]:at>=prefix.length+tileBytes?suffix[at-prefix.length-tileBytes]:(at-prefix.length)%2?1+(((at-prefix.length)>>1)&1):2;
+  }
+  return out;
+ }
+ const M=await require('../build/terrax_world_wasm_web.js')({wasmBinary:fs.readFileSync(require.resolve('../build/terrax_world_wasm_web.wasm'))});
+ const hp=M._tx_malloc(4),ep=M._tx_malloc(48),input=M._tx_malloc(1048576);assert.ok(hp&&ep&&input);
+ let task=0,world=0,maxRead=0,totalRead=0;
+ try{
+  assert.equal(M._terra_world_stream_open_begin(1,0x80000000,hp),-1,'WLD offsets remain signed Int32');
+  assert.equal(M._terra_world_stream_open_begin(1,size,hp),0);task=M.HEAPU32[hp/4];
+  for(;;){
+   assert.equal(M._terra_world_stream_step(task,64,ep),0);
+   const e=Array.from(M.HEAPU32.subarray(ep/4,ep/4+12));
+   if(e[1]===4)break;
+   if(e[1]===0)continue;
+   assert.equal(e[1],1);assert.equal(e[2],1);
+   maxRead=Math.max(maxRead,e[4]);totalRead+=e[4];M.HEAPU8.set(range(e[3],e[4]),input);
+   assert.equal(M._terra_world_stream_supply_source(task,1,e[3],input,e[4]),0);
+  }
+  assert.equal(M._terra_world_stream_adopt(task,1,hp),0);world=M.HEAPU32[hp/4];
+  assert.equal(M.HEAPU8.byteLength,64*1024*1024,'opening a large source does not allocate the file in Wasm');
+  assert.ok(maxRead<=1048576,'each tile-index or metadata read stays within one MiB');
+  assert.ok(totalRead>=tileBytes&&totalRead<=size+3*1048576,'the column index scans the source without retaining its tile bytes');
+ }finally{
+  if(task)assert.equal(M._terra_world_stream_close(task),0);
+  if(world)assert.equal(M._terra_world_close(world),0);
+  for(const pointer of [input,ep,hp])M._tx_free(pointer);
+  assert.equal(M._tx_native_heap_used(),0);assert.equal(M._tx_bridge_heap_used(),0);
+ }
+});
 test('Web heap growth is admitted before allocation and capped without overgrowth',async()=>{
  const factory=require('../build/terrax_world_wasm_web.js');
  const wasmBinary=fs.readFileSync(require.resolve('../build/terrax_world_wasm_web.wasm'));

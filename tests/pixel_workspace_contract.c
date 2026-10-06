@@ -200,7 +200,9 @@ static void failure_and_budget_contract(void){
     OK(terra_pixel_workspace_tx_begin(handle));cell(handle,1,0,index);color(handle,0x987654);
     txw_test_allocation_limit(64);TerraPixelCell entry={127,127,index};assert(terra_pixel_workspace_cells(handle,&entry,1)==TERRA_PIXEL_OOM);txw_test_allocation_limit(UINT32_MAX);
     assert(!get(handle,1,0)&&!get(handle,127,127)&&get(handle,0,0)==index);assert(stats(handle).state_id==before.state_id&&stats(handle).palette_count==before.palette_count&&!stats(handle).transaction_open);
-    OK(terra_pixel_workspace_tx_begin(handle));cell(handle,1,0,index);txw_test_allocation_limit(64);assert(terra_pixel_workspace_tx_commit(handle)==TERRA_PIXEL_OOM);txw_test_allocation_limit(UINT32_MAX);assert(!get(handle,1,0));
+    /* A one-cell journal can fit in 64 bytes on wasm32; fail the allocation
+     * explicitly rather than relying on a native pointer-sized header. */
+    OK(terra_pixel_workspace_tx_begin(handle));cell(handle,1,0,index);txw_test_allocation_limit(0);assert(terra_pixel_workspace_tx_commit(handle)==TERRA_PIXEL_OOM);txw_test_allocation_limit(UINT32_MAX);assert(!get(handle,1,0));
     OK(terra_pixel_workspace_tx_begin(handle));cell(handle,0,0,0);OK(terra_pixel_workspace_tx_commit(handle));before=stats(handle);assert(!before.active_blocks);
     txw_test_allocation_limit(64);assert(terra_pixel_workspace_undo(handle)==TERRA_PIXEL_OOM);txw_test_allocation_limit(UINT32_MAX);
     assert(stats(handle).state_id==before.state_id&&!stats(handle).active_blocks&&stats(handle).undo_count==before.undo_count);OK(terra_pixel_workspace_undo(handle));assert(get(handle,0,0)==index);

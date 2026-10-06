@@ -69,12 +69,12 @@ static const char g_capabilities[] =
     "{\"version\":1,\"features\":["
     "\"world-buffer-io\",\"json-sections\",\"preview-rgba\","
     "\"thumbnail-png\",\"map-output\",\"pixel-art\",\"sha256\","
-    "\"plr-read-write\"]}";
+    "\"plr-read-write\",\"circuit-traversal\",\"circuit-world\"]}";
 #elif TERRAWASM_FEATURE_WLD
 static const char g_capabilities[] =
     "{\"version\":1,\"features\":["
     "\"world-buffer-io\",\"json-sections\",\"preview-rgba\","
-    "\"thumbnail-png\",\"map-output\",\"pixel-art\",\"sha256\"]}";
+    "\"thumbnail-png\",\"map-output\",\"pixel-art\",\"sha256\",\"circuit-traversal\",\"circuit-world\"]}";
 #else
 static const char g_capabilities[] =
     "{\"version\":1,\"features\":[\"plr-read-write\"]}";
@@ -91,6 +91,8 @@ static const char g_build_info_json[] =
     TERRAX_STREAM_IDENTITY_JSON
     ",\"worldWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"pixelWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
+    ",\"circuitAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
+    ",\"circuitWorldAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"playerWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_PLR)
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""
     ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)

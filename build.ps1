@@ -125,6 +125,7 @@ if ($Test) {
         "tests/test_stream_abi_manifest.mjs"
     )
     $wldTests = @(
+        "tests/test_circuit_world.js",
         "tests/test_memory_lifecycle.js",
         "tests/test_map_streaming_contract.js",
         "tests/test_stream_lease.js",
@@ -149,6 +150,7 @@ if ($Test) {
         "tests/test_section_mutators.js",
         "tests/test_signs.js",
         "tests/test_sha256.js",
+        "tests/test_circuit.js",
         "tests/test_fixture_contract.js"
     )
     $regressionTests = @($commonTests)

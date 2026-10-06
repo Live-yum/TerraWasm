@@ -62,6 +62,10 @@ export const PIXEL_WORKSPACE_EXPORTS = ['abi_version', 'create', 'close', 'stats
 export const PLAYER_WORKSPACE_EXPORTS = ['workspace_abi_version', 'get_keys', 'get', 'set_many', 'replace_json', 'release_caches'].map(name => `_terra_plr_${name}`)
 const PIXEL_WORKSPACE = {version:1,blockSide:64,authoritative:true}
 const PLAYER_WORKSPACE = {version:1,fieldPatches:true,rollbackJournal:true}
+export const CIRCUIT_EXPORTS = ['abi_version','create','close','stats','load','compile','patch','begin','step','cancel'].map(name => `_terra_circuit_${name}`)
+const CIRCUIT_ABI = {version:1,sparseTopology:true,pauseBeforeExpansion:true}
+export const CIRCUIT_WORLD_EXPORTS = ['abi_version','begin','step','supply','ack','command','stats','cancel','close'].map(name => `_terra_circuit_world_${name}`)
+const CIRCUIT_WORLD_ABI = {version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true}
 function workspaceAbi(value, expected, exports, required, label) {
   if (value === undefined) return
   if (!value || Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',')
@@ -69,15 +73,37 @@ function workspaceAbi(value, expected, exports, required, label) {
   for (const name of required) if (!exports.includes(name)) fail(`${label} workspace export ${name} is missing`)
 }
 function validateWorkspaces(abi, exports, featureSet, label) {
+  workspaceAbi(abi.circuit, CIRCUIT_ABI, exports, CIRCUIT_EXPORTS, `${label} circuit`)
+  workspaceAbi(abi.circuitWorld, CIRCUIT_WORLD_ABI, exports, CIRCUIT_WORLD_EXPORTS, `${label} circuit world`)
+  // Known standalone profiles cannot claim the other domain. Future feature
+  // names remain extensible when their explicit ABI and exports are valid.
+  if (abi.circuit && featureSet === 'plr') fail(`${label} circuit feature mismatch`)
+  if (abi.circuitWorld && featureSet === 'plr') fail(`${label} circuit world feature mismatch`)
   workspaceAbi(abi.worldWorkspace, WORLD_WORKSPACE, exports, WORLD_WORKSPACE_EXPORTS, `${label} world`)
-  if (abi.worldWorkspace && !['all','wld'].includes(featureSet)) fail(`${label} world workspace feature mismatch`)
+  if (abi.worldWorkspace && featureSet === 'plr') fail(`${label} world workspace feature mismatch`)
   workspaceAbi(abi.pixelWorkspace, PIXEL_WORKSPACE, exports, PIXEL_WORKSPACE_EXPORTS, `${label} pixel`)
   workspaceAbi(abi.playerWorkspace, PLAYER_WORKSPACE, exports, PLAYER_WORKSPACE_EXPORTS, `${label} player`)
-  if (abi.pixelWorkspace && !['all','wld'].includes(featureSet)) fail(`${label} pixel workspace feature mismatch`)
-  if (abi.playerWorkspace && !['all','plr'].includes(featureSet)) fail(`${label} player workspace feature mismatch`)
+  if (abi.pixelWorkspace && featureSet === 'plr') fail(`${label} pixel workspace feature mismatch`)
+  if (abi.playerWorkspace && featureSet === 'wld') fail(`${label} player workspace feature mismatch`)
 }
 function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
+  if (identity.circuitWorldAbiVersion !== undefined) {
+    const enabled = ['all','wld'].includes(identity.featureSet)
+    if (identity.circuitWorldAbiVersion !== (enabled ? 1 : 0)) fail(`${label} circuit world identity version mismatch`)
+    if (enabled) {
+      if (typeof module._terra_circuit_world_abi_version !== 'function' || module._terra_circuit_world_abi_version() !== 1) fail(`${label} compiled circuit world version mismatch`)
+      abi.circuitWorld = {...CIRCUIT_WORLD_ABI}
+    }
+  }
+  if (identity.circuitAbiVersion !== undefined) {
+    const enabled = ['all','wld'].includes(identity.featureSet)
+    if (identity.circuitAbiVersion !== (enabled ? 1 : 0)) fail(`${label} circuit identity version mismatch`)
+    if (enabled) {
+      if (typeof module._terra_circuit_abi_version !== 'function' || module._terra_circuit_abi_version() !== 1) fail(`${label} compiled circuit version mismatch`)
+      abi.circuit = {...CIRCUIT_ABI}
+    }
+  }
   for (const [kind, expected, enabled] of [['world',WORLD_WORKSPACE,['all','wld'].includes(identity.featureSet)],['pixel',PIXEL_WORKSPACE,['all','wld'].includes(identity.featureSet)],['player',PLAYER_WORKSPACE,['all','plr'].includes(identity.featureSet)]]) {
     const version = identity[`${kind}WorkspaceAbiVersion`]
     if (version === undefined) continue // genuine older producer, no workspace claim
@@ -280,7 +306,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   }
   if (!targets.node || !targets.web) fail('both Node and Web builds are required')
   const identity = identities.web
-  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion']) {
+  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion', 'circuitAbiVersion']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')

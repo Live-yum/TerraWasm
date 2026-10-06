@@ -226,7 +226,7 @@ static int source_event(StreamTask* t,uint32_t offset,uint32_t limit){
 }
 int32_t terra_world_stream_open_begin(uint32_t source_id,uint32_t size,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
-    if(!source_id||size<16||size>TX_MAX_INPUT_BYTES)return fail("TERRAX_INVALID_ARGUMENT","invalid stream source");
+    if(!source_id||size<16||size>TX_MAX_STREAM_BYTES)return fail("TERRAX_INVALID_ARGUMENT","invalid stream source");
     StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","stream open allocation failed");
     t->stage=OPEN_FORMAT;t->source_id=source_id;t->source_size=size;
     event(t,TX_STREAM_NEED_SOURCE,0,size<65536?size:65536,NULL);return 0;

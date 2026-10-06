@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {readFileSync} from 'node:fs'
-import {validateManifest} from '../scripts/generate-manifest.mjs'
+import {validateManifest, CIRCUIT_WORLD_EXPORTS} from '../scripts/generate-manifest.mjs'
 const stream={version:2,inputLease:true,editPlan:true,pngColumnCursors:true}
 const exports=['_terra_build_info_json',...['abi_version','acquire_input','commit_input','release_input','get_stats'].map(x=>'_terra_world_stream_'+x)]
 const hash=x=>createHash('sha256').update(x).digest('hex')
@@ -21,4 +21,23 @@ test('stream claims require exact capability contract and every export',()=>{
 test('every WLD export profile declares source ABI additions without modifying PLR',()=>{
  for(const file of ['exports.txt','exports.web.txt','exports.wld.txt','exports.wld.web.txt']){const names=readFileSync(new URL('../'+file,import.meta.url),'utf8').trim().split(/\r?\n/);assert.equal(new Set(names).size,names.length);for(const name of exports)assert.ok(names.includes(name),`${file}: ${name}`)}
  assert.ok(!readFileSync(new URL('../exports.plr.txt',import.meta.url),'utf8').includes('_terra_world_stream_'))
+})
+
+test('world circuit claims require the complete streaming, compact-state and atomic contract',()=>{
+ const capability={version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true}
+ function worldFixture(){
+  const m=fixture();m.abi.circuitWorld={...capability};m.abi.requiredExports.push(...CIRCUIT_WORLD_EXPORTS)
+  m.abi.exportHash=hash(m.abi.requiredExports.join('\n')+'\n')
+  for(const target of Object.values(m.targets)){target.exports=[...m.abi.requiredExports];target.exportHash=m.abi.exportHash}
+  return m
+ }
+ assert.deepEqual(validateManifest(worldFixture()).abi.circuitWorld,capability)
+ for(const key of Object.keys(capability)){const m=worldFixture();m.abi.circuitWorld[key]=0;assert.throws(()=>validateManifest(m),/circuit world.*ABI/)}
+ for(const missing of CIRCUIT_WORLD_EXPORTS){const m=worldFixture();m.abi.requiredExports=m.abi.requiredExports.filter(name=>name!==missing);assert.throws(()=>validateManifest(m),/circuit world.*export/)}
+ const plr=worldFixture();plr.build.featureSet='plr';assert.throws(()=>validateManifest(plr),/feature mismatch/)
+ for(const file of ['exports.txt','exports.web.txt','exports.wld.txt','exports.wld.web.txt']){
+  const names=readFileSync(new URL('../'+file,import.meta.url),'utf8').trim().split(/\r?\n/)
+  for(const name of CIRCUIT_WORLD_EXPORTS)assert.ok(names.includes(name),`${file}: ${name}`)
+ }
+ assert.ok(!readFileSync(new URL('../exports.plr.txt',import.meta.url),'utf8').includes('_terra_circuit_world_'))
 })

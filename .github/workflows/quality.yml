@@ -154,3 +154,38 @@ jobs:
             build/terrax_world_wasm_web.js
             build/terrax_world_wasm_web.wasm
           if-no-files-found: error
+
+  # Consume the already uploaded Web artifact. These public ABI and circuit
+  # tests do not compile Wasm again or gate the build jobs' artifact uploads.
+  circuit-world-acceptance:
+    needs: wasm-feature-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Download the compiled WLD Web artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: terrawasm-wld-${{ github.sha }}
+          path: ${{ runner.temp }}/circuit-wld-artifact
+      - name: Fetch and verify the pinned public WLD
+        run: python3 tests/computerraria/fetch-inputs.py "$RUNNER_TEMP/computerraria" --wld-only
+      - name: Verify original PixelBox rules and physical RV32I execution
+        env:
+          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
+          TCW_WORLD: ${{ runner.temp }}/computerraria/computerraria.wld
+          TCW_REPORT: ${{ runner.temp }}/computerraria-wld-acceptance.json
+          TCW_EXPECTED_COMMIT: ${{ github.sha }}
+          TCW_MEMORY_MIB: 160
+          TMPDIR: ${{ runner.temp }}
+        run: node --test tests/test_computerraria_wld.js
+      - name: Upload original WLD acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: computerraria-wld-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/computerraria-wld-acceptance.json
+          if-no-files-found: warn

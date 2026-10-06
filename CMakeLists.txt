@@ -41,6 +41,16 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
         -fno-tree-loop-distribute-patterns)
 endif()
 set(WLD_SOURCES
+    "${SRC_DIR}/terra_circuit.c"
+    "${SRC_DIR}/terra_circuit_vm.c"
+    "${SRC_DIR}/terra_circuit_world.c"
+    "${SRC_DIR}/terra_circuit_compile.c"
+    "${SRC_DIR}/terra_circuit_rules.c"
+    "${SRC_DIR}/terra_circuit_query.c"
+    "${SRC_DIR}/terra_circuit_twld.c"
+    "${SRC_DIR}/terra_circuit_twld_session.c"
+    "${SRC_DIR}/terra_circuit_devices.c"
+    "${SRC_DIR}/terra_circuit_actuation.c"
     "${SRC_DIR}/terra_legacy_npc.c"
     "${SRC_DIR}/terra_wld_legacy.c"
     "${SRC_DIR}/terra_commands.c"
@@ -92,7 +102,7 @@ set(TERRAX_BUILD_COMMIT "unknown" CACHE STRING "Source commit embedded in ABI id
 set(TERRAX_BUILD_DIRTY "false" CACHE STRING "Dirty state embedded in ABI identity")
 set(TERRAX_BUILD_COMPILER "native" CACHE STRING "Compiler identity embedded in ABI identity")
 # The combined module contains both schemas. Its measured compact profile
-# satisfies the same Web size gate; standalone viewer modules retain -O3.
+# satisfies its combined-module Web gate; standalone Node modules retain -O3.
 set(TERRAX_DEFAULT_OPTIMIZE_FLAG "-O3")
 set(TERRAX_DEFAULT_ENABLE_LTO OFF)
 if(TERRAWASM_FEATURE_SET STREQUAL "all")
@@ -149,6 +159,16 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
+    # The WLD circuit compiler and stream codecs have their own measured feature
+    # budget. Keep non-hot paths compact; standalone PLR retains its own gate.
+    # Compact only that Web target; Node keeps its chosen optimization profile.
+    # Preserve O3 on the circuit traversal source even in the compact Web build.
+    set(WLD_WEB_COMPACT_FLAGS)
+    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
+        set(WLD_WEB_COMPACT_FLAGS -Oz -flto)
+        set_source_files_properties("${SRC_DIR}/terra_circuit.c" PROPERTIES COMPILE_OPTIONS "-O3")
+        set_source_files_properties("${SRC_DIR}/terra_circuit_vm.c" "${SRC_DIR}/terra_circuit_compile.c" "${SRC_DIR}/terra_circuit_rules.c" PROPERTIES COMPILE_OPTIONS "-O3")
+    endif()
     # Header/format and player patching are cold administrative paths. Keep
     # standalone viewer runtime paths at -O3, but size-optimize schema-heavy
     # encoders so each feature set remains inside the Mini Program budget.
@@ -216,6 +236,9 @@ if(EMSCRIPTEN)
     )
     set(COMMON_LINK_OPTIONS)
     if(TERRAWASM_ENABLE_WLD)
+        # Request the port during compilation too: a clean Emscripten SDK
+        # does not have zlib.h until USE_ZLIB installs the target headers.
+        list(APPEND COMMON_COMPILE_OPTIONS "-sUSE_ZLIB=1")
         list(APPEND COMMON_LINK_OPTIONS "-sUSE_ZLIB=1")
     endif()
     list(APPEND COMMON_LINK_OPTIONS
@@ -225,6 +248,7 @@ if(EMSCRIPTEN)
         "--no-entry"
     )
     set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
+    list(REMOVE_DUPLICATES COMMON_MANIFEST_FLAGS)
     if(TERRAX_ENABLE_LTO)
         list(APPEND COMMON_COMPILE_OPTIONS -flto)
         list(APPEND COMMON_LINK_OPTIONS -flto)
@@ -259,6 +283,7 @@ if(EMSCRIPTEN)
     set(WEB_LINK_OPTIONS
         "SHELL:--post-js ${CMAKE_CURRENT_SOURCE_DIR}/scripts/memory-growth-limit.js"
         "SHELL:-sEXPORTED_FUNCTIONS=@${CMAKE_CURRENT_BINARY_DIR}/exported_functions_web.json"
+        ${WLD_WEB_COMPACT_FLAGS}
         "${WEB_RUNTIME_METHODS}"
         "-sINITIAL_MEMORY=${TERRAX_WEB_INITIAL_MEMORY}"
         "-sMAXIMUM_MEMORY=${TERRAX_WEB_MAXIMUM_MEMORY}"
@@ -302,7 +327,7 @@ if(EMSCRIPTEN)
     if(TERRAWASM_FEATURE_SET STREQUAL "wld")
         target_compile_definitions(terrax_world_wasm_web PRIVATE TERRAWASM_VIEWER_WEB_PROFILE=1)
     endif()
-    target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS})
+    target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS} ${WLD_WEB_COMPACT_FLAGS})
     target_link_options(terrax_world_wasm_web PRIVATE
         "${TERRAX_OPTIMIZE_FLAG}"
         ${COMMON_LINK_OPTIONS}
@@ -347,6 +372,12 @@ else()
 
         if(TERRAWASM_ENABLE_WLD)
             find_package(ZLIB REQUIRED)
+            add_terra_contract(terra_circuit_contract tests/circuit_contract.c)
+            target_compile_definitions(terra_circuit_contract PRIVATE TERRAX_TESTING)
+            add_terra_contract(terra_circuit_vm_contract tests/circuit_vm_contract.c)
+            add_terra_contract(terra_circuit_twld_unit tests/circuit_twld_unit.c ZLIB::ZLIB)
+            add_terra_contract(terra_circuit_actuation_contract tests/circuit_actuation_contract.c)
+            target_include_directories(terra_circuit_actuation_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)
             target_compile_definitions(terra_native_contract PRIVATE
                 TERRAX_TESTING
