@@ -665,7 +665,7 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 }
 ```
 
-**Where 字段（可选，-1 或 null = 不匹配）：**
+**Where 字段（可选，-1 或 null = 不限制该条件）：**
 - `is_active`, `type`, `wall`
 - `liquid_amount`, `liquid_type`
 - `brick_style`, `tile_color`, `wall_color`
@@ -681,6 +681,18 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 - `wire_red`, `wire_blue`, `wire_green`, `wire_yellow`
 - `actuator`, `inactive`, `invisible_block`, `invisible_wall`
 - `fullbright_block`, `fullbright_wall`
+
+基础字段会验证 JSON 类型和 WLD 可表示范围；字符串形式的数字、错误类型和越界值会拒绝整组规则，不会静默扩大匹配范围或截断数值。`rules` 的每一项必须是对象，`where` / `patch` 可省略或为 `null`。
+
+| 基础字段 | 有效修改值 / 匹配值 |
+|---|---|
+| `type`, `wall` | 整数 `0..65535` |
+| `liquid_amount`, `tile_color`, `wall_color` | 整数 `0..255` |
+| `liquid_type` | 整数 `0..4`（无、水、岩浆、蜂蜜、微光） |
+| `brick_style` | 整数 `0..7`（WLD 的 3 位编码范围） |
+| 布尔基础字段（如 `is_active`, `wire_red`） | `true` / `false` 或整数 `0` / `1` |
+
+这些基础字段仍接受 `-1` / `null` 作为原有哨兵：Where 不限制该条件，Patch 不修改该属性。`limit` 可省略或为 `null`，否则须为整数 `0..2147483647`，其中 `0` 表示不限数量。`platform_style`、坐标、材质和环境条件继续使用各自更严格的约束。
 
 实现会按列顺序流式读取 tile RLE run 并重写 tile section，不会把全图 tile 展开成数组。
 

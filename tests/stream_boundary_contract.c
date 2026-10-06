@@ -20,6 +20,8 @@ extern TxWorld* tx_get_world(uint32_t);
 extern void tx_render_stream_color(TxWorld*,const TxTile*,uint32_t,uint8_t*);
 extern void txw_test_allocation_limit(uint32_t);
 extern void txw_test_stream_memory_bytes(uint32_t);
+extern int tx_stream_parse_tile_rules(TxWorld*,const char*,int,TxTileRule**,uint32_t*);
+extern void tx_internal_free(void*);
 static uint8_t* source;static uint32_t source_size,world;
 static uint32_t *hp;static TxStreamEvent* ep;static TxStreamInputLease* lp;static TxStreamStats* sp;
 static uint8_t* bridge;
@@ -118,6 +120,79 @@ static void mixed_plan_contract(const char*path){
  for(unsigned i=0;i<2;i++){char*name=string("edit_plan"),*request=string(bad[i]);assert(terra_world_stream_operation_begin(world,name,request,hp)<0&&!*hp);tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);assert(!strcmp(tx_get_world(world)->worldName,"ordered"));assert(tx_native_heap_used()==baseline);}
  check(terra_world_close(world));free(source);world=0;source=NULL;
 }
+static void reject_tile_rule(const char*request,int streaming){
+ uint32_t baseline=tx_native_heap_used();TxWorld*w=tx_get_world(world);assert(w);
+ if(streaming){
+  char*name=string("batch_update_tiles"),*json=string(request);
+  assert(terra_world_stream_operation_begin(world,name,json,hp)<0&&!*hp);
+  tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)json);
+ }else{
+  char response[256];uint64_t needed;
+  assert(terra_op_execute_json(world,"batch_update_tiles",request,response,sizeof(response),&needed)!=TERRAX_WORLD_STATUS_OK);
+ }
+ assert(tx_get_world(world)==w&&tx_native_heap_used()==baseline);
+ for(uint32_t i=0;i<TX_MAX_SECTION_OVERRIDES;i++)assert(!w->section_overrides[i].active);
+}
+static void tile_rule_validation_contract(const char*path){
+ load(path);
+ static const struct{const char*key;int maximum;} integers[]={
+  {"type",65535},{"wall",65535},{"liquid_amount",255},{"liquid_type",4},
+  {"brick_style",7},{"tile_color",255},{"wall_color",255}
+ };
+ static const char*booleans[]={"is_active","wire_red","wire_blue","wire_green","wire_yellow",
+  "actuator","inactive","invisible_block","invisible_wall","fullbright_block","fullbright_wall"};
+ static const char*bad_values[]={"\"1\"","1.5","true","[]","{}","-2"};
+ static const char*bad_flags[]={"\"true\"","1.5","2","-2","[]","{}"};
+ static const char*invalid[]={
+  "{\"rules\":[42]}", "{\"rules\":[null]}", "{\"rules\":[{\"where\":[] ,\"patch\":{\"type\":2}}]}",
+  "{\"rules\":[{\"where\":\"type=1\",\"patch\":{\"type\":2}}]}",
+  "{\"rules\":[{\"where\":{\"type\":1},\"patch\":true}]}",
+  "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2},\"limit\":\"1\"}]}",
+  "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2},\"limit\":-1}]}",
+  "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2},\"limit\":2147483648}]}",
+  "{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2}},{\"where\":{\"type\":\"2\"},\"patch\":{\"type\":1}}]}"
+ };
+ char request[512];uint32_t rejected=0;
+ for(int streaming=1;streaming>=0;streaming--){
+  if(!streaming){check(terra_world_close(world));check(terra_world_open_from_buffer(source,source_size,&world));}
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);i++){reject_tile_rule(invalid[i],streaming);rejected++;}
+  for(int patch=0;patch<2;patch++){
+   const char*side=patch?"patch":"where";
+   for(unsigned i=0;i<sizeof(integers)/sizeof(integers[0]);i++){
+    for(unsigned v=0;v<sizeof(bad_values)/sizeof(bad_values[0]);v++){
+     snprintf(request,sizeof(request),"{\"rules\":[{\"%s\":{\"%s\":%s}}]}",side,integers[i].key,bad_values[v]);
+     reject_tile_rule(request,streaming);rejected++;
+    }
+    snprintf(request,sizeof(request),"{\"rules\":[{\"%s\":{\"%s\":%d}}]}",side,integers[i].key,integers[i].maximum+1);
+    reject_tile_rule(request,streaming);rejected++;
+   }
+   for(unsigned i=0;i<sizeof(booleans)/sizeof(booleans[0]);i++)for(unsigned v=0;v<sizeof(bad_flags)/sizeof(bad_flags[0]);v++){
+    snprintf(request,sizeof(request),"{\"rules\":[{\"%s\":{\"%s\":%s}}]}",side,booleans[i],bad_flags[v]);
+    reject_tile_rule(request,streaming);rejected++;
+   }
+  }
+ }
+ // Rejected edits leave the exported world byte-identical, including a valid
+ // first rule followed by an invalid second rule in the same transaction.
+ uint32_t saved_size=0;
+ check(terra_world_save_to_buffer(world,NULL,0,&saved_size));
+ uint8_t*saved=malloc(saved_size);assert(saved);
+ check(terra_world_save_to_buffer(world,saved,saved_size,&saved_size));
+ assert(saved_size==source_size&&!memcmp(saved,source,source_size));free(saved);
+ // Null/-1 sentinels and the representable WLD boundaries remain supported.
+ const char*compatible="{\"rules\":[{\"where\":{\"type\":-1,\"wall\":null,\"wire_red\":-1},\"patch\":{\"type\":null,\"wire_red\":true,\"liquid_type\":4,\"brick_style\":7,\"tile_color\":255,\"wall\":65535},\"limit\":null},{\"where\":null,\"patch\":null}]}";
+ TxTileRule*rules=NULL;uint32_t count=0;
+ assert(tx_stream_parse_tile_rules(tx_get_world(world),compatible,(int)strlen(compatible),&rules,&count)>0&&count==2);
+ assert(rules[0].type==-1&&rules[0].wall==-1&&rules[0].wire_red==-1&&rules[0].patch_type==-1&&
+  rules[0].patch_wire_red==1&&rules[0].patch_liquid_type==4&&rules[0].patch_brick_style==7&&
+  rules[0].patch_tile_color==255&&rules[0].patch_wall==65535&&rules[0].limit==0);
+ tx_internal_free(rules);
+ char response[512];uint64_t needed=0;
+ check(terra_op_execute_json(world,"batch_update_tiles","{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2}}]}",response,sizeof(response),&needed));
+ assert(strstr(response,"\"total_updated\":945"));
+ check(terra_world_close(world));free(source);world=0;source=NULL;
+ printf("tile rule validation: %u invalid direct/stream requests rejected; original bytes and valid predicates preserved\n",rejected);
+}
 static void legacy_supply_contract(const char*path){
  load(path);uint32_t first_n,second_n;uint32_t id=begin("render_preview_png","{}");uint8_t*first=pump(id,0,&first_n);
  assert(sp->input_copy_bytes==sp->source_bytes&&sp->source_bytes>0);check(terra_world_stream_close(id));
@@ -175,6 +250,7 @@ int main(int argc,char**argv){assert(argc==2);
  const char* marker_requests[]={"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":0,\"line_width\":0,\"color\":\"#ff000080\"}]}",
  "{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":60,\"line_width\":15,\"color\":\"#ff000080\"},{\"tile_type\":2,\"locate\":0,\"radius\":3,\"line_width\":1,\"color\":\"#0000ff40\"}]}"};
  for(unsigned i=0;i<2;i++){snprintf(path,sizeof(path),"%s/marker-wide.wld",argv[1]);marker_contract(path,marker_requests[i]);snprintf(path,sizeof(path),"%s/marker-narrow.wld",argv[1]);marker_contract(path,marker_requests[i]);}
+ snprintf(path,sizeof(path),"%s/small.wld",argv[1]);tile_rule_validation_contract(path);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);faults_contract(path);
  tx_free((uint32_t)(uintptr_t)bridge);tx_free((uint32_t)(uintptr_t)sp);tx_free((uint32_t)(uintptr_t)lp);tx_free((uint32_t)(uintptr_t)ep);tx_free((uint32_t)(uintptr_t)hp);puts("native stream boundaries passed");return 0;
 }
