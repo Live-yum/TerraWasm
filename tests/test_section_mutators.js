@@ -484,6 +484,44 @@ test("three mutators share one open world and produce one reopenable output with
   }
 });
 
+test("bestiary kill counts span the game cap and retain signed Int32 bytes after save/reopen", async () => {
+  const M = await TerraWorldWasm();
+  let opened;
+  let reopened;
+  const bestiary = {
+    kills: [
+      { persistentNpcId: "Terraria.Zombie", killCount: 0 },
+      { persistentNpcId: "Terraria.DemonEye", killCount: 1_000_001 },
+      { persistentNpcId: "Terraria.BlueSlime", killCount: 999_999_999 },
+    ],
+    sightings: [{ persistentNpcId: "Terraria.Bunny" }],
+    chats: [{ persistentNpcId: "Terraria.Guide" }],
+  };
+  try {
+    opened = openBytes(M, TEST_BYTES);
+    executeOperation(M, opened.handle, "replace_bestiary", bestiary);
+    const saved = saveBytes(M, opened.handle);
+    const section = worldSections(saved)[8];
+    assert.equal(section.readInt32LE(0), bestiary.kills.length);
+    let offset = 4;
+    for (const entry of bestiary.kills) {
+      const length = section[offset++];
+      assert.ok(length < 128, "these NPC IDs use a one-byte 7-bit string length");
+      assert.equal(section.toString("utf8", offset, offset + length), entry.persistentNpcId);
+      offset += length;
+      assert.equal(section.readInt32LE(offset), entry.killCount);
+      offset += 4;
+    }
+    closeBytes(M, opened);
+    opened = null;
+    reopened = openBytes(M, saved);
+    assert.deepEqual(getSection(M, reopened.handle, "bestiary"), bestiary);
+  } finally {
+    closeBytes(M, reopened);
+    closeBytes(M, opened);
+  }
+});
+
 test("empty and maximum bounded section replacements round-trip", async () => {
   const M = await TerraWorldWasm();
   let opened;
@@ -501,7 +539,7 @@ test("empty and maximum bounded section replacements round-trip", async () => {
     const largeBestiary = {
       kills: Array.from({ length: 4096 }, (_, index) => ({
         persistentNpcId: `Terraria.TestNpc${index}`,
-        killCount: 1_000_000,
+        killCount: 999_999_999,
       })),
       sightings: [],
       chats: [],
@@ -553,7 +591,8 @@ test("malformed, unknown, duplicate, oversized, and out-of-range fields fail ato
       ["replace_chests", { chests: [{ x: 1, y: 2, name: "", maxItems: 1, items: [{ stack: 32768, itemType: 1, prefix: 0 }] }] }],
       ["replace_chests", { chests: Array.from({ length: 1001 }, (_, index) => ({ x: index, y: 0, name: "", maxItems: 0, items: [] })) }],
       ["replace_bestiary", { kills: [{ persistentNpcId: "x".repeat(256), killCount: 1 }], sightings: [], chats: [] }],
-      ["replace_bestiary", { kills: [{ persistentNpcId: "Terraria.Zombie", killCount: 1_000_001 }], sightings: [], chats: [] }],
+      ...[1_000_000_000, 2_147_483_647, 2_147_483_648, 4_294_967_296, -1, 0.5, "12", null].map(killCount =>
+        ["replace_bestiary", { kills: [{ persistentNpcId: "Terraria.Guide", killCount: 7 }, { persistentNpcId: "Terraria.Zombie", killCount }], sightings: [], chats: [] }]),
       ["replace_bestiary", { kills: Array.from({ length: 4097 }, (_, index) => ({ persistentNpcId: `Npc${index}`, killCount: 1 })), sightings: [], chats: [] }],
       ["replace_bestiary", { kills: [], sightings: [], chats: [], unknown: [] }],
     ];

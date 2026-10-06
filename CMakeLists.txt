@@ -42,6 +42,15 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 endif()
 set(WLD_SOURCES
     "${SRC_DIR}/terra_circuit.c"
+    "${SRC_DIR}/terra_circuit_vm.c"
+    "${SRC_DIR}/terra_circuit_world.c"
+    "${SRC_DIR}/terra_circuit_compile.c"
+    "${SRC_DIR}/terra_circuit_rules.c"
+    "${SRC_DIR}/terra_circuit_query.c"
+    "${SRC_DIR}/terra_circuit_twld.c"
+    "${SRC_DIR}/terra_circuit_twld_session.c"
+    "${SRC_DIR}/terra_circuit_devices.c"
+    "${SRC_DIR}/terra_circuit_actuation.c"
     "${SRC_DIR}/terra_legacy_npc.c"
     "${SRC_DIR}/terra_wld_legacy.c"
     "${SRC_DIR}/terra_commands.c"
@@ -150,13 +159,15 @@ function(configure_terra_identity target target_name initial_memory maximum_memo
 endfunction()
 
 if(EMSCRIPTEN)
-    # The expanded WLD editor ABI exceeds the unchanged 320 KiB Web gate at O3.
+    # The WLD circuit compiler and stream codecs have their own measured feature
+    # budget. Keep non-hot paths compact; standalone PLR retains its own gate.
     # Compact only that Web target; Node keeps its chosen optimization profile.
     # Preserve O3 on the circuit traversal source even in the compact Web build.
     set(WLD_WEB_COMPACT_FLAGS)
     if(TERRAWASM_FEATURE_SET STREQUAL "wld")
         set(WLD_WEB_COMPACT_FLAGS -Oz -flto)
         set_source_files_properties("${SRC_DIR}/terra_circuit.c" PROPERTIES COMPILE_OPTIONS "-O3")
+        set_source_files_properties("${SRC_DIR}/terra_circuit_vm.c" "${SRC_DIR}/terra_circuit_compile.c" "${SRC_DIR}/terra_circuit_rules.c" PROPERTIES COMPILE_OPTIONS "-O3")
     endif()
     # Header/format and player patching are cold administrative paths. Keep
     # standalone viewer runtime paths at -O3, but size-optimize schema-heavy
@@ -359,6 +370,10 @@ else()
             find_package(ZLIB REQUIRED)
             add_terra_contract(terra_circuit_contract tests/circuit_contract.c)
             target_compile_definitions(terra_circuit_contract PRIVATE TERRAX_TESTING)
+            add_terra_contract(terra_circuit_vm_contract tests/circuit_vm_contract.c)
+            add_terra_contract(terra_circuit_twld_unit tests/circuit_twld_unit.c ZLIB::ZLIB)
+            add_terra_contract(terra_circuit_actuation_contract tests/circuit_actuation_contract.c)
+            target_include_directories(terra_circuit_actuation_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)
             target_compile_definitions(terra_native_contract PRIVATE
                 TERRAX_TESTING
@@ -370,6 +385,7 @@ else()
             add_terra_contract(terra_error_json_contract tests/error_json_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_zlib_bridge_contract tests/zlib_bridge_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_json_parser_contract tests/json_parser_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_bestiary_kill_count_contract tests/bestiary_kill_count_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_string_section_guard_contract tests/string_section_guard_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_wld_guard_task_versions_contract tests/wld_guard_task_versions_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_wld_tile_versions_contract tests/wld_tile_versions_contract.c ZLIB::ZLIB)

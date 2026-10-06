@@ -141,3 +141,12 @@ _terra_circuit_patch
 _terra_circuit_begin
 _terra_circuit_step
 _terra_circuit_cancel
+_terra_circuit_world_abi_version
+_terra_circuit_world_begin
+_terra_circuit_world_step
+_terra_circuit_world_supply
+_terra_circuit_world_ack
+_terra_circuit_world_command
+_terra_circuit_world_stats
+_terra_circuit_world_cancel
+_terra_circuit_world_close

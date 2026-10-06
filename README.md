@@ -30,6 +30,12 @@ SANITIZE=1 sh scripts/test-circuit-native.sh
 正常构建后，`node --test tests/test_circuit.js` 验证实际 Node / Web 产物，包括
 FIFO 随机差分、命中与路由的交错、像素盒轴、取消和百万格内存上限。
 
+### 图鉴击杀数量的写入范围
+
+`replace_bestiary` 的 `kills[].killCount` 接受 **0–999999999**（含两端）的 JSON 整数。该上限取自游戏源码 [NPCKillsTracker.POSITIVE_KILL_COUNT_CAP 及 SetKillCountDirectly（8255d346）](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.GameContent.Bestiary/NPCKillsTracker.cs)，替代本库此前的 1000000 限制。高于上限、负数、非整数和错误类型会返回验证或解析错误，并保留原图鉴数据。
+
+写入仍使用游戏 `BinaryWriter.Write(Int32)` 对应的四字节小端字段，999999999 小于 `Int32.MaxValue`，不改变 WLD 节结构或 ABI。`terra_bestiary_kill_count_contract` 检查边界值、实际二进制字段和重新读取，以及无效第二条记录的整体回滚；`tests/test_section_mutators.js` 进一步验证通过 Wasm API 保存并重新打开完整 WLD 后保留 0、1000001 和 999999999，以及 4096 项最大图鉴替换。
+
 ## 项目结构
 
 ```
@@ -131,14 +137,21 @@ python scripts/build_txci.py
 
 `-Features wld` 的 Web target 已经是 buffer-only profile，`viewerWebProfile` 身份字段直接由该选择推导，不再需要 `-ViewerWebProfile` 或第二次构建。该字段作为 schema v1 兼容元数据保留；Node target 仍保持完整 WLD ABI，all/plr target 不受影响。
 
-WLD Web 使用 `-Oz + LTO` 保持现有 320 KiB Wasm 体积门禁，电路遍历源文件单独保留
-`-O3`；Node WLD 仍使用调用方选择的优化配置。Web 的这些目标参数写入编译身份和 manifest，
-不会以修改尺寸上限掩盖超限产物。
+WLD Web 使用 `-Oz + LTO` 压缩格式与管理代码，电路遍历、网络编译、VM 和门求值热路径保留 `-O3`；Node WLD 使用调用方选择的优化配置。所有目标参数写入编译身份和 manifest。
 
-独立 `wld` / `plr` Wasm 上限保持 320 KiB，完整兼容 `all` 模块单独为 344 KiB。
-同一 Emscripten 5.0.7 紧凑配置下，主分支 `8579be1` 的 `all` Web 基线为 344,389 字节，
-本次电路 ABI 增加 3,807 字节，达到 348,196 字节；因此通用模块采用最小充分的 8 KiB
-递增预算。该预算不会传递给小程序使用的 WLD 产物，所有配置的 wrapper 上限仍为 128 KiB。
+新增的 [file-backed circuit world ABI v1](docs/CIRCUIT_WORLD_ABI_V1.md) 在 WLD/all 中实现整图网络预编译、紧凑状态、原生门/像素规则与流式 WLD/TWLD 读写。原有稀疏 traversal ABI 继续服务临时小电路。独立 PLR 不编入这些功能。
+
+<!-- circuit-size:start -->
+| 功能集合 | 本轮 Web Wasm 测量 | Wasm 功能预算 |
+|---|---:|---:|
+| `wld` | 401,955 B（392.53 KiB） | 416 KiB |
+| `all` | 427,925 B（417.90 KiB） | 448 KiB |
+| `plr` | 不包含新增电路编译器与 VM | 原有 320 KiB |
+
+以上数值来自 Emscripten 5.0.7 对本轮完整源码的发布前构建；正式提交会改变编译身份和文件摘要，精确交付尺寸以随包 manifest 为准。WLD/all 分别保留约 23/30 KiB 功能余量，独立 PLR 预算不变。新增代码的成本包括网络编译、紧凑状态、原版延迟门求值、取消回滚和流式保存。小程序主流程使用单个 `.wld`；原版单色像素盒按逐 `TripWire` 规则执行，`.twld` 彩屏不是使用或验收前提。
+<!-- circuit-size:end -->
+
+功能预算按实际新代码单独分配；所有 wrapper 上限仍为 128 KiB，WLD Web 的 64 MiB 初始内存和 160 MiB 最大线性内存保持原值。`scripts/check-artifact-size.mjs` 对每个 profile 校验尺寸与摘要，超过各自预算仍会失败。
 
 产出：
 - `build/terrax_world_wasm.js` + `.wasm`（Node.js 目标）
@@ -179,7 +192,7 @@ Node WLD / PLR 的默认优化参数为 `-O3`，组合 `all` 和 WLD Web 使用�
 Web 交付包有显式体积门禁：
 
 - wrapper 上限：`128 KiB`
-- wasm 上限：`320 KiB`
+- Wasm 上限：按上述 `wld` / `plr` / `all` 功能预算分别检查
 
 可以单独运行：
 
@@ -195,6 +208,8 @@ CI 工作流位于 `.github/workflows/quality.yml`，当前包含：
 - `ASan/UBSan + fuzz smoke` 门禁
 - 固定 `Emscripten 5.0.7` 的 Node/Web 发布构建门禁
 - manifest 产物大小门禁与可追溯 artifact 上传
+
+固定公开 Computerraria 全图的物理 RV32I、ROM 负对照、显示、流式保存与重开还提供可选开发验收；历史配对文件验收的说明和记录见 [tests/computerraria](tests/computerraria/README.md)。小程序交付聚焦原版 `.wld` 规则。
 
 ### 3. 运行测试
 

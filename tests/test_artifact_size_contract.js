@@ -115,15 +115,19 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
       }
     };
     setWasmSize(WEB_ARTIFACT_LIMITS.wasmBytes + 1);
-    for (const featureSet of ["wld", "plr", "future-profile"]) {
+    for (const featureSet of ["plr", "future-profile"]) {
       manifest.build.featureSet = featureSet;
       assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i,
-        `${featureSet} must not inherit the combined compatibility module budget`);
+        `${featureSet} must not inherit the circuit module budget`);
     }
-    manifest.build.featureSet = "all";
-    assert.equal(verifyArtifactSizes({ root: temp, manifest }).limits.wasmBytes, 344 * 1024);
-    setWasmSize(WEB_ARTIFACT_LIMITS_BY_FEATURE.all.wasmBytes + 1);
-    assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i);
+    for (const [featureSet, expectedKiB] of [["wld", 416], ["all", 448], ["plr", 320]]) {
+      manifest.build.featureSet = featureSet;
+      setWasmSize(WEB_ARTIFACT_LIMITS_BY_FEATURE[featureSet].wasmBytes);
+      assert.equal(verifyArtifactSizes({ root: temp, manifest }).limits.wasmBytes, expectedKiB * 1024);
+      setWasmSize(WEB_ARTIFACT_LIMITS_BY_FEATURE[featureSet].wasmBytes + 1);
+      assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i,
+        `${featureSet} must reject even one byte over its own limit`);
+    }
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

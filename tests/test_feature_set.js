@@ -19,6 +19,7 @@ const EXPECTED_FEATURES = {
     "sha256",
     "plr-read-write",
     "circuit-traversal",
+    "circuit-world",
   ],
   wld: [
     "world-buffer-io",
@@ -29,6 +30,7 @@ const EXPECTED_FEATURES = {
     "pixel-art",
     "sha256",
     "circuit-traversal",
+    "circuit-world",
   ],
   plr: ["plr-read-write"],
 };

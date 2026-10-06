@@ -64,6 +64,8 @@ const PIXEL_WORKSPACE = {version:1,blockSide:64,authoritative:true}
 const PLAYER_WORKSPACE = {version:1,fieldPatches:true,rollbackJournal:true}
 export const CIRCUIT_EXPORTS = ['abi_version','create','close','stats','load','compile','patch','begin','step','cancel'].map(name => `_terra_circuit_${name}`)
 const CIRCUIT_ABI = {version:1,sparseTopology:true,pauseBeforeExpansion:true}
+export const CIRCUIT_WORLD_EXPORTS = ['abi_version','begin','step','supply','ack','command','stats','cancel','close'].map(name => `_terra_circuit_world_${name}`)
+const CIRCUIT_WORLD_ABI = {version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true}
 function workspaceAbi(value, expected, exports, required, label) {
   if (value === undefined) return
   if (!value || Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',')
@@ -72,9 +74,11 @@ function workspaceAbi(value, expected, exports, required, label) {
 }
 function validateWorkspaces(abi, exports, featureSet, label) {
   workspaceAbi(abi.circuit, CIRCUIT_ABI, exports, CIRCUIT_EXPORTS, `${label} circuit`)
+  workspaceAbi(abi.circuitWorld, CIRCUIT_WORLD_ABI, exports, CIRCUIT_WORLD_EXPORTS, `${label} circuit world`)
   // Known standalone profiles cannot claim the other domain. Future feature
   // names remain extensible when their explicit ABI and exports are valid.
   if (abi.circuit && featureSet === 'plr') fail(`${label} circuit feature mismatch`)
+  if (abi.circuitWorld && featureSet === 'plr') fail(`${label} circuit world feature mismatch`)
   workspaceAbi(abi.worldWorkspace, WORLD_WORKSPACE, exports, WORLD_WORKSPACE_EXPORTS, `${label} world`)
   if (abi.worldWorkspace && featureSet === 'plr') fail(`${label} world workspace feature mismatch`)
   workspaceAbi(abi.pixelWorkspace, PIXEL_WORKSPACE, exports, PIXEL_WORKSPACE_EXPORTS, `${label} pixel`)
@@ -84,6 +88,14 @@ function validateWorkspaces(abi, exports, featureSet, label) {
 }
 function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
+  if (identity.circuitWorldAbiVersion !== undefined) {
+    const enabled = ['all','wld'].includes(identity.featureSet)
+    if (identity.circuitWorldAbiVersion !== (enabled ? 1 : 0)) fail(`${label} circuit world identity version mismatch`)
+    if (enabled) {
+      if (typeof module._terra_circuit_world_abi_version !== 'function' || module._terra_circuit_world_abi_version() !== 1) fail(`${label} compiled circuit world version mismatch`)
+      abi.circuitWorld = {...CIRCUIT_WORLD_ABI}
+    }
+  }
   if (identity.circuitAbiVersion !== undefined) {
     const enabled = ['all','wld'].includes(identity.featureSet)
     if (identity.circuitAbiVersion !== (enabled ? 1 : 0)) fail(`${label} circuit identity version mismatch`)

@@ -6,16 +6,16 @@ import { validateManifest } from './generate-manifest.mjs'
 
 export const WEB_ARTIFACT_LIMITS = Object.freeze({
   wrapperBytes: 128 * 1024,
-  // The production WLD and standalone PLR Mini Program modules retain this cap.
+  // The standalone PLR module and unknown profiles retain the original cap.
   wasmBytes: 320 * 1024,
 })
-// The combined compatibility module includes every WLD and PLR API. With the
-// pinned Emscripten 5.0.7 -Oz/LTO profile, master 8579be1 is 344389 bytes and
-// circuit ABI v1 adds 3807 bytes (348196 total). 344 KiB is the smallest 8 KiB
-// budget increment containing that measured artifact. WLD/PLR do not inherit it.
+// Streaming WLD/TWLD circuit compilation, the native VM and save replay are
+// included only in WLD/all. Emscripten 5.0.7 measures 401955 / 427925 Web bytes
+// for those profiles. Keep explicit per-feature headroom; PLR, wrappers and
+// the 64/160 MiB Web memory limits do not inherit this functionality's budget.
 export const WEB_ARTIFACT_LIMITS_BY_FEATURE = Object.freeze({
-  all: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 344 * 1024 }),
-  wld: WEB_ARTIFACT_LIMITS,
+  all: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 448 * 1024 }),
+  wld: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 416 * 1024 }),
   plr: WEB_ARTIFACT_LIMITS,
 })
 

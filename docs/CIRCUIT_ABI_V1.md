@@ -1,5 +1,12 @@
 # Circuit traversal ABI v1
 
+This is the sparse traversal API used by the temporary component sandbox. The
+file-backed WLD/TWLD world workspace uses the additive
+[Circuit World ABI v1](CIRCUIT_WORLD_ABI_V1.md), which owns compiled networks,
+compact state, native gate/device rules and atomic commands. The traversal API's
+capacity parameters below do not constrain imported circuit worlds. Actual
+whole-world CPU/display acceptance is in [tests/computerraria](../tests/computerraria/README.md).
+
 Source semantics: Terraria `Wiring.HitWire` at
 [`8255d34616c780af12079425ac92a0a7aed87d71`](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria/Wiring.cs).
 

@@ -20,6 +20,9 @@
 
 #define TX_CURRENT_KNOWN_VERSION 326u
 #define TX_MAX_INPUT_BYTES 200000000u
+/* A ranged source is not an in-memory input allocation. WLD section pointers
+ * are signed Int32 offsets in the game format, so files retain that boundary. */
+#define TX_MAX_STREAM_BYTES 0x7fffffffu
 #define TX_MAX_WORLD_TILES 200000000u
 
 #define TX_MAX_SECTIONS        16u
