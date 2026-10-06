@@ -56,10 +56,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--cache', type=Path, help='Read already downloaded public inputs instead of the network')
+    parser.add_argument('--wld-only', action='store_true', help='Fetch only the original world, without companion mod data')
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     archive = download(args.directory, 'computerraria.tar.gz', args.cache)
-    download(args.directory, 'computerraria.twld', args.cache)
+    if not args.wld_only:
+        download(args.directory, 'computerraria.twld', args.cache)
     world = args.directory / 'computerraria.wld'
     if not world.exists():
         temporary = args.directory / 'computerraria.wld.extracting'
@@ -74,7 +76,8 @@ def main():
         finally:
             temporary.unlink(missing_ok=True)
     verified(world)
-    print(f'Verified pinned WLD/TWLD in {args.directory.resolve()}')
+    kind = 'WLD' if args.wld_only else 'WLD/TWLD'
+    print(f'Verified pinned {kind} in {args.directory.resolve()}')
 
 
 if __name__ == '__main__':

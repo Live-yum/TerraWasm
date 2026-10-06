@@ -236,6 +236,9 @@ if(EMSCRIPTEN)
     )
     set(COMMON_LINK_OPTIONS)
     if(TERRAWASM_ENABLE_WLD)
+        # Request the port during compilation too: a clean Emscripten SDK
+        # does not have zlib.h until USE_ZLIB installs the target headers.
+        list(APPEND COMMON_COMPILE_OPTIONS "-sUSE_ZLIB=1")
         list(APPEND COMMON_LINK_OPTIONS "-sUSE_ZLIB=1")
     endif()
     list(APPEND COMMON_LINK_OPTIONS
@@ -245,6 +248,7 @@ if(EMSCRIPTEN)
         "--no-entry"
     )
     set(COMMON_MANIFEST_FLAGS ${COMMON_COMPILE_OPTIONS} ${COMMON_LINK_OPTIONS})
+    list(REMOVE_DUPLICATES COMMON_MANIFEST_FLAGS)
     if(TERRAX_ENABLE_LTO)
         list(APPEND COMMON_COMPILE_OPTIONS -flto)
         list(APPEND COMMON_LINK_OPTIONS -flto)

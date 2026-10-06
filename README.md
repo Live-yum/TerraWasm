@@ -208,8 +208,9 @@ CI 工作流位于 `.github/workflows/quality.yml`，当前包含：
 - `ASan/UBSan + fuzz smoke` 门禁
 - 固定 `Emscripten 5.0.7` 的 Node/Web 发布构建门禁
 - manifest 产物大小门禁与可追溯 artifact 上传
+- 独立 `circuit-world-acceptance` job 复用 WLD Web artifact，验证原版 PixelBox、真实 RV32I、ROM 负对照与 WLD 保存重开；不重新编译，不影响编译 job 的产物上传，也不读取私有应用仓库
 
-固定公开 Computerraria 全图的物理 RV32I、ROM 负对照、显示、流式保存与重开还提供可选开发验收；历史配对文件验收的说明和记录见 [tests/computerraria](tests/computerraria/README.md)。小程序交付聚焦原版 `.wld` 规则。
+固定公开 Computerraria 全图的原版 WLD 验收见 [README-wld.md](tests/computerraria/README-wld.md)，输入由 SHA-256 固定，CI 同时校验已构建 artifact 的源码身份。历史配对文件验收记录见 [README.md](tests/computerraria/README.md)。小程序交付聚焦原版 `.wld` 规则。
 
 ### 3. 运行测试
 
