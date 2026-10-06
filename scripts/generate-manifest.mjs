@@ -56,6 +56,38 @@ function validateStreamAbi(stream, exports, label) {
   for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
 }
 
+export const PIXEL_WORKSPACE_EXPORTS = ['abi_version', 'create', 'close', 'stats', 'tx_begin', 'tx_commit', 'tx_rollback', 'palette_add', 'palette_read', 'nearest', 'match_colors', 'cells', 'stroke', 'fill', 'replace', 'transform', 'import_rgba', 'read_rect', 'read_block', 'raster_block', 'block_versions', 'undo', 'redo', 'checkpoint', 'clear_history'].map(name => `_terra_pixel_workspace_${name}`)
+export const PLAYER_WORKSPACE_EXPORTS = ['workspace_abi_version', 'get_keys', 'get', 'set_many', 'replace_json', 'release_caches'].map(name => `_terra_plr_${name}`)
+const PIXEL_WORKSPACE = {version:1,blockSide:64,authoritative:true}
+const PLAYER_WORKSPACE = {version:1,fieldPatches:true,rollbackJournal:true}
+function workspaceAbi(value, expected, exports, required, label) {
+  if (value === undefined) return
+  if (!value || Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',')
+    || Object.keys(expected).some(key => value[key] !== expected[key])) fail(`${label} workspace ABI is invalid`)
+  for (const name of required) if (!exports.includes(name)) fail(`${label} workspace export ${name} is missing`)
+}
+function validateWorkspaces(abi, exports, featureSet, label) {
+  workspaceAbi(abi.pixelWorkspace, PIXEL_WORKSPACE, exports, PIXEL_WORKSPACE_EXPORTS, `${label} pixel`)
+  workspaceAbi(abi.playerWorkspace, PLAYER_WORKSPACE, exports, PLAYER_WORKSPACE_EXPORTS, `${label} player`)
+  if (abi.pixelWorkspace && !['all','wld'].includes(featureSet)) fail(`${label} pixel workspace feature mismatch`)
+  if (abi.playerWorkspace && !['all','plr'].includes(featureSet)) fail(`${label} player workspace feature mismatch`)
+}
+function compiledWorkspaces(identity, module, exports, label) {
+  const abi = {}
+  for (const [kind, expected, enabled] of [['pixel',PIXEL_WORKSPACE,['all','wld'].includes(identity.featureSet)],['player',PLAYER_WORKSPACE,['all','plr'].includes(identity.featureSet)]]) {
+    const version = identity[`${kind}WorkspaceAbiVersion`]
+    if (version === undefined) continue // genuine older producer, no workspace claim
+    if (version !== (enabled ? 1 : 0)) fail(`${label} ${kind} workspace identity version mismatch`)
+    if (version === 1) {
+      const marker = kind === 'pixel' ? '_terra_pixel_workspace_abi_version' : '_terra_plr_workspace_abi_version'
+      if (typeof module[marker] !== 'function' || module[marker]() !== version) fail(`${label} compiled ${kind} workspace version mismatch`)
+      abi[`${kind}Workspace`] = {...expected}
+    }
+  }
+  validateWorkspaces(abi, exports, identity.featureSet, label)
+  return abi
+}
+
 function exportHash(exportsList) {
   return sha256(Buffer.from(`${normalizeExports(exportsList).join('\n')}\n`, 'utf8'))
 }
@@ -155,6 +187,7 @@ export function validateManifest(manifest) {
   if (!abi || !Number.isSafeInteger(abi.version) || abi.version < 1) fail('ABI version is invalid')
   const requiredExports = normalizeExports(abi.requiredExports, 'ABI export set')
   validateStreamAbi(abi.stream, requiredExports, 'manifest')
+  validateWorkspaces(abi, requiredExports, featureSet, 'manifest')
   if (!requiredExports.includes('_terra_build_info_json')) fail('ABI export set is missing _terra_build_info_json')
   if (!isSha256(abi.exportHash)) fail('ABI export hash is invalid')
   if (abi.exportHash !== exportHash(requiredExports)) fail('ABI export hash does not match the export set')
@@ -229,6 +262,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     }
     validateStreamAbi(identity.stream, exports, target)
     if (identity.stream && module._terra_world_stream_abi_version() !== identity.stream.version) fail(`${target} compiled stream version mismatch`)
+    identity.workspaceAbi = compiledWorkspaces(identity, module, exports, target)
     identities[target] = identity
     targets[target] = {
       memory: { initialBytes: identity.initialMemory, maxBytes: identity.maxMemory },
@@ -242,7 +276,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   }
   if (!targets.node || !targets.web) fail('both Node and Web builds are required')
   const identity = identities.web
-  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText']) {
+  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')
@@ -253,7 +287,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     artifactId: 'terrax-world-web',
     sourceCommit: identity.sourceCommit,
     dirty: identity.dirty,
-    abi: { version: identity.abiVersion, ...(identity.stream ? { stream: identity.stream } : {}), requiredExports: targets.web.exports, exportHash: targets.web.exportHash },
+    abi: { version: identity.abiVersion, ...identity.workspaceAbi, ...(identity.stream ? { stream: identity.stream } : {}), requiredExports: targets.web.exports, exportHash: targets.web.exportHash },
     memory: targets.web.memory,
     build: {
       compiler: identity.compiler,
