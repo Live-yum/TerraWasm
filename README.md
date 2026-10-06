@@ -13,6 +13,12 @@
 
 兼容范围、版本边界与验证限制见 [多版本兼容说明](docs/MULTI_VERSION_COMPATIBILITY.md)。
 
+### 图鉴击杀数量的写入范围
+
+`replace_bestiary` 的 `kills[].killCount` 接受 **0–999999999**（含两端）的 JSON 整数。该上限取自游戏源码 [NPCKillsTracker.POSITIVE_KILL_COUNT_CAP 及 SetKillCountDirectly（8255d346）](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.GameContent.Bestiary/NPCKillsTracker.cs)，替代本库此前的 1000000 限制。高于上限、负数、非整数和错误类型会返回验证或解析错误，并保留原图鉴数据。
+
+写入仍使用游戏 `BinaryWriter.Write(Int32)` 对应的四字节小端字段，999999999 小于 `Int32.MaxValue`，不改变 WLD 节结构或 ABI。`terra_bestiary_kill_count_contract` 检查边界值、实际二进制字段和重新读取，以及无效第二条记录的整体回滚；`tests/test_section_mutators.js` 进一步验证通过 Wasm API 保存并重新打开完整 WLD 后保留 0、1000001 和 999999999，以及 4096 项最大图鉴替换。
+
 ## 项目结构
 
 ```
