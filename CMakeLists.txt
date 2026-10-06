@@ -64,6 +64,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_update.c"
     "${SRC_DIR}/terra_txci.c"
     "${SRC_DIR}/terra_pixel_art.c"
+    "${SRC_DIR}/terra_pixel_workspace.c"
     "${SRC_DIR}/terra_pixel_art_metadata.c"
     "${SRC_DIR}/terra_stream.c"
     "${SRC_DIR}/terra_stream_png.c"
@@ -364,6 +365,8 @@ else()
             add_terra_contract(terra_wld_version_patch_contract tests/wld_version_patch_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_map_runtime_contract tests/map_runtime_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_pixel_workspace_contract tests/pixel_workspace_contract.c)
+            target_compile_definitions(terra_pixel_workspace_contract PRIVATE TERRAX_TESTING)
 
             # The public stream bridge uses Wasm32 pointers. LP64 ASan reserves
             # high addresses, so run this bridge contract in the native job;
@@ -427,6 +430,10 @@ else()
             target_compile_definitions(terra_plr_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
             )
+
+            add_terra_contract(terra_plr_workspace_contract tests/plr_workspace_contract.c)
+            target_compile_definitions(terra_plr_workspace_contract PRIVATE
+                TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
 
             set(TERRAWASM_PLR_REAL_FIXTURE_PATH
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/烟花.plr"

@@ -43,3 +43,6 @@ _terra_player_encode
 _terra_player_validate_handle
 _terra_player_open_json
 _terra_player_apply_patch_json
+_terra_plr_workspace_abi_version
+_terra_plr_get_keys
+_terra_plr_release_caches

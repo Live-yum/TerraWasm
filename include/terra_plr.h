@@ -71,6 +71,15 @@ terrax_world_status terra_plr_set_many(
     uint32_t handle,
     const char* edits_json_utf8);
 
+/* Workspace ABI v1: atomic subtree journals, bounded field discovery, and
+ * explicit release of reconstructible serialization caches. Document ownership
+ * lasts until close; releasing caches never discards fields or original bytes. */
+uint32_t terra_plr_workspace_abi_version(void);
+terrax_world_status terra_plr_get_keys(
+    uint32_t handle, const char *pointer_utf8, char *buffer,
+    uint64_t buffer_size, uint32_t *required_size);
+terrax_world_status terra_plr_release_caches(uint32_t handle);
+
 /* Compatibility aliases used by the TerraR/TerraWasm JS adapter. */
 terrax_world_status terra_plr_get_field_json(
     uint32_t handle,

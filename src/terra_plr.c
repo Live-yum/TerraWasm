@@ -72,6 +72,16 @@ static const uint8_t g_plr_key[16] = {
 };
 
 static int g_plr_oom = 0;
+#ifdef TERRAX_TESTING
+static int32_t g_plr_test_alloc_remaining = -1;
+void terrax_test_plr_fail_alloc_after(int32_t remaining) { g_plr_test_alloc_remaining = remaining; }
+static int plr_test_allocation_allowed(void) {
+    if (g_plr_test_alloc_remaining < 0) return 1;
+    if (g_plr_test_alloc_remaining == 0) { g_plr_oom = 1; return 0; }
+    g_plr_test_alloc_remaining--;
+    return 1;
+}
+#endif
 
 /* All PLR DOM and transient buffers belong to TerraWasm's tracked native
  * allocation domain.  Keep the existing cleanup code readable while making
@@ -124,6 +134,9 @@ static int plr_cstring_compare(const char *left, const char *right) {
 }
 
 static void *plr_malloc(size_t size) {
+#ifdef TERRAX_TESTING
+    if (!plr_test_allocation_allowed()) return NULL;
+#endif
     if (size == 0u) size = 1u;
     if (size > (size_t)UINT32_MAX) {
         g_plr_oom = 1;
@@ -145,6 +158,9 @@ static void *plr_calloc(size_t count, size_t size) {
 }
 
 static void *plr_realloc(void *old, size_t size) {
+#ifdef TERRAX_TESTING
+    if (!plr_test_allocation_allowed()) return NULL;
+#endif
     if (size == 0u) size = 1u;
     if (size > (size_t)UINT32_MAX) {
         g_plr_oom = 1;
@@ -4038,6 +4054,85 @@ terrax_world_status terra_plr_replace_json(
     return status;
 }
 
+/* A journal retains only replaced subtrees. Slots are restored in reverse
+ * order, so overlapping paths (child then parent, parent then child, repeated
+ * paths, and root replacement) remain atomic without a full document clone. */
+typedef struct PlrFieldUndo {
+    PlrJsonValue **slot;
+    PlrJsonValue *old_value;
+} PlrFieldUndo;
+
+static terrax_world_status plr_apply_field_edits(
+    PlrDocumentSlot *document, const PlrJsonValue *edits) {
+    if (!edits || edits->type != PLR_JSON_ARRAY) return plr_status_error(
+        TERRAX_WORLD_STATUS_VALIDATION_ERROR, "TERRAX_PLR_JSON_ERROR",
+        "PLR setMany value must be an array");
+    uint32_t count = edits->as.array.count;
+    if (count == 0u) { tx_clear_error(); return TERRAX_WORLD_STATUS_OK; }
+    PlrFieldUndo *journal = plr_calloc(count, sizeof(*journal));
+    if (!journal) return plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR,
+        "TERRAX_WASM_OOM", "out of memory for PLR field journal");
+    uint32_t applied = 0u;
+    terrax_world_status status = TERRAX_WORLD_STATUS_OK;
+    /* Normalization is an in-place numeric repair; retain its original value
+     * too so even a failed unrelated edit cannot change the original model. */
+    PlrJsonValue *metadata = plr_json_object_get(document->root, "metadata");
+    PlrJsonValue *magic = metadata ? plr_json_object_get(metadata, "magicAndType") : NULL;
+    PlrJsonValue old_magic;
+    if (magic) old_magic = *magic;
+    for (uint32_t i = 0u; i < count; i++) {
+        const PlrJsonValue *edit = edits->as.array.items[i];
+        const char *path = NULL;
+        const PlrJsonValue *value = NULL;
+        if (!edit || edit->type != PLR_JSON_OBJECT ||
+            !plr_value_string(plr_json_object_get(edit, "path"), &path) ||
+            !(value = plr_json_object_get(edit, "value"))) {
+            status = plr_status_error(TERRAX_WORLD_STATUS_VALIDATION_ERROR,
+                "TERRAX_PLR_JSON_ERROR", "each PLR edit must contain path and value");
+            break;
+        }
+        PlrJsonValue **slot = path[0] == 0 ? &document->root :
+            plr_json_pointer_slot(document->root, path);
+        if (!slot) {
+            status = plr_status_error(g_plr_oom ? TERRAX_WORLD_STATUS_INTERNAL_ERROR :
+                TERRAX_WORLD_STATUS_VALIDATION_ERROR, g_plr_oom ? "TERRAX_WASM_OOM" :
+                "TERRAX_PLR_FIELD_NOT_FOUND", "PLR JSON pointer was not found");
+            break;
+        }
+        PlrJsonValue *replacement = plr_json_clone(value);
+        if (!replacement) {
+            status = plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR,
+                "TERRAX_WASM_OOM", "out of memory for PLR replacement field");
+            break;
+        }
+        journal[applied].slot = slot;
+        journal[applied++].old_value = *slot;
+        *slot = replacement;
+    }
+    if (status == TERRAX_WORLD_STATUS_OK) {
+        plr_normalize_metadata_magic(document->root);
+        if (!plr_validate_model(document->root)) status = TERRAX_WORLD_STATUS_VALIDATION_ERROR;
+    }
+    if (status != TERRAX_WORLD_STATUS_OK) {
+        while (applied) {
+            PlrFieldUndo *entry = &journal[--applied];
+            plr_json_free(*entry->slot);
+            *entry->slot = entry->old_value;
+        }
+        if (magic) *magic = old_magic;
+    } else {
+        for (uint32_t i = 0u; i < applied; i++) plr_json_free(journal[i].old_value);
+        free(document->original_encrypted);
+        document->original_encrypted = NULL;
+        document->original_length = 0u;
+        plr_invalidate_document_caches(document);
+        document->dirty = 1u;
+        tx_clear_error();
+    }
+    free(journal);
+    return status;
+}
+
 terrax_world_status terra_plr_set(
     uint32_t handle, const char *pointer_utf8, const char *value_json_utf8) {
     PlrDocumentSlot *document = plr_document(handle);
@@ -4045,42 +4140,28 @@ terrax_world_status terra_plr_set(
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
         TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
         "future-version player supports reading and original-byte export only");
-    uint32_t pointer_length = 0u;
+    uint32_t length = 0u;
     if (!pointer_utf8 || !value_json_utf8 ||
-        !plr_cstring_length_bounded(pointer_utf8, PLR_MAX_JSON_BYTES, &pointer_length)) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
-            "TERRAX_INVALID_ARGUMENT",
-            "null or unterminated PLR pointer/value JSON");
-    }
-    (void)pointer_length;
+        !plr_cstring_length_bounded(pointer_utf8, PLR_MAX_JSON_BYTES, &length))
+        return plr_status_error(TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+            "TERRAX_INVALID_ARGUMENT", "null or unterminated PLR pointer/value JSON");
     g_plr_oom = 0;
     PlrJsonValue *value = plr_json_parse_text(value_json_utf8);
-    if (!value) return plr_status_error(
-        TERRAX_WORLD_STATUS_VALIDATION_ERROR,
-        g_plr_oom ? "TERRAX_WASM_OOM" : "TERRAX_PLR_JSON_ERROR",
-        g_plr_oom ? "out of memory while parsing PLR value" : "invalid PLR value JSON");
-    PlrJsonValue *candidate = plr_json_clone(document->root);
-    if (!candidate) {
-        plr_json_free(value);
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INTERNAL_ERROR,
-            "TERRAX_WASM_OOM",
-            "out of memory while copying PLR model");
-    }
-    if (!plr_json_pointer_replace(&candidate, pointer_utf8, value)) {
-        plr_json_free(value);
-        plr_json_free(candidate);
-        return g_plr_oom ?
-            plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM",
-                "out of memory while resolving PLR JSON pointer") :
-            plr_status_error(
-                TERRAX_WORLD_STATUS_VALIDATION_ERROR,
-                "TERRAX_PLR_FIELD_NOT_FOUND",
-                "PLR JSON pointer was not found");
-    }
-    terrax_world_status status = plr_commit_root(document, candidate);
-    if (status != TERRAX_WORLD_STATUS_OK) plr_json_free(candidate);
+    if (!value) return plr_json_error();
+    /* Stack-only edit wrappers borrow caller path and parsed value. */
+    PlrJsonValue path = {0}, edit = {0}, edits = {0};
+    path.type = PLR_JSON_STRING;
+    path.as.string = (char *)pointer_utf8;
+    PlrJsonMember members[2] = {{"path", &path}, {"value", value}};
+    edit.type = PLR_JSON_OBJECT;
+    edit.as.object.members = members;
+    edit.as.object.count = edit.as.object.capacity = 2u;
+    PlrJsonValue *items[1] = {&edit};
+    edits.type = PLR_JSON_ARRAY;
+    edits.as.array.items = items;
+    edits.as.array.count = edits.as.array.capacity = 1u;
+    terrax_world_status status = plr_apply_field_edits(document, &edits);
+    plr_json_free(value);
     return status;
 }
 
@@ -4091,61 +4172,52 @@ terrax_world_status terra_plr_set_many(
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
         TERRAX_WORLD_STATUS_NOT_SUPPORTED, "TERRAX_FUTURE_VERSION_READ_ONLY",
         "future-version player supports reading and original-byte export only");
-    if (!edits_json_utf8) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
-            "TERRAX_INVALID_ARGUMENT",
-            "null PLR edits JSON");
-    }
+    if (!edits_json_utf8) return plr_status_error(TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+        "TERRAX_INVALID_ARGUMENT", "null PLR edits JSON");
     g_plr_oom = 0;
     PlrJsonValue *edits = plr_json_parse_text(edits_json_utf8);
     if (!edits) return plr_json_error();
-    if (edits->type != PLR_JSON_ARRAY) {
-        plr_json_free(edits);
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_VALIDATION_ERROR,
-            "TERRAX_PLR_JSON_ERROR",
-            "PLR setMany value must be an array");
-    }
-    PlrJsonValue *candidate = plr_json_clone(document->root);
-    if (!candidate) {
-        plr_json_free(edits);
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INTERNAL_ERROR,
-            "TERRAX_WASM_OOM",
-            "out of memory while copying PLR model");
-    }
-    for (uint32_t i = 0u; i < edits->as.array.count; i++) {
-        const PlrJsonValue *edit = edits->as.array.items[i];
-        const char *path = NULL;
-        const PlrJsonValue *value = NULL;
-        if (!edit || edit->type != PLR_JSON_OBJECT ||
-            !plr_value_string(plr_json_object_get(edit, "path"), &path) ||
-            !(value = plr_json_object_get(edit, "value"))) {
-            plr_json_free(candidate);
-            plr_json_free(edits);
-            return plr_status_error(
-                TERRAX_WORLD_STATUS_VALIDATION_ERROR,
-                "TERRAX_PLR_JSON_ERROR",
-                "each PLR edit must contain path and value");
-        }
-        PlrJsonValue *replacement = plr_json_clone(value);
-        if (!replacement || !plr_json_pointer_replace(&candidate, path, replacement)) {
-            plr_json_free(replacement);
-            plr_json_free(candidate);
-            plr_json_free(edits);
-            return g_plr_oom ?
-                plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR, "TERRAX_WASM_OOM",
-                    "out of memory while applying PLR JSON edits") :
-                plr_status_error(
-                    TERRAX_WORLD_STATUS_VALIDATION_ERROR,
-                    "TERRAX_PLR_FIELD_NOT_FOUND",
-                    "one PLR JSON pointer was not found");
-        }
-    }
+    terrax_world_status status = plr_apply_field_edits(document, edits);
     plr_json_free(edits);
-    terrax_world_status status = plr_commit_root(document, candidate);
-    if (status != TERRAX_WORLD_STATUS_OK) plr_json_free(candidate);
+    return status;
+}
+
+uint32_t terra_plr_workspace_abi_version(void) { return 1u; }
+
+terrax_world_status terra_plr_release_caches(uint32_t handle) {
+    PlrDocumentSlot *document = plr_document(handle);
+    if (!document) return plr_invalid_handle();
+    plr_invalidate_document_caches(document);
+    tx_clear_error();
+    return TERRAX_WORLD_STATUS_OK;
+}
+
+terrax_world_status terra_plr_get_keys(uint32_t handle, const char *pointer_utf8,
+    char *buffer, uint64_t buffer_size, uint32_t *required_size) {
+    PlrDocumentSlot *document = plr_document(handle);
+    if (!document) return plr_invalid_handle();
+    uint32_t pointer_length = 0u;
+    if (!pointer_utf8 || !plr_cstring_length_bounded(pointer_utf8, PLR_MAX_JSON_BYTES, &pointer_length))
+        return plr_status_error(TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+            "TERRAX_INVALID_ARGUMENT", "null or unterminated PLR JSON pointer");
+    (void)pointer_length;
+    g_plr_oom = 0;
+    const PlrJsonValue *value = plr_json_pointer_value(document->root, pointer_utf8);
+    if (!value && g_plr_oom) return plr_status_error(TERRAX_WORLD_STATUS_INTERNAL_ERROR,
+        "TERRAX_WASM_OOM", "out of memory while resolving PLR key query");
+    if (!value || value->type != PLR_JSON_OBJECT) return plr_status_error(
+        TERRAX_WORLD_STATUS_VALIDATION_ERROR, "TERRAX_PLR_FIELD_NOT_FOUND",
+        "PLR key query requires an object pointer");
+    PlrJsonValue *keys = plr_json_array();
+    if (!keys) return plr_json_error();
+    for (uint32_t i = 0u; i < value->as.object.count; i++) {
+        PlrJsonValue *key = plr_json_string(value->as.object.members[i].key);
+        if (!key || !plr_json_array_push(keys, key)) {
+            plr_json_free(key); plr_json_free(keys); return plr_json_error();
+        }
+    }
+    terrax_world_status status = plr_copy_json_result(keys, buffer, buffer_size, required_size);
+    plr_json_free(keys);
     return status;
 }
 

@@ -16,6 +16,10 @@ test("the Node artifact reports the same source, flags, memory, and dirty identi
   assert.equal(identity.abiVersion, manifest.abi.version);
   assert.deepEqual(identity.stream, manifest.abi.stream);
   if (identity.stream) assert.equal(M._terra_world_stream_abi_version(), identity.stream.version);
+  assert.equal(identity.pixelWorkspaceAbiVersion ?? 0, manifest.abi.pixelWorkspace?.version || 0);
+  assert.equal(identity.playerWorkspaceAbiVersion ?? 0, manifest.abi.playerWorkspace?.version || 0);
+  if (manifest.abi.pixelWorkspace) assert.equal(M._terra_pixel_workspace_abi_version(), 1);
+  if (manifest.abi.playerWorkspace) assert.equal(M._terra_plr_workspace_abi_version(), 1);
   assert.equal(identity.sourceCommit, manifest.sourceCommit);
   assert.equal(identity.dirty, manifest.dirty);
   assert.equal(typeof identity.dirty, "boolean");
