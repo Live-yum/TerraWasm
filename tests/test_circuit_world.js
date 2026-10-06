@@ -71,6 +71,31 @@ test('HitSwitch timers use 60/180/300/30/15 ticks and cancel restores a complete
   } finally { d.dispose(); }
 });
 
+test('world timers obey CheckMech shared 999-slot capacity and reclaim slots only during UpdateMech', async () => {
+  const d = await makeDriver();
+  try {
+    const timers = Array.from({ length: 1000 }, (_, index) => ({
+      x: index + 2, y: 4, type: 144, fx: 72, wires: index === 999 ? 1 : 0,
+    }));
+    d.open(makeCircuitWorld([...timers, { x: 1002, y: 4, type: 419, wires: 1 }], 1006, 8));
+    for (const timer of timers) d.command(2, { x: timer.x, y: timer.y, flags: 1 });
+    assert.equal(d.cell(1001, 4).fy, 18, 'HitSwitch still changes the frame when registration is full');
+    d.command(3, { count: 15 });
+    assert.equal(d.cell(1002, 4).fx, 0, 'the 1000th timer has no registered clock and cannot pulse');
+
+    d.command(2, { x: 2, y: 4, flags: 1 });
+    d.command(2, { x: 1001, y: 4, flags: 1 });
+    d.command(2, { x: 1001, y: 4, flags: 1 });
+    d.command(3, { count: 15 });
+    assert.equal(d.cell(1002, 4).fx, 0, 'turning a timer off does not immediately free its coordinate slot');
+
+    d.command(2, { x: 1001, y: 4, flags: 1 });
+    d.command(2, { x: 1001, y: 4, flags: 1 });
+    d.command(3, { count: 14 }); assert.equal(d.cell(1002, 4).fx, 0);
+    d.command(3, { count: 1 }); assert.equal(d.cell(1002, 4).fx, 18, 'a later explicit activation can acquire the freed slot');
+  } finally { d.dispose(); }
+});
+
 test('clock batch cancel restores committed lamps, and wall samples/save preserve source sections', async () => {
   const d = await makeDriver();
   try {

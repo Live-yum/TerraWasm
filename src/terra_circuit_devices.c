@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Wiring.CheckMech uses one shared 999-position limit, independent of world
+ * size and the number of wire-connected devices. A full list rejects only the
+ * new registration; HitSwitch still changes the timer/button's visible frame. */
+#define CX_MECH_LIMIT 999u
+
 static int grow(CxWorld* w,void** data,uint32_t* capacity,uint32_t count,uint32_t size){if(count<=*capacity)return 1;uint32_t n=*capacity?*capacity*2u:64u;while(n<count){if(n>UINT32_MAX/2u)return 0;n*=2u;}if((uint64_t)n*size>UINT32_MAX)return 0;void* p=cx_alloc(w,n*size);if(!p)return 0;if(*data)memcpy(p,*data,*capacity*size);cx_free(w,*data);*data=p;*capacity=n;return 1;}
 static int is_switch(uint32_t type){switch(type){case 132:case 135:case 136:case 144:case 314:case 411:case 423:case 428:case 440:case 441:case 442:case 467:case 468:case 476:return 1;default:return 0;}}
 int cx_devices_prepare(CxWorld* w){for(uint32_t i=0;i<2;i++){w->previous_columns[i]=(TxTile*)cx_alloc(w,w->height*sizeof(TxTile));if(!w->previous_columns[i])return TCW_MEMORY;}return TCW_OK;}
@@ -37,7 +42,7 @@ int cx_devices_compile(CxWorld* w){
     for(uint32_t i=0;i<w->device_count;i++)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c]){count+=w->devices[i].tile.actuator!=0;count+=w->devices[i].tile.type==130u||w->devices[i].tile.type==131u;}
     if(count>UINT32_MAX/sizeof(CxPort))return TCW_MEMORY;
     w->ports=(CxPort*)cx_alloc(w,(count?count:1u)*sizeof(CxPort));w->pixel_touched=(uint32_t*)cx_alloc(w,(w->pixel_count?w->pixel_count:1u)*4u);w->pixel_snapshot=(uint8_t*)cx_alloc(w,w->pixel_count?w->pixel_count:1u);
-    w->mech_capacity=w->device_count?w->device_count:1u;w->mechs=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);w->mechs_snapshot=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);
+    w->mech_capacity=w->device_count?w->device_count:1u;if(w->mech_capacity>CX_MECH_LIMIT)w->mech_capacity=CX_MECH_LIMIT;w->mechs=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);w->mechs_snapshot=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);
     if(!w->ports||!w->pixel_touched||!w->pixel_snapshot||!w->mechs||!w->mechs_snapshot)return TCW_MEMORY;
     for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(w->twld_state&&p->custom&&p->h[c]==p->v[c])continue;if(p->h[c])w->ports[w->port_count++]=(CxPort){p->h[c],i,0,(uint8_t)c,0};if((!w->twld_state||p->custom)&&p->v[c])w->ports[w->port_count++]=(CxPort){p->v[c],i,1,(uint8_t)c,0};}
     for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c])w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,w->devices[i].tile.type==144u?2:3,(uint8_t)c,0};
@@ -46,7 +51,7 @@ int cx_devices_compile(CxWorld* w){
 }
 uint32_t cx_pixel_find(CxWorld* w,uint32_t x,uint32_t y){uint32_t lo=0,hi=w->pixel_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;CxPixel* p=w->pixels+m;if(p->x<x||(p->x==x&&p->y<y))lo=m+1;else hi=m;}return lo<w->pixel_count&&w->pixels[lo].x==x&&w->pixels[lo].y==y?lo:CX_NONE;}
 CxDevice* cx_device_find(CxWorld* w,uint32_t x,uint32_t y){uint32_t lo=0,hi=w->device_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;CxDevice* p=w->devices+m;if(p->x<x||(p->x==x&&p->y<y))lo=m+1;else hi=m;}return lo<w->device_count&&w->devices[lo].x==x&&w->devices[lo].y==y?w->devices+lo:NULL;}
-static int check_mech(CxWorld* w,CxDevice* d,uint32_t time){if(d->cooldown)return 0;if(w->mech_count>=w->mech_capacity)return -1;d->cooldown=time;w->mechs[w->mech_count++]=(uint32_t)(d-w->devices);return 1;}
+static int check_mech(CxWorld* w,CxDevice* d,uint32_t time){if(d->cooldown||w->mech_count>=CX_MECH_LIMIT)return 0;if(w->mech_count>=w->mech_capacity)return -1;d->cooldown=time;w->mechs[w->mech_count++]=(uint32_t)(d-w->devices);return 1;}
 static int toggle_timer(CxWorld* w,CxDevice* d){if(d->tile.frame_y==0){d->tile.frame_y=18;if(check_mech(w,d,18000u)<0)return -1;}else d->tile.frame_y=0;return 0;}
 int cx_trip_begin(void* context){CxWorld* w=(CxWorld*)context;++w->vm_trip_index;TerraVmGateRef source;w->vm_source_gate=terra_vm_current_gate(w->vm,&source)==1&&source.group==0?source.offset:0;if(!w->twld_state)w->pixel_touched_count=0;for(uint32_t i=0;i<w->device_count;i++)w->devices[i].wire_hit_mask=0;return 0;}
 int cx_net_hit(void* context,uint32_t net){

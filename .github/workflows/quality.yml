@@ -30,6 +30,12 @@ jobs:
         run: cmake --build build-native --config Release --parallel
       - name: Run native contracts and fuzz smoke
         run: ctest --test-dir build-native --build-config Release --output-on-failure
+      - name: Check source mechanic capacity without adding release exports
+        run: |
+          cc -std=c17 -O2 -ffunction-sections -fdata-sections -Iinclude -Isrc \
+            src/terra_circuit_devices.c tests/circuit_device_clock_contract.c \
+            -Wl,--gc-sections -o "$RUNNER_TEMP/circuit-device-clock"
+          "$RUNNER_TEMP/circuit-device-clock"
 
   sanitizer-and-fuzz:
     runs-on: ubuntu-latest
