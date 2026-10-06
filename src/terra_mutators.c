@@ -32,7 +32,8 @@ extern int parse_header(TxWorld *w);
 #define TX_MUTATOR_MAX_CHESTS 1000u
 #define TX_MUTATOR_MAX_CHEST_ITEMS 504u
 #define TX_MUTATOR_MAX_BESTIARY_ENTRIES 4096u
-#define TX_MUTATOR_MAX_KILL_COUNT 1000000u
+/* Terraria NPCKillsTracker.POSITIVE_KILL_COUNT_CAP; fits its signed Int32 field. */
+#define TX_MUTATOR_MAX_KILL_COUNT 999999999u
 #define TX_MUTATOR_MAX_ITEM_TYPE 1000000u
 
 typedef struct TxJsonParser {
