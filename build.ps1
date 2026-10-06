@@ -121,11 +121,15 @@ if ($Test) {
         "tests/test_build_identity.js",
         "tests/test_manifest_contract.js",
         "tests/test_artifact_size_contract.js",
-        "tests/test_feature_set.js"
+        "tests/test_feature_set.js",
+        "tests/test_stream_abi_manifest.mjs"
     )
     $wldTests = @(
         "tests/test_memory_lifecycle.js",
         "tests/test_map_streaming_contract.js",
+        "tests/test_stream_lease.js",
+        "tests/test_stream_world.js",
+        "tests/test_stream_operations.js",
         "tests/test_buffer_io.js",
         "tests/test_batch_update_thumbnail.js",
         "tests/test_commands.js",

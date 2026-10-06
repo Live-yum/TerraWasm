@@ -80,8 +80,15 @@ static const char g_capabilities[] =
     "{\"version\":1,\"features\":[\"plr-read-write\"]}";
 #endif
 
+#if TERRAWASM_FEATURE_WLD
+#define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true}"
+#else
+#define TERRAX_STREAM_IDENTITY_JSON ""
+#endif
+
 static const char g_build_info_json[] =
     "{\"abiVersion\":" TERRAX_STRINGIFY(TERRAX_ABI_VERSION)
+    TERRAX_STREAM_IDENTITY_JSON
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""
     ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)
     ",\"compiler\":\"" TERRAX_BUILD_COMPILER "\""

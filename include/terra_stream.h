@@ -15,6 +15,28 @@ typedef struct TxStreamPixelSpec {
     uint32_t width, height, resolved_maps_ptr, resolved_maps_count;
     uint32_t default_palette_index, preview_width, reserved;
 } TxStreamPixelSpec;
+/* Additive input ownership protocol. Event/spec ABI remains version 1.
+ * Allocate the descriptor before acquire; no Wasm calls between filling a fresh
+ * HEAPU8 view and commit. Memory growth invalidates the lease. A failed commit
+ * never consumes the event. Cancel/close invalidate every borrowed pointer. */
+typedef struct TxStreamInputLease {
+    uint32_t abi_version, lease_id, source_id, offset, length, data_ptr, capacity, memory_bytes;
+} TxStreamInputLease;
+/* Counters saturate at UINT32_MAX; source_bytes / decoded_tile_bytes is read
+ * amplification (metadata bytes are included in source_bytes). No heap metric
+ * here describes process RSS or the platform's file-system cache. */
+typedef struct TxStreamStats {
+    uint32_t abi_version, source_requests, source_bytes, decoded_tile_bytes;
+    uint32_t tile_records, tile_scan_passes, input_copy_bytes, tile_copy_bytes;
+    uint32_t output_bytes, cache_hits, cache_misses, cache_bytes, candidate_count;
+    uint32_t cache_copy_bytes;
+} TxStreamStats;
+uint32_t terra_world_stream_abi_version(void);
+int32_t terra_world_stream_acquire_input(uint32_t task, TxStreamInputLease* out);
+int32_t terra_world_stream_commit_input(uint32_t task, uint32_t lease_id,
+    uint32_t source_id, uint32_t offset, uint32_t length);
+int32_t terra_world_stream_release_input(uint32_t task, uint32_t lease_id);
+int32_t terra_world_stream_get_stats(uint32_t task, TxStreamStats* out);
 int32_t terra_world_stream_open_begin(uint32_t source_id, uint32_t source_size, uint32_t* out_task);
 int32_t terra_world_stream_pixel_begin(uint32_t world, const TxStreamPixelSpec* spec, uint32_t* out_task);
 int32_t terra_world_stream_step(uint32_t task, uint32_t work_units, TxStreamEvent* event);
