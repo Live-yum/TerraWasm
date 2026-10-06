@@ -33,6 +33,8 @@ void terrax_test_reset_fail_save(void);
 
 void rd_string_copy(const uint8_t* p, uint32_t len, uint32_t* off, char* out, uint32_t cap);
 void rd_skip_string_value(const uint8_t* p, uint32_t len, uint32_t* off);
+int json_find_key(const char* json, int len, const char* key);
+int json_extract_str(const char* json, int len, int pos, char* out, int capacity);
 int parse_format(TxWorld* w);
 int parse_header(TxWorld* w);
 int read_tile_at(TxWorld* w, uint32_t* off, uint32_t end, TxTile* t);
@@ -236,6 +238,18 @@ static int test_native_abi_contract(void) {
     return 1;
 }
 
+static int expect_header_manifest(const char* header, const unsigned char* expected, uint32_t length) {
+    char* decoded = (char*)malloc((size_t)length + 1u);
+    if (!expect(decoded != NULL, "header manifest: allocation failed")) return 0;
+    int json_length = (int)strlen(header);
+    int position = json_find_key(header, json_length, "manifestJson");
+    int actual = json_extract_str(header, json_length, position, decoded, (int)length + 1);
+    int ok = expect(actual == (int)length && memcmp(decoded, expected, length) == 0,
+                    "header manifest: full source bytes must survive JSON serialization");
+    free(decoded);
+    return ok;
+}
+
 /* Independent byte offsets from WorldFile.LoadWorldFlags in the checked-in
  * Terraria fixtures, not from TerraWasm's parser or header encoder:
  * gameMode=254, spawnX/Y=352/356, dualDungeons=2450,
@@ -263,6 +277,7 @@ static int test_header_patch_bytes(uint32_t version, uint8_t more, uint8_t none)
                 "header patch bytes: game fixture rejected")) goto cleanup;
     if (!expect(terra_section_get_json(handle, "header", header, sizeof(header), &json_required) == TERRAX_WORLD_STATUS_OK,
                 "header patch bytes: header JSON failed")) goto cleanup;
+    if (!expect_header_manifest(header, fixture + manifest + 2u, 9571u)) goto cleanup;
     if (version >= 323u) {
         snprintf(request, sizeof(request), "\"moreLightningSeed\":%s", more ? "true" : "false");
         if (!expect(strstr(header, request) != NULL, "header patch bytes: moreLightningSeed misread")) goto cleanup;
@@ -274,6 +289,9 @@ static int test_header_patch_bytes(uint32_t version, uint8_t more, uint8_t none)
                 "{\"patch\":{\"spawnTileX\":4201,\"spawnTileY\":2255,\"gameMode\":3,\"revision\":1234}}",
                 response, sizeof(response), &json_required) == TERRAX_WORLD_STATUS_OK,
                 "header patch bytes: metadata patch failed")) goto cleanup;
+    if (!expect(terra_section_get_json(handle, "header", header, sizeof(header), &json_required) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: active header JSON failed") ||
+        !expect_header_manifest(header, fixture + manifest + 2u, 9571u)) goto cleanup;
     write_u32le(fixture, 12u, 1234u);
     write_u32le(fixture, 254u, 3u);
     write_u32le(fixture, 352u, 4201u);
@@ -305,6 +323,9 @@ static int test_header_patch_bytes(uint32_t version, uint8_t more, uint8_t none)
     terra_world_close(handle); handle = 0u;
     if (!expect(terra_world_open_from_buffer(saved, required, &reopened) == TERRAX_WORLD_STATUS_OK,
                 "header patch bytes: saved game fixture cannot reopen")) goto cleanup;
+    if (!expect(terra_section_get_json(reopened, "header", header, sizeof(header), &json_required) == TERRAX_WORLD_STATUS_OK,
+                "header patch bytes: reopened header JSON failed") ||
+        !expect_header_manifest(header, fixture + manifest + 2u, 9571u)) goto cleanup;
     printf("header patch bytes: v%u flags %u/%u metadata, manifest and section bytes preserved\n", version, more, none);
     ok = 1;
 cleanup:
