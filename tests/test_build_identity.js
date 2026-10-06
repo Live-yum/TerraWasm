@@ -14,6 +14,8 @@ test("the Node artifact reports the same source, flags, memory, and dirty identi
   const identity = JSON.parse(M.UTF8ToString(M._terra_build_info_json()));
 
   assert.equal(identity.abiVersion, manifest.abi.version);
+  assert.deepEqual(identity.stream, manifest.abi.stream);
+  if (identity.stream) assert.equal(M._terra_world_stream_abi_version(), identity.stream.version);
   assert.equal(identity.sourceCommit, manifest.sourceCommit);
   assert.equal(identity.dirty, manifest.dirty);
   assert.equal(typeof identity.dirty, "boolean");

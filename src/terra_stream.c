@@ -14,6 +14,7 @@
 #define METADATA_LIMIT (16u*1024u*1024u)
 #define RECORD_BYTES 8200u
 #define TILE_MAX_BYTES 32u
+#define PNG_SOURCE_CACHE (2u*1024u*1024u)
 extern uint8_t* tx_persistent_alloc(uint32_t);
 extern void tx_internal_free(void*);
 extern uint32_t tx_mark(void);
@@ -32,6 +33,7 @@ extern void buf_init(TxBuf*,uint32_t);
 extern int apply_pixel_art_at(TxWorld*,uint32_t,uint32_t,TxTile*);
 extern int tx_stream_activate_world(TxWorld*,uint32_t*);
 
+#ifdef TERRAX_TESTING
 static void write_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
                                 uint32_t y, const TxTile* tile, uint32_t run) {
     uint8_t color[4];
@@ -43,17 +45,28 @@ static void write_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
     }
 }
 
-#ifdef TERRAX_TESTING
 void txw_test_stream_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
                                    uint32_t y, const TxTile* tile, uint32_t run) {
     write_rgb_cache_run(world, rgb, x, y, tile, run);
 }
 #endif
 
-enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY };
+enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY,PNG_CURSOR_SCAN,WRITE_COPY,PNG_MARKER_SCAN };
+typedef struct PngMarkerCursor {uint32_t offset,y;} PngMarkerCursor;
+typedef struct PngColumnCursor {
+    uint32_t offset,y,remaining,cache_offset,cache_length;
+    TxTile tile;
+} PngColumnCursor;
+typedef struct EditRuleGroup {
+    TxTileRule* rules;
+    uint32_t count;
+    double surface;
+} EditRuleGroup;
 typedef struct StreamTask {
     uint32_t id, stage, is_write, old_handle;
     TxStreamEvent event;
+    TxStreamInputLease lease;
+    TxStreamStats stats;
     TxWorld* candidate;
     TxWorld* source;
     uint8_t* input;
@@ -75,9 +88,15 @@ typedef struct StreamTask {
     char* request;
     uint32_t result_kind,result_length,result_offset;
     uint8_t* result;
-    uint8_t* rgb_cache;
+    PngColumnCursor* png_columns;
+    PngMarkerCursor* png_marker_columns;
+    uint32_t png_marker_radius,png_marker_first,png_marker_end;
+    uint8_t* png_source_cache;
+    uint32_t png_cache_stride,png_cache_request,png_strip_end;
     TxTileRule* rules;
     uint32_t rule_count;
+    EditRuleGroup groups[128];
+    uint32_t group_count,plan_rule_count,copy_tiles;
     void* region_scan;
     TxMarkerScan* marker_scan;
     MapMarkerEntry* chest_markers;
@@ -86,7 +105,25 @@ typedef struct StreamTask {
     TxStreamPng* png_encoder;
 } StreamTask;
 static StreamTask* current;
-static uint32_t generation=1;
+static uint32_t generation=1, lease_generation=1;
+static void counter_add(uint32_t* value,uint32_t n){*value=n>UINT32_MAX-*value?UINT32_MAX:*value+n;}
+#ifdef TERRAX_TESTING
+static uint32_t test_memory_bytes;
+void txw_test_stream_memory_bytes(uint32_t n){test_memory_bytes=n;}
+#endif
+static uint32_t lease_memory_bytes(void){
+#ifdef __wasm__
+    return (uint32_t)__builtin_wasm_memory_size(0)*65536u;
+#else
+#ifdef TERRAX_TESTING
+    return test_memory_bytes;
+#else
+    return 0;
+#endif
+#endif
+}
+uint32_t terra_world_stream_abi_version(void){return 2;}
+
 
 int tx_stream_task_pending(void) {
     return current && current->stage != CANCELLED && current->stage != ADOPTED;
@@ -132,6 +169,7 @@ static int validate_footer(TxWorld* w){
 static StreamTask* task(uint32_t id){return current&&current->id==id&&current->stage!=CANCELLED?current:NULL;}
 static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;}
 static void event(StreamTask* t,uint32_t kind,uint32_t offset,uint32_t length,const void* data){
+    if(kind==TX_STREAM_NEED_SOURCE)counter_add(&t->stats.source_requests,1);
     clear_event(t);t->event.kind=kind;t->event.source_id=t->source_id;t->event.offset=offset;
     t->event.length=length;t->event.data_ptr=(uint32_t)(uintptr_t)data;
     t->event.completed_columns=t->x;t->event.total_columns=t->candidate?(uint32_t)t->candidate->maxTilesX:0;
@@ -174,7 +212,7 @@ static StreamTask* new_task(uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
     if(!valid_range(out,4)||current){fail("TERRAX_STATE_ERROR","invalid stream output pointer or another task is active");return NULL;}
     StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t)return NULL;
-    memset(t,0,sizeof(*t));t->id=generation++;if(!t->id)t->id=generation++;
+    memset(t,0,sizeof(*t));t->stats.abi_version=2;t->stats.candidate_count=1;t->id=generation++;if(!t->id)t->id=generation++;
     t->candidate=(TxWorld*)tx_persistent_alloc(sizeof(TxWorld));t->input=tx_persistent_alloc(WINDOW);
     if(!t->candidate||!t->input){if(t->candidate)tx_internal_free(t->candidate);if(t->input)tx_internal_free(t->input);tx_internal_free(t);return NULL;}
     memset(t->candidate,0,sizeof(TxWorld));clear_event(t);current=t;*out=t->id;return t;
@@ -257,7 +295,99 @@ static int finish_compact_open(StreamTask* t){
     w->stream_source_id=t->source_id;w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
     w->stream_columns=(uint32_t*)tx_persistent_alloc(((uint32_t)w->maxTilesX+1)*4);
     if(!w->stream_columns)return fail("TERRAX_WASM_OOM","column index allocation failed");
-    t->cursor=t->original_start;t->stage=OPEN_SCAN;return 0;
+    t->cursor=t->original_start;t->stats.tile_scan_passes++;t->stage=OPEN_SCAN;return 0;
+}
+static int same_tile_format(const TxWorld* a,const TxWorld* b){
+    return a->version==b->version&&a->maxTilesX==b->maxTilesX&&a->maxTilesY==b->maxTilesY&&
+        a->tile_type_count==b->tile_type_count&&a->important_len==b->important_len&&
+        !memcmp(a->important,b->important,a->important_len);
+}
+static int compact_metadata(StreamTask* t,const char* operation,const char* request){
+    TxWorld* w=t->candidate;TxBuf response={0};buf_init(&response,256);
+    int ok=op_execute_json(w,operation,request,&response);
+    if(response.data)tx_internal_free(response.data);tx_last_ptr=tx_last_len=0;
+    if(ok<0)return 0;
+    TxWorld compact={0};if(!compact_copy(&compact,w)){
+        if(compact.file)tx_internal_free(compact.file);return 0;
+    }
+    tx_internal_free(w->file);w->file=compact.file;w->file_len=compact.file_len;
+    for(uint32_t i=0;i<TX_MAX_SECTION_OVERRIDES;i++){
+        if(w->section_overrides[i].data)tx_internal_free(w->section_overrides[i].data);
+        memset(&w->section_overrides[i],0,sizeof(w->section_overrides[i]));
+    }
+    if(w->important_override){tx_internal_free(w->important_override);w->important_override=NULL;}
+    if(!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return 0;
+    if(w->maxTilesX!=t->source->maxTilesX||w->maxTilesY!=t->source->maxTilesY){
+        fail("TERRAX_INVALID_ARGUMENT","streaming header patch cannot resize world dimensions");return 0;
+    }
+    return 1;
+}
+static int verified_tile_copy(StreamTask* t){
+    TxWorld* s=t->source;
+    if(!s->stream_source_id||!s->stream_columns||s->section_overrides[1].active||!same_tile_format(t->candidate,s)||
+       s->stream_columns[0]!=t->original_start||s->stream_columns[s->maxTilesX]!=t->original_end)return 0;
+    for(uint32_t x=0;x<(uint32_t)s->maxTilesX;x++)if(s->stream_columns[x]>=s->stream_columns[x+1])return 0;
+    return 1;
+}
+extern int json_array_count(const char*,int,int);
+extern int json_array_element(const char*,int,int,int);
+extern int json_skip_value(const char*,int,int);
+extern int json_extract_str(const char*,int,int,char*,int);
+static int prepare_edit_plan(StreamTask* t){
+    const char* json=t->request;int len=(int)strlen(json),pos=json_find_key(json,len,"operations");
+    int count=pos<0?-1:json_array_count(json,len,pos);
+    if(count<1||count>128)return 0;
+    for(int i=0;i<count;i++){
+        int begin=json_array_element(json,len,pos,i),end=json_skip_value(json,len,begin);
+        if(begin<0||end<=begin)return 0;
+        const char* entry=json+begin;int n=end-begin;
+        int name=json_find_key(entry,n,"operation"),request=json_find_key(entry,n,"request");
+        char operation[128];
+        if(name<0||request<0||!json_extract_str(entry,n,name,operation,sizeof(operation)))return 0;
+        int request_end=json_skip_value(entry,n,request);
+        if(request_end<=request||entry[request]!='{')return 0;
+        char* text=(char*)tx_persistent_alloc((uint32_t)(request_end-request)+1);
+        if(!text)return 0;memcpy(text,entry+request,request_end-request);text[request_end-request]=0;
+        int ok=1;
+        if(!strcmp(operation,"batch_update_tiles")){
+            EditRuleGroup* group=&t->groups[t->group_count];
+            ok=tx_stream_parse_tile_rules(t->candidate,text,request_end-request,&group->rules,&group->count)>0;
+            if(ok){
+                t->group_count++;t->plan_rule_count+=group->count;group->surface=t->candidate->worldSurface;
+                if(t->plan_rule_count>1024)ok=0;
+                for(uint32_t r=0;r<group->count;r++){
+                    TxTileRule* rule=&group->rules[r];
+                    /* These depend on a whole intermediate world, RLE grouping,
+                     * or region/surface subdivision; never silently fuse them. */
+                    if(rule->biome_region>0||rule->exclude_biome_region>0||rule->terrain_theme>0||rule->limit)ok=0;
+                }
+            }
+        }else if(!strcmp(operation,"header_patch")||!strcmp(operation,"replace_chests")||!strcmp(operation,"replace_bestiary")){
+            ok=compact_metadata(t,operation,text)&&same_tile_format(t->candidate,t->source);
+        }else if(strcmp(operation,"save"))ok=0;
+        tx_internal_free(text);if(!ok)return 0;
+    }
+    t->copy_tiles=!t->group_count&&verified_tile_copy(t);
+    return 1;
+}
+static int apply_write_rules(StreamTask* t,TxTile* tile,uint32_t run){
+    TxWorld* w=t->candidate;
+    if(!t->group_count){tx_apply_tile_rules(tile,t->rules,t->rule_count,run,tx_region_at(w,t->x,t->y),t->y,w->worldSurface);return 1;}
+    for(uint32_t g=0;g<t->group_count;g++){
+        EditRuleGroup* group=&t->groups[g];
+        tx_apply_tile_rules(tile,group->rules,group->count,run,0,t->y,group->surface);
+        if(g+1<t->group_count){
+            /* Each operation observes what the previous WLD encode/decode
+             * would retain (e.g. an inactive tile no longer carries type).
+             * Preserve operation-local material matching's original tile. */
+            uint8_t bytes[TILE_MAX_BYTES];TxBuf b={bytes,0,sizeof(bytes),1};write_tile(w,&b,tile,0);
+            if(!b.ok)return 0;
+            uint8_t* saved=w->file;uint32_t saved_len=w->file_len,off=0;
+            w->file=bytes;w->file_len=b.len;int ok=read_tile_at(w,&off,b.len,tile);w->file=saved;w->file_len=saved_len;
+            if(!ok||off!=b.len)return 0;
+        }
+    }
+    return 1;
 }
 int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,const char* request,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
@@ -268,7 +398,7 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     if(!t->operation||!t->request||!json_validate_document(t->request,(int)strlen(t->request)))goto invalid;
     if(tx_world_is_future(source) && (!strcmp(t->operation,"batch_update_tiles") ||
        !strcmp(t->operation,"header_patch") || !strcmp(t->operation,"replace_chests") ||
-       !strcmp(t->operation,"replace_bestiary"))) {
+       !strcmp(t->operation,"replace_bestiary") || !strcmp(t->operation,"edit_plan"))) {
         terra_world_stream_cancel(t->id);terra_world_stream_close(t->id);*out=0;
         tx_world_require_writable(source);return -1;
     }
@@ -290,22 +420,20 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
         w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
         return 0;
     }
-    if(!strcmp(t->operation,"batch_update_tiles")||!strcmp(t->operation,"save")||!strcmp(t->operation,"header_patch")||!strcmp(t->operation,"replace_chests")||!strcmp(t->operation,"replace_bestiary")){
+    if(!strcmp(t->operation,"batch_update_tiles")||!strcmp(t->operation,"save")||!strcmp(t->operation,"header_patch")||!strcmp(t->operation,"replace_chests")||!strcmp(t->operation,"replace_bestiary")||!strcmp(t->operation,"edit_plan")){
         t->is_write=1;t->output.data=tx_persistent_alloc(WINDOW);t->output.cap=WINDOW;t->output.ok=t->output.data!=NULL;if(!t->output.ok)goto invalid;
-        if(!strcmp(t->operation,"batch_update_tiles")){
+        if(!strcmp(t->operation,"edit_plan")){
+            if(!prepare_edit_plan(t))goto invalid;
+            t->prefix_length=w->starts[1];t->stage=WRITE_PREFIX;
+        }else if(!strcmp(t->operation,"batch_update_tiles")){
             if(tx_stream_parse_tile_rules(w,t->request,jlen,&t->rules,&t->rule_count)<0)goto invalid;
             t->region_scan=tx_region_stream_begin(w,t->rules,t->rule_count);if(!t->region_scan)goto invalid;
-            t->stage=OP_REGION;
+            t->stats.tile_scan_passes++;t->stage=OP_REGION;
         }else{
             if(strcmp(t->operation,"save")){
-                TxBuf response={0};buf_init(&response,256);int ok=op_execute_json(w,t->operation,t->request,&response);if(response.data)tx_internal_free(response.data);if(ok<0)goto invalid;
-                TxWorld compact={0};if(!compact_copy(&compact,w))goto invalid;
-                tx_internal_free(w->file);w->file=compact.file;w->file_len=compact.file_len;
-                for(uint32_t i=0;i<TX_MAX_SECTION_OVERRIDES;i++){if(w->section_overrides[i].data)tx_internal_free(w->section_overrides[i].data);memset(&w->section_overrides[i],0,sizeof(w->section_overrides[i]));}
-                if(w->important_override){tx_internal_free(w->important_override);w->important_override=NULL;}
-                if(!parse_format(w)||!parse_header(w))goto invalid;
-                if(w->maxTilesX!=source->maxTilesX||w->maxTilesY!=source->maxTilesY){fail("TERRAX_INVALID_ARGUMENT","streaming header patch cannot resize world dimensions");goto invalid;}
+                if(!compact_metadata(t,t->operation,t->request))goto invalid;
             }
+            t->copy_tiles=verified_tile_copy(t);
             t->prefix_length=w->starts[1];t->stage=WRITE_PREFIX;
         }
     }else{
@@ -330,22 +458,45 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
         }
         t->marker_scan=tx_marker_stream_begin(w,w->prepared_output->markers,count);if(!t->marker_scan)goto invalid;
         if(t->full_png){
-            uint64_t bytes=(uint64_t)w->maxTilesX*w->maxTilesY*3;
-            /* Optional cache: allocation is admitted by the host before heap growth.
-             * Failure retains the strip path. Cap is one large-world RGB image. */
-            if(bytes<=60480000u)t->rgb_cache=tx_persistent_alloc((uint32_t)bytes);
+            uint32_t width=(uint32_t)w->maxTilesX;
+            t->png_cache_stride=PNG_SOURCE_CACHE/width;
+            if(t->png_cache_stride>4096)t->png_cache_stride=4096;
+            if(t->png_cache_stride<TILE_MAX_BYTES)goto invalid;
+            t->png_columns=(PngColumnCursor*)tx_persistent_alloc(width*sizeof(PngColumnCursor));
+            t->png_source_cache=tx_persistent_alloc(width*t->png_cache_stride);
+            if(!t->png_columns||!t->png_source_cache)goto invalid;
+            memset(t->png_columns,0,width*sizeof(PngColumnCursor));
+            for(uint32_t i=0;i<count;i++)if(!w->prepared_output->markers[i].locate){
+                uint32_t radius=w->prepared_output->markers[i].radius;
+                if(!radius)radius=1;
+                if(radius>t->png_marker_radius)t->png_marker_radius=radius;
+            }
+            if(t->png_marker_radius){
+                t->png_marker_columns=(PngMarkerCursor*)tx_persistent_alloc(width*sizeof(PngMarkerCursor));
+                if(!t->png_marker_columns)goto invalid;
+                memset(t->png_marker_columns,0,width*sizeof(PngMarkerCursor));
+            }
+            t->stats.cache_bytes=width*(sizeof(PngColumnCursor)+t->png_cache_stride+(t->png_marker_columns?sizeof(PngMarkerCursor):0));
+            if(!count&&source->stream_columns&&!source->section_overrides[1].active&&
+               source->stream_columns[0]==t->original_start&&source->stream_columns[width]==t->original_end){
+                /* Open has already validated every column. No marker search is
+                 * needed: begin directly with one resumable decoding pass. */
+                tx_marker_stream_free(t->marker_scan);t->marker_scan=NULL;
+                t->png_encoder=tx_stream_png_begin(w,0,0,t->chest_markers,t->chest_count,NULL,0);
+                if(!t->png_encoder)goto invalid;
+                for(uint32_t x=0;x<width;x++)t->png_columns[x].offset=w->stream_columns[x];
+                t->stage=OP_MEDIA;return 0;
+            }
         }
-        t->stage=OP_SCAN;
+        t->stats.tile_scan_passes++;t->stage=OP_SCAN;
     }
     return 0;
 invalid:
     terra_world_stream_cancel(t->id);terra_world_stream_close(t->id);if(out&&valid_range(out,4))*out=0;
     return fail("TERRAX_STREAM_OPERATION_FAILED","invalid operation or bounded preparation failed");
 }
-int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t offset,const uint8_t* bytes,uint32_t length){
-    StreamTask* t=task(id);
-    if(!t||t->event.kind!=TX_STREAM_NEED_SOURCE||source_id!=t->event.source_id||offset!=t->event.offset||length!=t->event.length||!valid_range(bytes,length))
-        return fail("TERRAX_INVALID_ARGUMENT","source event/range mismatch");
+static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uint32_t length){
+    counter_add(&t->stats.source_bytes,length);
     if(t->stage==OPEN_FORMAT){
         if(length<16)return fail("TERRAX_TRUNCATED_FORMAT","format truncated");
         uint32_t version=u32(bytes),table=version>=135?26:6;
@@ -366,11 +517,59 @@ int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t
         t->candidate->stream_owned=1;t->candidate->file_len=(uint32_t)compact;
         t->load_offset=0;t->stage=OPEN_PREFIX;
     }else if(t->stage==OPEN_PREFIX){
-        memcpy(t->candidate->file+offset,bytes,length);t->load_offset+=length;
+        if(bytes!=t->candidate->file+offset){memcpy(t->candidate->file+offset,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}t->load_offset+=length;
     }else if(t->stage==OPEN_SUFFIX){
-        memcpy(t->candidate->file+t->prefix_length+offset-t->original_end,bytes,length);t->load_offset+=length;
-    }else {memcpy(t->input,bytes,length);t->input_offset=offset;t->input_length=length;}
+        if(bytes!=t->candidate->file+t->prefix_length+offset-t->original_end){memcpy(t->candidate->file+t->prefix_length+offset-t->original_end,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}t->load_offset+=length;
+    }else if(t->png_cache_request){
+        PngColumnCursor* c=&t->png_columns[t->x];uint8_t* dest=t->png_source_cache+t->x*t->png_cache_stride;
+        if(bytes!=dest){memcpy(dest,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}
+        c->cache_offset=offset;c->cache_length=length;t->png_cache_request=0;
+    }else {if(bytes!=t->input){memcpy(t->input,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}t->input_offset=offset;t->input_length=length;}
     clear_event(t);return 0;
+}
+static uint8_t* input_destination(StreamTask* t){
+    if(t->png_cache_request)return t->png_source_cache+t->x*t->png_cache_stride;
+    if(t->stage==OPEN_PREFIX)return t->candidate->file+t->event.offset;
+    if(t->stage==OPEN_SUFFIX)return t->candidate->file+t->prefix_length+t->event.offset-t->original_end;
+    return t->input;
+}
+int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t offset,const uint8_t* bytes,uint32_t length){
+    StreamTask* t=task(id);
+    if(!t||t->lease.lease_id||t->event.kind!=TX_STREAM_NEED_SOURCE||source_id!=t->event.source_id||offset!=t->event.offset||length!=t->event.length||!valid_range(bytes,length))
+        return fail("TERRAX_INVALID_ARGUMENT","source event/range mismatch or leased input");
+    return consume_source(t,offset,bytes,length);
+}
+int32_t terra_world_stream_acquire_input(uint32_t id,TxStreamInputLease* out){
+    StreamTask* t=task(id);
+    if(!t||!valid_range(out,sizeof(*out))||t->event.kind!=TX_STREAM_NEED_SOURCE||t->lease.lease_id)
+        return fail("TERRAX_STATE_ERROR","source input is not available for a lease");
+    memset(&t->lease,0,sizeof(t->lease));t->lease.abi_version=2;
+    t->lease.lease_id=lease_generation++;if(!t->lease.lease_id)t->lease.lease_id=lease_generation++;
+    t->lease.source_id=t->event.source_id;t->lease.offset=t->event.offset;
+    t->lease.length=t->lease.capacity=t->event.length;
+    t->lease.data_ptr=(uint32_t)(uintptr_t)input_destination(t);
+    t->lease.memory_bytes=lease_memory_bytes();*out=t->lease;return 0;
+}
+int32_t terra_world_stream_commit_input(uint32_t id,uint32_t lease_id,uint32_t source_id,uint32_t offset,uint32_t length){
+    StreamTask* t=task(id);
+    if(!t||!lease_id||t->lease.lease_id!=lease_id||t->event.kind!=TX_STREAM_NEED_SOURCE||
+       source_id!=t->lease.source_id||offset!=t->lease.offset||length!=t->lease.length)
+        return fail("TERRAX_INVALID_ARGUMENT","input lease task/range mismatch");
+    if(t->lease.memory_bytes!=lease_memory_bytes()){
+        memset(&t->lease,0,sizeof(t->lease));
+        return fail("TERRAX_STREAM_LEASE_GROWTH","memory growth invalidated input lease; reacquire and refill");
+    }
+    uint8_t* bytes=input_destination(t);memset(&t->lease,0,sizeof(t->lease));
+    return consume_source(t,offset,bytes,length);
+}
+int32_t terra_world_stream_release_input(uint32_t id,uint32_t lease_id){
+    StreamTask* t=task(id);
+    if(!t||!lease_id||t->lease.lease_id!=lease_id)return fail("TERRAX_STATE_ERROR","input lease is stale");
+    memset(&t->lease,0,sizeof(t->lease));return 0;
+}
+int32_t terra_world_stream_get_stats(uint32_t id,TxStreamStats* out){
+    StreamTask* t=task(id);if(!t||!valid_range(out,sizeof(*out)))return fail("TERRAX_STATE_ERROR","invalid stats task/pointer");
+    *out=t->stats;return 0;
 }
 static int read_next(StreamTask* t,TxTile* tile,uint8_t* raw,uint32_t* raw_length){
     TxWorld* w=t->candidate;uint8_t* saved=w->file;uint32_t saved_len=w->file_len,off,end;
@@ -379,9 +578,46 @@ static int read_next(StreamTask* t,TxTile* tile,uint8_t* raw,uint32_t* raw_lengt
         w->file_len=t->source->section_overrides[1].active?t->source->section_overrides[1].len:t->source->file_len;
         off=t->cursor;end=t->original_end;
     }else {
-        if(t->cursor<t->input_offset||t->cursor>=t->input_offset+t->input_length||
-           (t->input_length-(t->cursor-t->input_offset)<TILE_MAX_BYTES&&t->input_offset+t->input_length<t->original_end))return source_event(t,t->cursor,t->original_end)==0?0:-1;
-        w->file=t->input;w->file_len=t->input_length;off=t->cursor-t->input_offset;end=t->input_length;
+        int column_cache=t->stage==PNG_CURSOR_SCAN||t->stage==PNG_MARKER_SCAN;
+        uint32_t limit=column_cache?w->stream_columns[t->x+1]:t->original_end;
+        uint8_t* input=t->input;uint32_t input_offset=t->input_offset,input_length=t->input_length;
+        if(column_cache){
+            PngColumnCursor* c=&t->png_columns[t->x];
+            uint32_t first=w->stream_columns[t->x],n=limit-first;
+            if(n<=t->png_cache_stride && !(c->cache_offset==first&&c->cache_length==n) &&
+               first>=input_offset&&first-input_offset<=input_length&&n<=input_length-(first-input_offset)){
+                /* Coalescing alone thrashes once short columns span > WINDOW.
+                 * Retain the complete column in its already-budgeted slot. */
+                memcpy(t->png_source_cache+t->x*t->png_cache_stride,input+first-input_offset,n);
+                c->cache_offset=first;c->cache_length=n;counter_add(&t->stats.cache_copy_bytes,n);
+            }
+            if(n<=t->png_cache_stride&&!(c->cache_offset==first&&c->cache_length==n)){
+                counter_add(&t->stats.cache_misses,1);
+                return source_event(t,first,t->original_end)==0?0:-1;
+            }
+        }
+        int available=t->cursor>=input_offset&&t->cursor-input_offset<input_length&&
+            (input_length-(t->cursor-input_offset)>=TILE_MAX_BYTES||input_offset+input_length>=limit);
+        if(column_cache&&!available){
+            PngColumnCursor* c=&t->png_columns[t->x];input=t->png_source_cache+t->x*t->png_cache_stride;
+            input_offset=c->cache_offset;input_length=c->cache_length;
+            available=t->cursor>=input_offset&&t->cursor-input_offset<input_length&&
+                (input_length-(t->cursor-input_offset)>=TILE_MAX_BYTES||input_offset+input_length>=limit);
+            if(!available){
+                counter_add(&t->stats.cache_misses,1);
+                /* Coalesce short neighbouring columns into the common window;
+                 * long columns keep a bounded private read-ahead block so the
+                 * next row strip cannot evict their unread source bytes. */
+                if(limit-w->stream_columns[t->x]<=t->png_cache_stride)return source_event(t,w->stream_columns[t->x],t->original_end)==0?0:-1;
+                t->png_cache_request=1;
+                if(limit-t->cursor>t->png_cache_stride)limit=t->cursor+t->png_cache_stride;
+                return source_event(t,t->cursor,limit)==0?0:-1;
+            }
+        }
+        if(!available)return source_event(t,t->cursor,t->original_end)==0?0:-1;
+        if(column_cache)counter_add(&t->stats.cache_hits,1);
+        w->file=input;w->file_len=input_length;off=t->cursor-input_offset;
+        end=input_length;if(limit-input_offset<end)end=limit-input_offset;
     }
     uint8_t* saved_important=w->important;uint32_t saved_important_len=w->important_len;uint16_t saved_types=w->tile_type_count;
     if(t->source){w->important=t->source->important;w->important_len=t->source->important_len;w->tile_type_count=t->source->tile_type_count;}
@@ -390,6 +626,7 @@ static int read_next(StreamTask* t,TxTile* tile,uint8_t* raw,uint32_t* raw_lengt
     if(ok&&raw){*raw_length=off-before;memcpy(raw,w->file+before,*raw_length);}
     w->file=saved;w->file_len=saved_len;
     if(!ok||off<=before||(uint32_t)tile->same+1>(uint32_t)w->maxTilesY-t->y)return fail("TERRAX_BAD_TILE_STREAM","truncated record or RLE exceeds column");
+    counter_add(&t->stats.tile_records,1);counter_add(&t->stats.decoded_tile_bytes,off-before);
     t->cursor+=off-before;return 1;
 }
 static int flush_output(StreamTask* t){
@@ -440,6 +677,7 @@ int32_t terra_world_stream_supply_pixels(uint32_t id,const uint8_t* records,uint
 }
 int32_t terra_world_stream_ack_output(uint32_t id){
     StreamTask* t=task(id);if(!t||t->event.kind!=TX_STREAM_OUTPUT)return fail("TERRAX_STATE_ERROR","no output awaits acknowledgement");
+    counter_add(&t->stats.output_bytes,t->event.length);
     if(t->stage==OP_MEDIA){
         if(t->map_encoder){if(!tx_stream_map_ack(t->map_encoder))return -1;}
         else if(t->png_encoder){if(!tx_stream_png_ack(t->png_encoder))return -1;}
@@ -485,6 +723,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
         }else if(t->stage==OP_REGION||t->stage==OP_SCAN){
             if(t->x==(uint32_t)w->maxTilesX){
                 if(t->cursor!=t->original_end)return fail("TERRAX_BAD_TILE_STREAM","operation tile section trailing bytes");
+                w->stream_columns[t->x]=t->cursor;
                 if(t->stage==OP_REGION){
                     tx_region_stream_finish(w,t->region_scan);tx_region_stream_free(t->region_scan);t->region_scan=NULL;
                     t->x=t->y=0;t->cursor=t->original_start;t->input_length=0;t->prefix_length=w->starts[1];t->stage=WRITE_PREFIX;continue;
@@ -498,6 +737,10 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
                     if(t->result_kind==2)t->map_encoder=tx_stream_map_begin(w,t->chest_markers,t->chest_count,w->prepared_output->markers,w->prepared_output->marker_count);
                     else t->png_encoder=tx_stream_png_begin(w,0,0,t->chest_markers,t->chest_count,w->prepared_output->markers,w->prepared_output->marker_count);
                     if(!t->map_encoder&&!t->png_encoder)return fail("TERRAX_WASM_OOM","bounded media encoder allocation failed");
+                    if(t->png_columns)for(uint32_t x=0;x<(uint32_t)w->maxTilesX;x++){
+                        t->png_columns[x].offset=w->stream_columns[x];
+                        if(t->png_marker_columns)t->png_marker_columns[x].offset=w->stream_columns[x];
+                    }
                     t->stage=OP_MEDIA;continue;
                 }
                 TxBuf response={0};buf_init(&response,256);int ok=op_execute_json(w,t->operation,t->request,&response);
@@ -511,7 +754,6 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             uint32_t run=(uint32_t)tile.same+1;
             if(t->stage==OP_REGION){if(!tx_region_stream_run(w,t->region_scan,t->x,t->y,&tile,run))return -1;}
             else if(!tx_output_stream_run(w,t->x,t->y,&tile,run)||!tx_marker_stream_run(t->marker_scan,t->x,t->y,&tile,run))return -1;
-            if(t->rgb_cache)write_rgb_cache_run(w,t->rgb_cache,t->x,t->y,&tile,run);
             t->y+=run;if(t->y==(uint32_t)w->maxTilesY){if(t->marker_scan&&!tx_marker_stream_column(t->marker_scan))return -1;t->x++;t->y=0;}
         }else if(t->stage==OP_MEDIA){
             uint32_t offset,length;const uint8_t* bytes;
@@ -521,12 +763,55 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             int range=t->map_encoder?tx_stream_map_range(t->map_encoder,&first,&count):tx_stream_png_range(t->png_encoder,&first,&count);
             if(range<0)continue;
             if(!range){t->stage=DONE;if(t->map_encoder)t->result_length=tx_stream_map_size(t->map_encoder);continue;}
-            if(t->png_encoder&&t->rgb_cache){
-                int filled=tx_stream_png_rgb(t->png_encoder,t->rgb_cache);if(filled<0)return -1;
-                if(filled){if(!tx_stream_png_finish_strip(t->png_encoder))return -1;continue;}
+            if(t->png_columns&&!tx_stream_png_marker_pass(t->png_encoder)){
+                if(!first)t->stats.tile_scan_passes++;
+                t->x=0;t->png_strip_end=first+count;t->stage=PNG_CURSOR_SCAN;continue;
             }
+            if(t->png_marker_columns&&tx_stream_png_marker_pass(t->png_encoder)){
+                if(!first)t->stats.tile_scan_passes++;
+                t->x=0;t->y=t->png_marker_columns[0].y;t->cursor=t->png_marker_columns[0].offset;
+                t->png_marker_first=first>t->png_marker_radius?first-t->png_marker_radius:0;
+                t->png_marker_end=first+count+t->png_marker_radius;
+                if(t->png_marker_end>(uint32_t)w->maxTilesY)t->png_marker_end=(uint32_t)w->maxTilesY;
+                t->stage=PNG_MARKER_SCAN;continue;
+            }
+            t->stats.tile_scan_passes++;
             t->x=t->map_encoder?first:0;t->scan_end=t->map_encoder?first+count:(uint32_t)w->maxTilesX;t->y=0;
             t->cursor=w->stream_columns[t->x];t->stage=OP_MEDIA_SCAN;
+        }else if(t->stage==PNG_CURSOR_SCAN){
+            if(t->x==(uint32_t)w->maxTilesX){
+                if(!tx_stream_png_finish_strip(t->png_encoder))return -1;t->stage=OP_MEDIA;continue;
+            }
+            PngColumnCursor* c=&t->png_columns[t->x];
+            if(c->y>=t->png_strip_end){t->x++;continue;}
+            t->cursor=c->offset;t->y=c->y;
+            if(!c->remaining){
+                int r=read_next(t,&c->tile,NULL,NULL);if(r<0)return -1;if(!r)break;
+                c->offset=t->cursor;c->remaining=(uint32_t)c->tile.same+1;
+            }
+            uint32_t n=c->remaining;if(n>t->png_strip_end-c->y)n=t->png_strip_end-c->y;
+            if(!tx_stream_png_run(t->png_encoder,t->x,c->y,&c->tile,n))return -1;
+            c->y+=n;c->remaining-=n;
+            if(c->y==(uint32_t)w->maxTilesY&&
+               (c->remaining||c->offset!=w->stream_columns[t->x+1]))
+                return fail("TERRAX_BAD_TILE_STREAM","PNG cursor column length mismatch");
+        }else if(t->stage==PNG_MARKER_SCAN){
+            if(t->x==(uint32_t)w->maxTilesX){
+                if(!tx_stream_png_finish_strip(t->png_encoder))return -1;t->stage=OP_MEDIA;continue;
+            }
+            if(t->y>=t->png_marker_end){
+                t->x++;
+                if(t->x<(uint32_t)w->maxTilesX){t->y=t->png_marker_columns[t->x].y;t->cursor=t->png_marker_columns[t->x].offset;}
+                continue;
+            }
+            TxTile tile;int r=read_next(t,&tile,NULL,NULL);if(r<0)return -1;if(!r)break;
+            uint32_t run=(uint32_t)tile.same+1;
+            if(t->y+run<=t->png_marker_first){
+                t->png_marker_columns[t->x].offset=t->cursor;t->png_marker_columns[t->x].y=t->y+run;
+            }else if(!tx_stream_png_run(t->png_encoder,t->x,t->y,&tile,run))return -1;
+            t->y+=run;
+            if(t->y==(uint32_t)w->maxTilesY&&t->cursor!=w->stream_columns[t->x+1])
+                return fail("TERRAX_BAD_TILE_STREAM","PNG marker column length mismatch");
         }else if(t->stage==OP_MEDIA_SCAN){
             if(t->x==t->scan_end){
                 int ok=t->map_encoder?tx_stream_map_finish_strip(t->map_encoder):tx_stream_png_finish_strip(t->png_encoder);
@@ -546,7 +831,23 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             t->stage=DONE;
         }else if(t->stage==WRITE_PREFIX){
             if(t->output_offset<t->prefix_length){uint32_t n=t->prefix_length-t->output_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->output_offset,n,w->file+t->output_offset);break;}
-            t->stage=WRITE_SCAN;
+            if(t->copy_tiles){
+                for(uint32_t x=0;x<=(uint32_t)w->maxTilesX;x++)w->stream_columns[x]=
+                    t->source->stream_columns[x]-t->original_start+t->prefix_length;
+                t->stage=WRITE_COPY;
+            }else{t->stats.tile_scan_passes++;t->stage=WRITE_SCAN;}
+        }else if(t->stage==WRITE_COPY){
+            if(t->cursor==t->original_end){
+                t->x=(uint32_t)w->maxTilesX;
+                if(finish_write_tiles(t)<0)return -1;continue;
+            }
+            if(t->cursor<t->input_offset||t->cursor-t->input_offset>=t->input_length){
+                source_event(t,t->cursor,t->original_end);break;
+            }
+            uint32_t n=t->input_length-(t->cursor-t->input_offset);
+            if(n>t->original_end-t->cursor)n=t->original_end-t->cursor;
+            const uint8_t* bytes=t->input+t->cursor-t->input_offset;t->cursor+=n;
+            counter_add(&t->stats.tile_copy_bytes,n);event(t,TX_STREAM_OUTPUT,t->output_offset,n,bytes);break;
         }else if(t->stage==WRITE_SCAN){
             if(t->output.len>WINDOW-2*TILE_MAX_BYTES){flush_output(t);break;}
             if(t->x==(uint32_t)w->maxTilesX){if(!flush_merge(t)||finish_write_tiles(t)<0)return -1;if(flush_output(t))break;continue;}
@@ -559,7 +860,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
                 if(!w->pixel_art_indexed){
                     uint32_t run=tx_region_run(w,t->x,t->y,t->remaining);
                     TxTile tile=t->source_tile;
-                    tx_apply_tile_rules(&tile,t->rules,t->rule_count,run,tx_region_at(w,t->x,t->y),t->y,w->worldSurface);
+                    if(!apply_write_rules(t,&tile,run))return -1;
                     write_tile(w,&t->output,&tile,run-1);t->remaining-=run;t->y+=run;
                 }
                 int64_t px=(int64_t)t->x-w->pixel_art_start_x;
@@ -570,7 +871,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             }
             if(t->remaining&&!w->pixel_art_indexed){
                 uint32_t run=tx_region_run(w,t->x,t->y,t->remaining);TxTile tile=t->source_tile;
-                tx_apply_tile_rules(&tile,t->rules,t->rule_count,run,tx_region_at(w,t->x,t->y),t->y,w->worldSurface);
+                if(!apply_write_rules(t,&tile,run))return -1;
                 write_tile(w,&t->output,&tile,run-1);t->remaining-=run;t->y+=run;
             }else if(t->remaining){
                 int64_t py=(int64_t)t->y-w->pixel_art_start_y;
@@ -612,11 +913,13 @@ int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     if(w->pixel_art_maps){tx_internal_free(w->pixel_art_maps);w->pixel_art_maps=NULL;}
     if(w->pixel_art_chunk_table){tx_internal_free(w->pixel_art_chunk_table);w->pixel_art_chunk_table=NULL;}
     w->pixel_art_indexed=0;w->pixel_art_map_count=0;w->stream_source_id=source_id;
+    for(uint32_t g=0;g<t->group_count;g++)if(t->groups[g].rules){tx_internal_free(t->groups[g].rules);t->groups[g].rules=NULL;}
+    t->group_count=0;
     tx_stream_activate_world(w,out);tx_internal_free(w);t->candidate=NULL;t->stage=ADOPTED;t->old_handle=0;tx_clear_error();return 0;
 }
 int32_t terra_world_stream_cancel(uint32_t id){
     StreamTask* t=current&&current->id==id?current:NULL;if(!t||t->stage==ADOPTED)return fail("TERRAX_STATE_ERROR","task cannot be cancelled");
-    discard_candidate(t);t->stage=CANCELLED;clear_event(t);return 0;
+    memset(&t->lease,0,sizeof(t->lease));discard_candidate(t);t->stage=CANCELLED;clear_event(t);return 0;
 }
 int32_t terra_world_stream_close(uint32_t id){
     StreamTask* t=current&&current->id==id?current:NULL;if(!t)return fail("TERRAX_STATE_ERROR","invalid stream task");
@@ -624,10 +927,11 @@ int32_t terra_world_stream_close(uint32_t id){
     tx_stream_metadata_discard(&t->metadata);
     if(t->marker_scan)tx_marker_stream_free(t->marker_scan);
     if(t->region_scan)tx_region_stream_free(t->region_scan);
+    for(uint32_t g=0;g<t->group_count;g++)if(t->groups[g].rules)tx_internal_free(t->groups[g].rules);
     if(t->rules)tx_internal_free(t->rules);
     if(t->operation)tx_internal_free(t->operation);if(t->request)tx_internal_free(t->request);
     if(t->result)tx_internal_free(t->result);
-    if(t->rgb_cache)tx_internal_free(t->rgb_cache);
+    if(t->png_columns)tx_internal_free(t->png_columns);if(t->png_marker_columns)tx_internal_free(t->png_marker_columns);if(t->png_source_cache)tx_internal_free(t->png_source_cache);
     if(t->chest_markers)tx_internal_free(t->chest_markers);
     if(t->map_encoder)tx_stream_map_free(t->map_encoder);if(t->png_encoder)tx_stream_png_free(t->png_encoder);
     if(t->input)tx_internal_free(t->input);if(t->output.data)tx_internal_free(t->output.data);

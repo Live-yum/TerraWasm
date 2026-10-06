@@ -107,6 +107,7 @@ int txw_test_stream_png_pixel(TxStreamPng* p, uint32_t y, uint8_t rgba[4]) {
     return 1;
 }
 #endif
+int tx_stream_png_marker_pass(const TxStreamPng* p){return p&&p->phase;}
 int tx_stream_png_rgb(TxStreamPng* p, const uint8_t* rgb) {
     if(!p||!rgb||!p->active||p->output.len)return -1;
     if(p->phase)return 0;

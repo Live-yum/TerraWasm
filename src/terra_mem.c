@@ -65,6 +65,10 @@ union TxAllocHeader {
     max_align_t alignment;
 };
 
+#ifdef TERRAX_TESTING
+static uint32_t tx_test_allocation_limit=UINT32_MAX;
+void txw_test_allocation_limit(uint32_t n){tx_test_allocation_limit=n;}
+#endif
 static uint32_t tx_world_open_count = 0;
 static TxAllocHeader* tx_bridge_head = NULL;
 static TxAllocHeader* tx_bridge_tail = NULL;
@@ -200,6 +204,9 @@ static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
 }
 
 static void* tx_new_root(uint32_t size, uint32_t domain) {
+#ifdef TERRAX_TESTING
+    if(size>tx_test_allocation_limit)return NULL;
+#endif
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
     if (domain == TX_DOMAIN_NATIVE && tx_native_sequence == UINT32_MAX) return NULL;
@@ -419,7 +426,7 @@ void buf_u8(TxBuf* b, uint8_t v) {
 
 void buf_bytes(TxBuf* b, const void* p, uint32_t n) {
     if (buf_reserve(b, n)) {
-        memcpy(b->data + b->len, p, n);
+        if (n) memcpy(b->data + b->len, p, n);
         b->len += n;
     }
 }

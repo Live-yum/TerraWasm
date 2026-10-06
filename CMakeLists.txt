@@ -365,6 +365,34 @@ else()
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_map_runtime_contract tests/map_runtime_contract.c ZLIB::ZLIB)
 
+            # The public stream bridge uses Wasm32 pointers. LP64 ASan reserves
+            # high addresses, so run this bridge contract in the native job;
+            # the existing parser/renderer contracts still run under ASan.
+            if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT TERRAWASM_SANITIZERS)
+                find_program(TERRAX_NODE_EXECUTABLE node)
+                if(TERRAX_NODE_EXECUTABLE)
+                    set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
+                    add_custom_command(
+                        OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                               "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld"
+                        COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
+                        DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js
+                        VERBATIM)
+                    add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                        "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld")
+                    add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
+                    target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG -fno-pie)
+                    target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                    target_link_options(terra_stream_boundary_contract PRIVATE -no-pie)
+                    target_link_libraries(terra_stream_boundary_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                    add_dependencies(terra_stream_boundary_contract terra_stream_fixtures)
+                    add_test(NAME terra_stream_boundary_contract COMMAND terra_stream_boundary_contract "${STREAM_FIXTURES}")
+                else()
+                    message(STATUS "Stream boundary fixture generation needs Node; contract not enabled")
+                endif()
+            endif()
+
+
             if(TERRAWASM_FUZZ_SMOKE)
                 add_executable(terra_fuzz_smoke
                     tests/fuzz/fuzz_smoke.c

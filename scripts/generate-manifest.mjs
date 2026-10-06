@@ -44,6 +44,18 @@ function normalizeBuildFlags(buildFlags) {
   }
 }
 
+const STREAM_EXPORTS = ['abi_version', 'acquire_input', 'commit_input', 'release_input', 'get_stats']
+  .map(name => `_terra_world_stream_${name}`)
+function validateStreamAbi(stream, exports, label) {
+  if (stream === undefined) return
+  if (!stream || stream.version !== 2 || stream.inputLease !== true
+    || stream.editPlan !== true || stream.pngColumnCursors !== true
+    || Object.keys(stream).sort().join(',') !== 'editPlan,inputLease,pngColumnCursors,version') {
+    fail(`${label} stream ABI is invalid`)
+  }
+  for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
+}
+
 function exportHash(exportsList) {
   return sha256(Buffer.from(`${normalizeExports(exportsList).join('\n')}\n`, 'utf8'))
 }
@@ -142,6 +154,7 @@ export function validateManifest(manifest) {
   const abi = manifest.abi
   if (!abi || !Number.isSafeInteger(abi.version) || abi.version < 1) fail('ABI version is invalid')
   const requiredExports = normalizeExports(abi.requiredExports, 'ABI export set')
+  validateStreamAbi(abi.stream, requiredExports, 'manifest')
   if (!requiredExports.includes('_terra_build_info_json')) fail('ABI export set is missing _terra_build_info_json')
   if (!isSha256(abi.exportHash)) fail('ABI export hash is invalid')
   if (abi.exportHash !== exportHash(requiredExports)) fail('ABI export hash does not match the export set')
@@ -214,6 +227,8 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     for (const name of exports) {
       if (typeof module[name] !== 'function') fail(`${target} wrapper is missing ${name}`)
     }
+    validateStreamAbi(identity.stream, exports, target)
+    if (identity.stream && module._terra_world_stream_abi_version() !== identity.stream.version) fail(`${target} compiled stream version mismatch`)
     identities[target] = identity
     targets[target] = {
       memory: { initialBytes: identity.initialMemory, maxBytes: identity.maxMemory },
@@ -230,6 +245,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
+  if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')
   if (sourceCommit !== undefined && identity.sourceCommit !== sourceCommit) fail('compiled source commit does not match requested source commit')
   if (dirty !== undefined && identity.dirty !== dirty) fail('compiled dirty state does not match requested dirty state')
   const manifest = {
@@ -237,7 +253,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     artifactId: 'terrax-world-web',
     sourceCommit: identity.sourceCommit,
     dirty: identity.dirty,
-    abi: { version: identity.abiVersion, requiredExports: targets.web.exports, exportHash: targets.web.exportHash },
+    abi: { version: identity.abiVersion, ...(identity.stream ? { stream: identity.stream } : {}), requiredExports: targets.web.exports, exportHash: targets.web.exportHash },
     memory: targets.web.memory,
     build: {
       compiler: identity.compiler,
