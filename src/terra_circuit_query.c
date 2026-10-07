@@ -32,6 +32,7 @@ static int reserve_result(CxWorld* w,uint32_t count){
     if(count<=w->result_capacity)return TCW_OK;if((uint64_t)count*16u>TERRA_CIRCUIT_WORLD_WINDOW)return TCW_INVALID;
     uint32_t* p=(uint32_t*)cx_alloc(w,(count?count:1u)*16u);if(!p)return TCW_MEMORY;cx_free(w,w->result);w->result=p;w->result_capacity=count;return TCW_OK;
 }
+#include "terra_circuit_fragments.inc"
 int cx_query_begin(CxWorld* w){
     w->point_index=0;w->query_point=0;w->result_count=0;w->trigger_count=0;
     if(w->command.kind==TCW_VIEWPORT){w->query_x0=w->command.x;w->query_x1=w->command.x+w->command.width;w->query_y0=w->command.y;w->query_y1=w->command.y+w->command.height;w->query_stride=w->command.stride?w->command.stride:1u;
@@ -100,7 +101,10 @@ int cx_command_complete(CxWorld* w){
 }
 int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(!input)return TCW_INVALID;if(w->phase!=CX_IDLE||w->event.kind)return TCW_STATE;
-    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_SAVE||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
+    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
+    /* A rejected bounded query must not poison SAVE's earlier dispatch path. */
+    w->error=0;
+    if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd);
     if(cmd.kind==TCW_TRIGGER&&(cmd.flags&1u)){int s=cx_interaction_rect(w,&cmd);if(s<0)return TCW_INVALID;if(!s){w->command=cmd;return TCW_OK;}}
     if((cmd.kind==TCW_VIEWPORT||cmd.kind==TCW_TRIGGER)&&(!cmd.width||!cmd.height||cmd.x>=w->width||cmd.y>=w->height||cmd.width>w->width-cmd.x||cmd.height>w->height-cmd.y))return TCW_INVALID;
     if(cmd.kind==TCW_TRIGGER&&(cmd.mask>15u||!cmd.mask))return TCW_INVALID;

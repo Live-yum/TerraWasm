@@ -15,7 +15,8 @@ enum TerraCircuitWorldEventKind {
 };
 enum TerraCircuitWorldCommandKind {
     TCW_VIEWPORT = 1, TCW_TRIGGER = 2, TCW_TICKS = 3,
-    TCW_READ_LAMPS = 4, TCW_WRITE_LAMPS = 5, TCW_SAVE = 6
+    TCW_READ_LAMPS = 4, TCW_WRITE_LAMPS = 5, TCW_SAVE = 6,
+    TCW_FRAGMENTS = 7, TCW_EXTRACT = 8
 };
 enum TerraCircuitWorldStatus {
     TCW_OK = 0, TCW_CONTINUE = 1,
@@ -53,6 +54,25 @@ typedef struct TerraCircuitWorldCommand {
     uint32_t abi_version, kind, x, y, width, height, stride, mask;
     uint32_t count, data_ptr, data_count, source_id, flags, aux_source_id, reserved1, reserved2;
 } TerraCircuitWorldCommand;
+/* FRAGMENTS: x=page offset, count=page size (1..32768). Optional geometry
+ * data_count 16-byte records [type,frameX|frameY<<16,dx|dy<<8|width<<16|height<<24,0]
+ * is copied on the first request. Exact frame layouts must come from the target
+ * game's TileObjectData, never a rendered atlas. Later requests reuse the index.
+ * Result records (32 bytes): [id,x,y,width,height,cells,wireCells,flags]. Flags:
+ * 1=incomplete/ambiguous object geometry, 2=section-backed object, 4=modded tile.
+ * EXTRACT: mask=fragment id, count=maximum cells (1..32768). Whole selected
+ * objects and their circuit wires only; unrelated cells in the bounds are absent.
+ * Result records (32 bytes): [x,y,type|flags<<16,frameX|frameY<<16,
+ * wall|tilePaint<<16|wallPaint<<24,liquidAmount|liquidType<<8|brickStyle<<16|wires<<24,0,0].
+ * Tile flags bits 0..6: active, actuator, inactive, invisible block/wall,
+ * fullbright block/wall. Frame coordinates are signed 16-bit values.
+ * EXTRACT flags bit 0: emit a COB1 object companion to aux_source_id using
+ * sequential WRITE events, then the original cell RESULT. width limits bytes
+ * (32..4194304); height limits objects (1..32768). Requires the numeric
+ * circuitWorld.fragmentObjects=1 capability. No implicit empty inventories.
+ * See docs/CIRCUIT_FRAGMENTS.md for the bounded COB1/overlay protocol.
+ * READY.result_count is the total fragment count or extracted cell count.
+ * Neither command changes electrical connectivity or simulation state. */
 /* Exactly twenty-four words. Byte figures count retained native allocations;
  * the host must also account for Wasm heap, JS, images and platform buffers. */
 typedef struct TerraCircuitWorldStats {

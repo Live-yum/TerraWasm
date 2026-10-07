@@ -81,7 +81,7 @@ static const char g_capabilities[] =
 #endif
 
 #if TERRAWASM_FEATURE_WLD
-#define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true}"
+#define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true,\"stampTiles\":true,\"stampObjects\":1}"
 #else
 #define TERRAX_STREAM_IDENTITY_JSON ""
 #endif
@@ -93,6 +93,7 @@ static const char g_build_info_json[] =
     ",\"pixelWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"circuitAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"circuitWorldAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
+    ",\"circuitWorldFragmentObjects\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"playerWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_PLR)
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""
     ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)

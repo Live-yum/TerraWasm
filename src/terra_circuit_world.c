@@ -131,6 +131,7 @@ int cx_cache_flush(CxWorld* w){
 }
 static void destroy(CxWorld* w){
     if(!w)return;terra_vm_destroy(w->vm);w->vm=NULL;terra_twld_destroy(w->twld);w->twld=NULL;
+    cx_fragments_free(w);
     cx_words_free(w,&w->parents);cx_words_free(w,&w->code_ends);cx_words_free(w,&w->member_ends);cx_words_free(w,&w->previous_gate);
     cx_bytes_free(w,&w->map);cx_bytes_free(w,&w->checkpoints);cx_bytes_free(w,&w->code);cx_bytes_free(w,&w->members);
 #define RELEASE(field) cx_free(w,w->field)
@@ -183,7 +184,8 @@ int32_t terra_circuit_world_ack(uint32_t handle){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;
     if(w->event.kind!=TCW_WRITE&&w->event.kind!=TCW_RESULT)return TCW_STATE;
     if(w->event.kind==TCW_WRITE){
-        if(w->phase==CX_ZERO)w->output_offset+=w->event.length;
+        if(w->phase==CX_FRAGMENTS&&(w->command.flags&1)&&w->event.source_id==w->command.aux_source_id)cx_fragments_ack(w);
+        else if(w->phase==CX_ZERO)w->output_offset+=w->event.length;
         else if(w->event.source_id==w->scratch_source){CxCachePage* p=w->cache_pages+w->read_slot;p->dirty=0;w->stored_pages[p->page>>3]|=(uint8_t)(1u<<(p->page&7u));}
         else if(w->phase==CX_SAVE_PATCH){int s=cx_twld_save_begin(w);if(s<0)return s;if(!w->twld)w->phase=CX_IDLE;}
         else if(w->phase==CX_TWLD&&w->twld_mode==2u){w->twld_output_offset+=w->event.length;w->output_length=0;}
@@ -212,13 +214,14 @@ int32_t terra_circuit_world_step(uint32_t handle,uint32_t work_units,TerraCircui
         }else if(w->phase>=CX_SAVE_PREFIX&&w->phase<=CX_SAVE_PATCH)status=cx_save_step(w,&work);
         else if(w->phase==CX_TWLD)status=cx_twld_step(w,&work);
         else if(w->phase==CX_TICKS)status=cx_ticks_step(w,&work);
+        else if(w->phase==CX_FRAGMENTS)status=cx_fragments_step(w,&work);
         else status=cx_fail(w,TCW_STATE,"unknown circuit session phase");
-        if(status<0){if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
+        if(status<0){cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
         if(w->event.kind){*out=w->event;return TCW_CONTINUE;}
         if(status==TCW_CONTINUE&&!work)break;
     }
     memset(out,0,sizeof(*out));out->abi_version=1;out->kind=w->phase==CX_IDLE?TCW_READY:TCW_MORE;out->phase=w->phase;out->completed=w->x;out->total=w->width;
-    if(w->phase==CX_IDLE){out->result_kind=w->command.kind;out->reserved=w->twld_state&1u;if(w->command.kind==TCW_SAVE){out->source_id=w->output_source;out->result_count=w->save_result_size;out->reserved=w->twld_saved_size;}}
+    if(w->phase==CX_IDLE){out->result_kind=w->command.kind;out->reserved=w->twld_state&1u;if(w->command.kind==TCW_SAVE){out->source_id=w->output_source;out->result_count=w->save_result_size;out->reserved=w->twld_saved_size;}else if(w->command.kind==TCW_FRAGMENTS||w->command.kind==TCW_EXTRACT)out->result_count=cx_fragments_result_count(w);}
     return w->phase==CX_IDLE?TCW_OK:TCW_CONTINUE;
 }
 int32_t terra_circuit_world_stats(uint32_t handle,TerraCircuitWorldStats* out){
@@ -228,5 +231,5 @@ int32_t terra_circuit_world_stats(uint32_t handle,TerraCircuitWorldStats* out){
         w->min_x,w->min_y,w->max_x,w->max_y,w->wire_cells,w->devices_count,w->gates,w->networks,w->vm?w->width:w->x,w->phase,bytes,peak,
         (uint32_t)w->ticks,(uint32_t)(w->ticks>>32),(uint32_t)s.net_pulses,(uint32_t)(s.net_pulses>>32),(uint32_t)s.gates_fired,(uint32_t)(s.gates_fired>>32)};return TCW_OK;
 }
-int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
+int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
 int32_t terra_circuit_world_close(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;for(uint32_t i=0;i<4;i++)if(sessions[i]==w){sessions[i]=NULL;break;}destroy(w);return TCW_OK;}

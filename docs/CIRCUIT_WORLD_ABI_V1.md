@@ -28,7 +28,9 @@ identity field `circuitWorldAbiVersion: 1`, and the following manifest group:
       "compiledNetworks": true,
       "compactState": true,
       "atomicCommands": true,
-      "wallLayer": true
+      "wallLayer": true,
+      "fragments": true,
+      "fragmentObjects": 1
     }
   }
 }
@@ -101,7 +103,7 @@ The event occupies exactly 48 bytes:
 | 6 | `phase` | Internal progress phase; treat as an opaque identifier |
 | 7–8 | `completed`, `total` | Progress units, independent of the byte range |
 | 9 | `result_kind` | Command producing the result |
-| 10 | `result_count` | RESULT record count; final SAVE WLD byte count |
+| 10 | `result_count` | RESULT record count; final SAVE WLD bytes; final FRAGMENTS total; final EXTRACT cell count |
 | 11 | `reserved` | Rule flags on non-SAVE READY; final SAVE TWLD byte count |
 
 A READ requests an exact immutable-source or scratch range. Supply exactly its

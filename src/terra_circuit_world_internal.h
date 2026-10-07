@@ -17,7 +17,7 @@ enum CxPhase {
     CX_TOPOLOGY=1, CX_ROOTS, CX_NUMBER, CX_REMAP, CX_MAP_SIZE, CX_MAP_ENCODE,
     CX_COUNT, CX_LAYOUT, CX_ZERO, CX_WRITE, CX_FLUSH, CX_INTERN, CX_IDLE,
     CX_QUERY, CX_RUN, CX_SAVE_PREFIX, CX_SAVE_TILES, CX_SAVE_SUFFIX, CX_SAVE_PATCH,
-    CX_FAILED, CX_CANCELLED, CX_TWLD, CX_TICKS
+    CX_FAILED, CX_CANCELLED, CX_TWLD, CX_TICKS, CX_FRAGMENTS
 };
 typedef struct CxBytes { uint8_t** pages; uint32_t length, pages_count, pages_capacity; } CxBytes;
 typedef struct CxWords { uint32_t** pages; uint32_t length, pages_count, pages_capacity; } CxWords;
@@ -45,6 +45,7 @@ typedef struct CxActuationPolicy { uint32_t device,x,y; uint32_t valid; TxTile a
 typedef struct CxPixel { uint32_t x,y,h[4],v[4]; uint8_t state,initial,hit_h,hit_v,custom,marked; uint8_t reserved[2]; } CxPixel;
 typedef struct CxModTile { TerraTwldTile tile; TxTile vanilla; } CxModTile;
 typedef struct CxPort { uint32_t net,pixel; uint8_t axis,colour; uint16_t reserved; } CxPort;
+typedef struct CxFragments CxFragments;
 typedef struct CxWorld {
     uint32_t id, world_handle, maximum, bytes, peak, phase, error;
     TxWorld* world;
@@ -108,6 +109,7 @@ typedef struct CxWorld {
     TxTile save_previous; uint32_t save_repeat,save_previous_valid;
     uint32_t save_new_tile_end,save_prefix_length,save_suffix_length;
     uint8_t save_patch[64];
+    CxFragments* fragments;
 } CxWorld;
 
 void* cx_alloc(CxWorld*,uint32_t);
@@ -179,5 +181,11 @@ int cx_seed_contains(const CxWorld*,uint32_t,uint32_t);
 int cx_inside_wiring(const CxWorld*,uint32_t,uint32_t);
 int cx_devices_prepare(CxWorld*);
 void cx_devices_end_columns(CxWorld*);
+int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*);
+int cx_fragments_step(CxWorld*,uint32_t*);
+void cx_fragments_free(CxWorld*);
+void cx_fragments_cancel(CxWorld*);
+void cx_fragments_ack(CxWorld*);
+uint32_t cx_fragments_result_count(CxWorld*);
 
 #endif
