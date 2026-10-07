@@ -94,6 +94,7 @@ static const char g_build_info_json[] =
     ",\"circuitAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"circuitWorldAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"circuitWorldFragmentObjects\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
+    ",\"circuitWorldFragmentSupports\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"playerWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_PLR)
     ",\"sourceCommit\":\"" TERRAX_BUILD_COMMIT "\""
     ",\"dirty\":" TERRAX_STRINGIFY(TERRAX_BUILD_DIRTY)

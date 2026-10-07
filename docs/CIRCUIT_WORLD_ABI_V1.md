@@ -30,7 +30,8 @@ identity field `circuitWorldAbiVersion: 1`, and the following manifest group:
       "atomicCommands": true,
       "wallLayer": true,
       "fragments": true,
-      "fragmentObjects": 1
+      "fragmentObjects": 1,
+      "fragmentSupports": 1
     }
   }
 }

@@ -90,7 +90,7 @@ test('fragment enumeration keeps crossing colors separate and completes exact mu
     assert.equal(d.start(8, { mask: object[0], count: 5 }), -4, 'reject the whole selection before any truncated output');
     assert.ok(d.command(6, { source: 9 }).event[10] > 0, 'a rejected extraction must not poison a subsequent save');
     const complete = d.command(8, { mask: object[0], count: 6 }).rows.filter(r => (r[2] & 65535) === 132);
-    assert.equal(complete.length, 4); assert.ok(complete.every(r => r[4] === (2 | 7 << 16 | 9 << 24)));
+    assert.equal(complete.length, 4); assert.ok(complete.every(r => r[4] === (7 << 16)));
   } finally { d.dispose(); }
 });
 

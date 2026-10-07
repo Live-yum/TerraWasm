@@ -12,7 +12,7 @@ Command **7 (FRAGMENTS)** takes `x = page offset`, `count = page size` (1–3276
 Its first invocation can supply at most 65536 geometry records through the
 existing `data_ptr`/`data_count` fields. Each geometry record is four u32 words:
 
-`[tileId, uint16(frameX) | uint16(frameY)<<16, dx | dy<<8 | width<<16 | height<<24, 0]`
+`[tileId, uint16(frameX) | uint16(frameY)<<16, dx | dy<<8 | width<<16 | height<<24, anchor]`
 
 Expand each verified `TileObjectData` layout to one record per occupied cell.
 Coordinates are raw game frame coordinates, never atlas positions. Layouts are
@@ -26,10 +26,13 @@ Conflicting layouts for the same type/frame are ambiguous, never guessed.
 The copied geometry survives a cancelled enumeration; once indexed, later page
 requests omit it. A different geometry set requires a new circuit session.
 
-Two cooperative column replays reuse the existing compiled network identities.
+Cooperative column replays reuse the existing compiled network identities.
 Electrical color/directional networks remain distinct. A second, independent
 grouping joins networks touching one complete object, plus logic lamp/gate
-stacks. It does not flood adjacent terrain. Retained auxiliary storage scales
+stacks. It does not flood adjacent terrain. Natural pots, stalactites, plants and other
+nonmechanical decorations merely crossed by a wire are excluded, using the
+pinned `Wiring.HitSwitch` / `HitWireSingle` handlers and routing tile types.
+Actuated foreground tiles and section-backed objects remain explicit members. Retained auxiliary storage scales
 with network/object counts and one column; it is charged to the circuit memory
 budget. It is not a second world tile grid.
 
@@ -38,7 +41,10 @@ FRAGMENTS emits 32-byte records, eight little-endian u32 words:
 `[id, x, y, width, height, cellCount, wireCellCount, flags]`
 
 Flags: **1** incomplete/ambiguous object geometry; **2** an object needs a
-chest/sign/tile-entity section; **4** a mod tile needs its companion data. Flags
+chest/sign/tile-entity section; **4** a mod tile needs its companion data;
+**8** no complete stable placement support is present in the source. Flag 8 is
+distinct from a broken object: a host may show the fragment and repair its
+missing anchor with the selected base material before a world write. Flags
 1 and 4 prevent a complete supported world round trip. Flag 2 requires the
 object companion described below; tile records alone cannot preserve it.
 RESULT `result_count` counts this page; READY `result_count` is the total number
@@ -48,7 +54,10 @@ consecutive. Empty worlds return a valid empty page.
 Command **8 (EXTRACT)** takes `mask = fragment ID`, `count = cell budget`
 (1–32768). It rejects oversized fragments before returning any partial data.
 The output is sparse, in absolute world x/y order, and includes whole recognized
-objects. Unrelated cells inside a fragment's bounding rectangle are absent.
+objects. Unrelated cells inside a fragment's bounding rectangle are absent. At wire-only
+coordinates, unrelated foreground, background walls, paint, and liquid are
+removed; an actuator remains an electrical layer. Foreground objects preserve
+only their own foreground attributes, plus walls explicitly needed as anchors.
 At a shared wire coordinate, only colors belonging to this fragment are copied.
 The current simulation state is resolved before encoding each tile.
 
@@ -67,6 +76,93 @@ Tile flag bits 0–6 are active, actuator, inactive, invisible block, invisible
 wall, fullbright block, fullbright wall. Wire bits are red, blue, green, yellow.
 READY `result_count` is the number of extracted records. Standard borrowed
 RESULT acknowledgement, source reads, cancellation, and close ownership apply.
+
+## Placement anchors (`fragmentSupports = 1`)
+
+Require numeric `manifest.abi.circuitWorld.fragmentSupports === 1` and compiled
+`circuitWorldFragmentSupports === 1` before sending nonzero geometry `anchor`
+words. This adds no exports, command fields, or cell-record fields. Existing
+zero words remain valid and mean no extra anchor requests for that layout.
+
+| Anchor | Source placement rule |
+| --- | --- |
+| 0 | No extra anchor |
+| 1 | Full-width floor; the owning tile's source rule determines permitted materials |
+| 2 | Full-width ceiling, including source-defined platform alternates |
+| 3 | Full-width solid ceiling and floor |
+| 4 | Single solid ceiling at the horizontal center |
+| 5 | Switch: floor, left, right, or footprint wall; select one complete alternative |
+| 6 | Wall behind every occupied cell |
+| 7 | Lever: full-width floor or full footprint wall |
+| 8 | Logic lamp: a lamp (419) or gate (420) immediately below |
+| 9 / 10 | Open door: ceiling and floor at the left / right hinge |
+| 11 / 12 | Both side anchors at root Y / root Y + 1 (trapdoors) |
+| 13 | Torch: frame-selected floor/side, or footprint wall |
+| 14 | Table/platform surface below every bottom cell (ordinary glass is invalid) |
+| 15 / 16 | Full-height solid left / right side |
+| 17 | The middle two floor cells (4-wide cannon) |
+
+The host derives each code from the pinned target version's `TileObjectData`,
+`TileObject`, and special `WorldGen` placement checks. For example, an open
+trapdoor's frame determines code 11 versus 12, and an open door's hinge determines
+9 versus 10. A valid code is a placement description, not a request to guess
+missing geometry from an atlas. A few verified single-cell devices can resolve
+the same rules without a geometry entry (pressure plates, switches, explosives,
+and projectile pads).
+
+A sparse candidate pass checks actual source anchors and chooses a complete
+stable alternative. All selected supports retain their original tile
+type, paint and state. Required walls retain wall paint and visibility. Nearby
+unused sides and top/floor cells are absent. A candle's framed table is retained
+as a whole object and resolves its own floor; section-backed supports also
+require their COB1 records. Dependency resolution is bounded to 32 object layers,
+and all storage is charged to the circuit memory budget. Ordinary wire-only
+worlds need no additional support pass. Shared support cells do not join wire
+colors; whole shared framed objects use the existing fragment grouping.
+
+Material checks use the owning tile's source permissions: a chest does not
+accept a bare table, while a candle requires a table or a valid platform top.
+Source platform frame and slope checks apply to all platform variants. Side
+mounts preserve a beam or all three required tree-trunk cells. Natural
+stalactites retain the source stone/ice/moss/coral material accepted by
+`WorldGen.GetDesiredStalagtiteStyle`; ordinary glass is not a valid substitute.
+
+Unwired boulders, rolling cacti and TNT barrels immediately above a wired
+actuator or active-stone release block are included as complete geometry. This
+preserves natural release traps without copying the surrounding cave. Boulders
+retain every valid existing foot or holding container, because dropping an
+alternative hold would change the result of retracting another foot.
+
+For falling material such as sand or silt, the already-decoded column supplies
+the original vertical chain through to its stopping tile. A non-solid stopping
+tile also retains the required second cell below it; source-defined holders
+above the material retain their complete geometry and object companion. This
+follows `WorldGen.BlockBelowMakesSandFall` and `AllowsSandfall` without adding
+one whole-world replay for every sand tile. An inactive payload keeps its
+intentional gap. An unsupported active payload reports flag 8; extraction
+never fills its falling path with a new block.
+
+Extraction never invents missing blocks, replaces a table with invalid glass,
+or repairs a source world in place. The editor may fill ordinary missing
+anchors when placing or exporting a design; flag 8 makes an unresolved need
+visible and falling-path warnings require preserving the intended behavior.
+
+The generated placement material predicates reuse the existing solid-material
+catalog. Regenerate the small table/platform/no-attach and mechanism dispatch
+sets from the pinned source with:
+
+```sh
+python3 scripts/generate-circuit-support-materials.py /path/to/source/Terraria/Main.cs
+python3 scripts/generate-circuit-anchor-permissions.py /path/to/source
+```
+
+`Wiring.cs` and `WorldGen.cs` must be beside `Main.cs`. Generated headers include the source
+commit and SHA-256. No private user world is committed as a regression fixture;
+`tests/helpers/circuit-supports.js` independently encodes representative traps,
+colored-wire crossings, doors, tables, wall switches, chests, narrow anchors,
+three-cell trees, platform variants and long falling-material support chains.
+The same contract runs natively, under UBSan, in the regular WLD build tests, and
+against the actual WLD Web artifact downloaded by the quality workflow.
 
 ## Writing an overlay
 

@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const zlib = require('node:zlib');
 const { makeSectionedWorld } = require('./sectioned-world');
 
@@ -13,7 +14,7 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
   const dimensions = Buffer.alloc(8); dimensions.writeInt32LE(500); dimensions.writeInt32LE(1000, 4);
   const at = header.indexOf(dimensions); assert.ok(at >= 0);
   header.writeInt32LE(height, at); header.writeInt32LE(width, at + 4);
-  const framed = new Set([4, 10, 21, 33, 49, 55, 85, 88, 132, 135, 136, 138, 144, 235, 314, 378, 395, 411, 419, 420, 423, 424, 425, 445, 467, 470, 471, 475, 520, 573, 597, 698, 723, 724]);
+  const framed = new Set([4, 5, 10, 14, 19, 21, 28, 33, 34, 42, 49, 55, 85, 88, 132, 135, 136, 137, 138, 141, 144, 165, 209, 235, 314, 378, 395, 411, 419, 420, 423, 424, 425, 427, 435, 436, 437, 438, 439, 442, 445, 467, 470, 471, 475, 520, 573, 597, 698, 723, 724]);
   // Include all pinned 1.4.5.8 entity tile IDs so rejection tests exercise the
   // section-data guard, rather than accidentally failing a type-count bound.
   const tileCount = 754, mask = Buffer.alloc(Math.ceil(tileCount / 8)); for (const type of framed) mask[type >>> 3] |= 1 << (type & 7);
@@ -22,8 +23,9 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
   const records = [], map = new Map(cells.map(cell => [`${cell.x},${cell.y}`, cell]));
   for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) {
     const t = map.get(`${x},${y}`) || {}, out = [], active = t.type !== undefined, wires = t.wires || 0;
-    let f1 = active ? 2 : 0, f2 = (wires & 7) << 1, f3 = (wires & 8) ? 32 : 0;
+    let f1 = active ? 2 : 0, f2 = ((wires & 7) << 1) | ((t.brick || 0) << 4), f3 = (wires & 8) ? 32 : 0;
     if (active && t.type > 255) f1 |= 32;
+    if (t.liquid) { f1 |= (t.liquidType === 4 ? 1 : t.liquidType || 1) << 3; if (t.liquidType === 4) f3 |= 128; }
     if (t.actuator) f3 |= 2; if (t.inactive) f3 |= 4;
     if (t.wall) f1 |= 4; if ((t.wall || 0) > 255) f3 |= 64;
     if (t.paint) f3 |= 8; if (t.wallPaint) f3 |= 16;
@@ -35,6 +37,7 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
       if (t.paint) out.push(t.paint);
     }
     if (t.wall) { out.push(t.wall & 255); if (t.wallPaint) out.push(t.wallPaint); }
+    if (t.liquid) out.push(t.liquid);
     if (f3 & 64) out.push(t.wall >>> 8);
     records.push(Buffer.from(out));
   }
@@ -64,7 +67,8 @@ function makeCircuitTwld(width = 40, height = 32) {
 }
 
 async function makeDriver() {
-  const M = await require('../../build/terrax_world_wasm_web.js')({ wasmBinary: fs.readFileSync(require.resolve('../../build/terrax_world_wasm_web.wasm')) });
+  const build = process.env.TCW_BUILD_DIR ? path.resolve(process.env.TCW_BUILD_DIR) : path.join(__dirname, '../../build');
+  const M = await require(path.join(build, 'terrax_world_wasm_web.js'))({ wasmBinary: fs.readFileSync(path.join(build, 'terrax_world_wasm_web.wasm')) });
   const pointers = [], alloc = bytes => { const p = M._tx_malloc(bytes); assert.ok(p); pointers.push(p); return p; };
   const hp = alloc(4), ep = alloc(48), cp = alloc(64), sp = alloc(96), input = alloc(1048576), data = alloc(1048576);
   const sources = new Map(); let world = 0, circuit = 0, openTask = 0, progress = 0;

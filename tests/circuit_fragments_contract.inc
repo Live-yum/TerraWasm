@@ -28,7 +28,7 @@ static void circuit_fragments_contract(const char* path){
  assert(pure&&multi&&stack);command=(TerraCircuitWorldCommand){0};command.abi_version=1;command.kind=TCW_EXTRACT;command.mask=pure;command.count=32;
  assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==7&&fragment_row_count==7);for(uint32_t i=0;i<7;i++)assert(fragment_rows[i*8+5]>>24==1);
  command.mask=multi;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==6);uint32_t objects=0;
- for(uint32_t i=0;i<6;i++){uint32_t* r=fragment_rows+i*8;if((r[2]&65535u)==132){objects++;assert((r[4]&65535u)==2&&((r[4]>>16)&255u)==7&&(r[4]>>24)==9);}}assert(objects==4);
+ for(uint32_t i=0;i<6;i++){uint32_t* r=fragment_rows+i*8;if((r[2]&65535u)==132){objects++;assert((r[4]&65535u)==0&&((r[4]>>16)&255u)==7&&(r[4]>>24)==0);}}assert(objects==4);
  command.count=5;assert(terra_circuit_world_command(handle,&command)==TCW_MEMORY);
  command.kind=TCW_SAVE;command.source_id=9;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total>0);
  command.kind=TCW_EXTRACT;command.count=32;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==6);assert(!terra_circuit_world_cancel(handle));assert(!terra_circuit_world_close(handle));assert(tx_native_heap_used()==baseline);
