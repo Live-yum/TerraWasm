@@ -133,11 +133,11 @@ static int cf_objects_build(CxWorld* w) {
     for(uint32_t i=0;i<f->total;i++)if(f->descriptors[i*8]==f->selected) {
         origin_x=f->descriptors[i*8+1];
         origin_y=f->descriptors[i*8+2];
-        if(f->descriptors[i*8+7]&5)return cx_fail(w,TCW_UNSUPPORTED,"fragment object geometry or companion data is unsupported");
+        if(f->descriptors[i*8+7]&5)return cx_fail(w,TCW_UNSUPPORTED,"unsupported fragment geometry or objects");
     }
     for(uint32_t i=0;i<f->object_count;i++)if(cf_root(f,f->objects[i].net)==f->selected&&co_section(f->objects[i].type))count++;
-    if(count>w->command.height)return cx_fail(w,TCW_MEMORY,"fragment object count exceeds host budget");
-    if(count&&w->world->version!=326)return cx_fail(w,TCW_UNSUPPORTED,"object transfer requires WLD version 326");
+    if(count>w->command.height)return cx_fail(w,TCW_MEMORY,"fragment object count exceeds budget");
+    if(count&&w->world->version!=326)return cx_fail(w,TCW_UNSUPPORTED,"object transfer requires WLD 326");
     if(count) {
         items=cx_alloc(w,count*sizeof(*items));
         if(!items)return TCW_MEMORY;
@@ -202,7 +202,7 @@ static int cf_objects_build(CxWorld* w) {
     }
     result=TCW_OK;
     done:cx_free(w,items);
-    return result?cx_fail(w,result,result==TCW_MEMORY?"fragment object bytes exceed host budget":"object section is malformed, duplicated or missing its tile record"):TCW_OK;
+    return result?cx_fail(w,result,result==TCW_MEMORY?"fragment object bytes exceed budget":"object section missing, duplicate or malformed"):TCW_OK;
 }
 uint32_t cx_fragments_result_count(CxWorld* w){return w->fragments?(w->command.kind==TCW_FRAGMENTS?w->fragments->total:w->fragments->result_count):0;}
 static int cf_emit_page(CxWorld* w){CxFragments* f=w->fragments;uint32_t n=w->command.x<f->total?f->total-w->command.x:0;if(n>w->command.count)n=w->command.count;int s=reserve_result(w,n*2);if(s)return s;if(n)memcpy(w->result,f->descriptors+w->command.x*8,n*32u);cx_emit(w,TCW_RESULT,0,0,n*32u,w->result);w->event.result_kind=TCW_FRAGMENTS;w->event.result_count=n;return TCW_CONTINUE;}
@@ -215,7 +215,7 @@ int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd){
 #endif
     w->error=0;
     if(cmd->kind==TCW_FRAGMENTS&&w->fragments&&w->fragments->ready){if(cmd->data_count)return TCW_STATE;w->command=*cmd;return cf_emit_page(w);}
-    if(cmd->kind==TCW_EXTRACT){CxFragments* f=w->fragments;cx_fragments_cancel(w);uint32_t i=0;while(i<f->total&&f->descriptors[i*8]!=cmd->mask)i++;if(i==f->total)return TCW_INVALID;if(f->descriptors[i*8+5]>cmd->count)return cx_fail(w,TCW_MEMORY,"selected circuit exceeds extraction cell budget");
+    if(cmd->kind==TCW_EXTRACT){CxFragments* f=w->fragments;cx_fragments_cancel(w);uint32_t i=0;while(i<f->total&&f->descriptors[i*8]!=cmd->mask)i++;if(i==f->total)return TCW_INVALID;if(f->descriptors[i*8+5]>cmd->count)return cx_fail(w,TCW_MEMORY,"fragment exceeds cell budget");
         int s=reserve_result(w,f->descriptors[i*8+5]*2u);if(s)return s;w->command=*cmd;f->selected=cmd->mask;f->result_count=0;f->stage=3;f->object_first=f->object_end=f->support_cursor=0;seek_checkpoint(w,f->descriptors[i*8+1]);w->query_x1=f->descriptors[i*8+1]+f->descriptors[i*8+3];w->phase=CX_FRAGMENTS;return TCW_OK;}
     CxGeometry* saved_geometry=NULL;uint32_t saved_count=0;
     if(w->fragments&&!cmd->data_count){saved_geometry=w->fragments->geometry;saved_count=w->fragments->geometry_count;w->fragments->geometry=NULL;}
@@ -239,7 +239,7 @@ int cx_fragments_step(CxWorld* w,uint32_t* work){
         while(*work&&w->emit_y<w->height){uint32_t y=w->emit_y++,groups[16],masks[16],layers[16];--*work;
             if(f->stage==1){int s=cf_collect(w,y);if(s)return s;continue;}
             if(f->stage==5){int s=cf_support_scan(w,y);if(s)return s;continue;}
-            uint32_t count=cf_groups(w,y,groups,masks,layers);if(count==UINT32_MAX)return cx_fail(w,TCW_FORMAT,"too many overlapping support owners at one coordinate");
+            uint32_t count=cf_groups(w,y,groups,masks,layers);if(count==UINT32_MAX)return cx_fail(w,TCW_FORMAT,"cell has over 16 support owners");
             for(uint32_t i=0;i<count;i++){uint32_t group=groups[i];if(f->stage==2){uint32_t* d=f->descriptors+(group-1)*8;
                     if(!d[5]){d[0]=group;d[1]=w->x;d[2]=y;d[3]=w->x;d[4]=y;}else{if(w->x<d[1])d[1]=w->x;if(y<d[2])d[2]=y;if(w->x>d[3])d[3]=w->x;if(y>d[4])d[4]=y;}d[5]++;if(masks[i])d[6]++;
                 }else if(group==f->selected){if(f->result_count>=w->command.count||f->result_count*2>=w->result_capacity)return TCW_MEMORY;TxTile tile=w->column[y];cx_current_tile(w,w->x,y,point_gate(w,y),&tile,w->ids+y*4u);cf_filter_tile(&tile,layers[i]);tx_tile_record(w->result+f->result_count++*8,w->x,y,&tile,masks[i]);}

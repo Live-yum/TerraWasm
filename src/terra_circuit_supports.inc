@@ -120,7 +120,7 @@ static int cf_support_object_prepare(CxWorld* w,uint32_t object) {
 }
 static int cf_support_prepare(CxWorld* w) {
     CxFragments* f=w->fragments;
-    if(++f->support_round>32u)return cx_fail(w,TCW_UNSUPPORTED,"placement support dependency exceeds 32 object layers");
+    if(++f->support_round>32u)return cx_fail(w,TCW_UNSUPPORTED,"support dependency exceeds 32 layers");
     while(f->support_prepared<f->object_count) {
         int status=cf_support_object_prepare(w,f->support_prepared++);if(status)return status;
     }
