@@ -51,6 +51,16 @@ for name, mask in [('IsBeam', 8), ('Platforms', 16), ('Falling', 64)]:
         raise ValueError('missing pinned tile property ' + name)
     for tile in map(int, re.findall(r'\d+', match.group(1))):
         values[tile] |= mask
+# The pinned properties have ten distinct combinations. Share their values
+# and pack two dictionary indices per byte without changing any predicate.
+dictionary = sorted(set(values))
+assert len(dictionary) <= 16
+indices = [dictionary.index(value) for value in values]
+packed = [0] * ((len(indices) + 1) // 2)
+for tile, index in enumerate(indices):
+    packed[tile >> 1] |= index << ((tile & 1) * 4)
+assert [dictionary[(packed[tile >> 1] >> ((tile & 1) * 4)) & 15]
+        for tile in range(len(values))] == values
 lines = ['#ifndef TERRA_CIRCUIT_SUPPORT_MATERIALS_H', '#define TERRA_CIRCUIT_SUPPORT_MATERIALS_H',
     '/* Generated from pinned Terraria source ' + SOURCE_COMMIT + '.',
     ' * Main.cs SHA-256: ' + hashlib.sha256(source).hexdigest() + '.',
@@ -58,11 +68,13 @@ lines = ['#ifndef TERRA_CIRCUIT_SUPPORT_MATERIALS_H', '#define TERRA_CIRCUIT_SUP
     ' * WorldGen.cs SHA-256: ' + hashlib.sha256(world_gen_source).hexdigest() + ' */',
     '#define CX_SUPPORT_TABLE 1u', '#define CX_SUPPORT_SOLID_TOP 2u', '#define CX_SUPPORT_NO_ATTACH 4u',
     '#define CX_SUPPORT_BEAM 8u', '#define CX_SUPPORT_PLATFORM 16u', '#define CX_SUPPORT_MOSS 32u', '#define CX_SUPPORT_FALLING 64u',
-    'static const unsigned char cx_support_materials[754] = {']
-for at in range(0, len(values), 32):
-    lines.append('    ' + ','.join(map(str, values[at:at+32])) + ',')
+    f'static const unsigned char cx_support_property_values[{len(dictionary)}] = {{',
+    '    ' + ','.join(map(str, dictionary)), '};',
+    f'static const unsigned char cx_support_materials[{len(packed)}] = {{']
+for at in range(0, len(packed), 32):
+    lines.append('    ' + ','.join(map(str, packed[at:at+32])) + ',')
 lines.extend(['};', 'static unsigned cx_support_properties(unsigned type) {',
-    '    return type < sizeof(cx_support_materials) ? cx_support_materials[type] : 0;', '}',
+    '    return type < 754u ? cx_support_property_values[(cx_support_materials[type >> 1] >> ((type & 1u) * 4u)) & 15u] : 0;', '}',
     '/* WorldGen.GetDesiredStalagtiteStyle: small coral alone accepts coralstone. */',
     'static int cx_stalactite_material(unsigned type, unsigned height) {',
     '    if (cx_support_properties(type) & CX_SUPPORT_MOSS) return 1;',
