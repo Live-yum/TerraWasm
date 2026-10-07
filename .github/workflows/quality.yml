@@ -1,218 +1,65 @@
-name: TerraWasm quality
+name: Viewer HELLO H5 Playwright screenshots
 
 on:
   push:
-  pull_request:
+    branches: [test/hello-h5-screenshots-20261007]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: terrawasm-quality-${{ github.ref }}
+  group: hello-h5-screenshots-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  EMSCRIPTEN_VERSION: "5.0.7"
-
 jobs:
-  native:
+  screenshot:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes zlib1g-dev
-      - name: Configure native contracts
-        run: cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_NATIVE_TESTS=ON
-      - name: Build native contracts
-        run: cmake --build build-native --config Release --parallel
-      - name: Run native contracts and fuzz smoke
-        run: ctest --test-dir build-native --build-config Release --output-on-failure
-      - name: Check source mechanic capacity without adding release exports
-        run: |
-          cc -std=c17 -O2 -ffunction-sections -fdata-sections -Iinclude -Isrc \
-            src/terra_circuit_devices.c tests/circuit_device_clock_contract.c \
-            -Wl,--gc-sections -o "$RUNNER_TEMP/circuit-device-clock"
-          "$RUNNER_TEMP/circuit-device-clock"
-
-  sanitizer-and-fuzz:
-    runs-on: ubuntu-latest
+    timeout-minutes: 12
     env:
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      CI: true
+      VIEWER_COMMIT: bceff604da1813d100c45d0bd40170b5302e7e43
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout isolated screenshot runner
+        uses: actions/checkout@v7
         with:
-          lfs: true
-      - name: Install sanitizer dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang zlib1g-dev
-      - name: Configure sanitizer contracts
-        env:
-          CC: clang
-        run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTERRAWASM_NATIVE_TESTS=ON -DTERRAWASM_SANITIZERS=ON -DTERRAWASM_FUZZ_SMOKE=ON
-      - name: Build sanitizer contracts
-        run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
-      - name: Run sanitizer contracts
-        run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
-      # Stream events use Wasm32 addresses. The low-address native harness is
-      # incompatible with ASan's address space, but supports full UBSan checks.
-      - name: Run stream and circuit object contracts under UBSan
-        run: python3 scripts/test-stream-native.py --ubsan
-
-  wasm-release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
+          path: runner
+          persist-credentials: false
+      - name: Checkout exact viewer-app PR commit
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          lfs: true
+          repository: Live-yan/viewer-app
+          ref: bceff604da1813d100c45d0bd40170b5302e7e43
+          path: viewer
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
-      - name: Install pinned Emscripten SDK
-        shell: pwsh
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
-          & "$env:RUNNER_TEMP/emsdk/emsdk" install $env:EMSCRIPTEN_VERSION
-          & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
-      - name: Build and test Node and Web artifacts
-        shell: pwsh
-        run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Upload traceable release artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: terrawasm-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm.js
-            build/terrax_world_wasm.wasm
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
-
-  wasm-feature-matrix:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features: [wld, plr]
-    env:
-      TERRAWASM_FEATURE_SET: ${{ matrix.features }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          lfs: true
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 20
-      - name: Install pinned Emscripten SDK
-        shell: pwsh
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$env:RUNNER_TEMP/emsdk"
-          & "$env:RUNNER_TEMP/emsdk/emsdk" install $env:EMSCRIPTEN_VERSION
-          & "$env:RUNNER_TEMP/emsdk/emsdk" activate $env:EMSCRIPTEN_VERSION
-      - name: Build and test selected capability set
-        shell: pwsh
-        run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
-      - name: Validate buffer-only WLD Web profile
-        if: matrix.features == 'wld'
-        shell: pwsh
-        run: node tests/check_viewer_web_profile_artifact.js build/terrax_world_wasm_web.wasm
-      - name: Run native-size PNG under Mini Program memory ceiling
-        if: matrix.features == 'wld'
-        shell: pwsh
-        run: |
-          & "$env:RUNNER_TEMP/emsdk/emsdk_env.ps1" 2>$null
-          & emcmake cmake -S . -B build-lowmem `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DTERRAWASM_FEATURE_SET=wld `
-            -DTERRAX_BUILD_COMMIT=$env:GITHUB_SHA `
-            -DTERRAX_BUILD_DIRTY=false `
-            -DTERRAX_BUILD_COMPILER=emscripten `
-            -DTERRAX_NODE_INITIAL_MEMORY=67108864 `
-            -DTERRAX_NODE_MAXIMUM_MEMORY=167772160
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & cmake --build build-lowmem --config Release --target terrax_world_wasm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:TERRAWASM_LOW_MEMORY_MODULE = (Resolve-Path "build-lowmem/terrax_world_wasm.js").Path
-          & node -e "const f=require(process.env.TERRAWASM_LOW_MEMORY_MODULE);f().then(M=>{const i=JSON.parse(M.UTF8ToString(M._terra_build_info_json()));if(i.maxMemory!==167772160)throw new Error('expected 160 MiB maxMemory, got '+i.maxMemory);console.log('maxMemory='+i.maxMemory)})"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & node tests/test_preview_png_lowmem_160.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Upload WLD viewer artifacts
-        if: matrix.features == 'wld'
-        uses: actions/upload-artifact@v7
-        with:
-          name: terrawasm-wld-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
-
-
-      - name: Upload PLR viewer artifacts
-        if: matrix.features == 'plr'
-        uses: actions/upload-artifact@v7
-        with:
-          name: terrawasm-plr-${{ github.sha }}
-          path: |
-            build/terra.manifest.json
-            build/terrax_world_wasm_web.js
-            build/terrax_world_wasm_web.wasm
-          if-no-files-found: error
-
-  # Consume the already uploaded Web artifact. These public ABI and circuit
-  # tests do not compile Wasm again or gate the build jobs' artifact uploads.
-  circuit-world-acceptance:
-    needs: wasm-feature-matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 20
-      - name: Download the compiled WLD Web artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: terrawasm-wld-${{ github.sha }}
-          path: ${{ runner.temp }}/circuit-wld-artifact
-      - name: Verify natural traps, sparse fragments and placement anchors in the compiled WLD artifact
+          node-version: 22
+      - name: Verify pinned application commit
+        working-directory: viewer
+        run: test "$(git rev-parse HEAD)" = "$VIEWER_COMMIT"
+      - name: Install application dependencies
+        working-directory: viewer
+        run: npm ci --include=dev --ignore-scripts --no-audit --no-fund
+      - name: Build actual production H5
+        working-directory: viewer
+        run: npm run build:h5
+      - name: Install real Chromium for Playwright
         env:
-          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
-        run: node --test tests/test_circuit_fragments_supports.js
-      - name: Verify exported HELLO display, half-second timers and WLD round trip
+          BROWSER_TOOLS: ${{ runner.temp }}/hello-playwright
+        run: |
+          npm install --prefix "$BROWSER_TOOLS" --no-audit --no-fund playwright@1.55.0
+          "$BROWSER_TOOLS/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture desktop and mobile H5 pages
+        working-directory: viewer
         env:
-          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
-          TCW_EXPECTED_COMMIT: ${{ github.sha }}
-          TCW_HELLO_REPORT: ${{ runner.temp }}/hello-display-acceptance.json
-        run: node --test tests/test_hello_display.js
-      - name: Upload HELLO display acceptance evidence
+          CIRCUIT_BROWSER_TOOLS: ${{ runner.temp }}/hello-playwright
+        run: timeout --kill-after=10s 180s node --import ./scripts/node-alias-register.mjs ../runner/tests/capture_viewer_hello.mjs
+      - name: Upload actual page screenshots and browser report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hello-display-acceptance-${{ github.sha }}
-          path: ${{ runner.temp }}/hello-display-acceptance.json
+          name: hello-h5-playwright-bceff60
+          path: viewer/reports/hello-h5-screenshots
           if-no-files-found: warn
-      - name: Fetch and verify the pinned public WLD
-        run: python3 tests/computerraria/fetch-inputs.py "$RUNNER_TEMP/computerraria" --wld-only
-      - name: Verify original PixelBox rules and physical RV32I execution
-        env:
-          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
-          TCW_WORLD: ${{ runner.temp }}/computerraria/computerraria.wld
-          TCW_REPORT: ${{ runner.temp }}/computerraria-wld-acceptance.json
-          TCW_EXPECTED_COMMIT: ${{ github.sha }}
-          TCW_MEMORY_MIB: 160
-          TMPDIR: ${{ runner.temp }}
-        run: node --test tests/test_computerraria_wld.js
-      - name: Upload original WLD acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: computerraria-wld-acceptance-${{ github.sha }}
-          path: ${{ runner.temp }}/computerraria-wld-acceptance.json
-          if-no-files-found: warn
+          retention-days: 14
