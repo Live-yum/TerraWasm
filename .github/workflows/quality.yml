@@ -185,6 +185,19 @@ jobs:
         env:
           TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
         run: node --test tests/test_circuit_fragments_supports.js
+      - name: Verify exported HELLO display, half-second timers and WLD round trip
+        env:
+          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
+          TCW_EXPECTED_COMMIT: ${{ github.sha }}
+          TCW_HELLO_REPORT: ${{ runner.temp }}/hello-display-acceptance.json
+        run: node --test tests/test_hello_display.js
+      - name: Upload HELLO display acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hello-display-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/hello-display-acceptance.json
+          if-no-files-found: warn
       - name: Fetch and verify the pinned public WLD
         run: python3 tests/computerraria/fetch-inputs.py "$RUNNER_TEMP/computerraria" --wld-only
       - name: Verify original PixelBox rules and physical RV32I execution
