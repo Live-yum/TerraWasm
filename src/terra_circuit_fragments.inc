@@ -3,6 +3,7 @@
  * width*height grid. Two cooperative column replays build groups/descriptors;
  * selected records are materialized only after the caller's bound is checked. */
 #include "terra_tile_record.h"
+#include "terra_circuit_objects.h"
 typedef struct CxGeometry {uint32_t type,frame,shape,reserved;} CxGeometry;
 typedef struct CxFragmentObject {uint32_t x,y,width,height,type,net,flags;} CxFragmentObject;
 struct CxFragments {
@@ -11,6 +12,7 @@ struct CxFragments {
     CxFragmentObject* objects;uint32_t object_count,object_capacity;
     uint32_t* slots;uint32_t slot_capacity;
     uint32_t stage,ready,total,selected,result_count,object_first,object_end;
+    uint8_t* object_payload;uint32_t object_bytes,object_offset;
 };
 static uint32_t cf_root(CxFragments* f,uint32_t n){uint32_t root=n;while(f->parents[root]!=root)root=f->parents[root];while(n!=root){uint32_t next=f->parents[n];f->parents[n]=root;n=next;}return root;}
 static uint32_t cf_join(CxFragments* f,uint32_t a,uint32_t b){if(!a)return b;if(!b)return a;a=cf_root(f,a);b=cf_root(f,b);if(a>b){uint32_t n=a;a=b;b=n;}f->parents[b]=a;return a;}
@@ -75,18 +77,100 @@ static uint32_t cf_groups(CxWorld* w,uint32_t y,uint32_t* groups,uint32_t* masks
     for(uint32_t c=0;c<4;c++)if(cx_wire_mask(w->column+y)&(1u<<c)){uint32_t nets[2]={w->seed_ids[y*4+c],w->opposite_ids[y*4+c]};for(uint32_t j=0;j<2;j++)if(nets[j]){uint32_t group=cf_root(f,nets[j]),i=0;while(i<count&&groups[i]!=group)i++;if(i==count){groups[count]=group;masks[count++]=0;}masks[i]|=1u<<c;}}
     return count;
 }
-void cx_fragments_free(CxWorld* w){CxFragments* f=w->fragments;if(!f)return;cx_free(w,f->geometry);cx_free(w,f->parents);cx_free(w,f->descriptors);cx_free(w,f->owner);cx_free(w,f->objects);cx_free(w,f->slots);cx_free(w,f);w->fragments=NULL;}
+void cx_fragments_cancel(CxWorld* w){CxFragments* f=w->fragments;if(!f)return;cx_free(w,f->object_payload);f->object_payload=NULL;f->object_bytes=f->object_offset=0;}
+void cx_fragments_ack(CxWorld* w){if(w->fragments)w->fragments->object_offset+=w->event.length;}
+void cx_fragments_free(CxWorld* w){CxFragments* f=w->fragments;if(!f)return;cx_fragments_cancel(w);cx_free(w,f->geometry);cx_free(w,f->parents);cx_free(w,f->descriptors);cx_free(w,f->owner);cx_free(w,f->objects);cx_free(w,f->slots);cx_free(w,f);w->fragments=NULL;}
+static int cf_objects_build(CxWorld* w) {
+    CxFragments* f=w->fragments;
+    uint32_t count=0,total=32,origin_x=0,origin_y=0;
+    CoItem* items=NULL;
+    int result=TCW_FORMAT;
+    for(uint32_t i=0;i<f->total;i++)if(f->descriptors[i*8]==f->selected) {
+        origin_x=f->descriptors[i*8+1];
+        origin_y=f->descriptors[i*8+2];
+        if(f->descriptors[i*8+7]&5)return cx_fail(w,TCW_UNSUPPORTED,"fragment object geometry or companion data is unsupported");
+    }
+    for(uint32_t i=0;i<f->object_count;i++)if(cf_root(f,f->objects[i].net)==f->selected&&co_section(f->objects[i].type))count++;
+    if(count>w->command.height)return cx_fail(w,TCW_MEMORY,"fragment object count exceeds host budget");
+    if(count&&w->world->version!=326)return cx_fail(w,TCW_UNSUPPORTED,"object transfer requires WLD version 326");
+    if(count) {
+        items=cx_alloc(w,count*sizeof(*items));
+        if(!items)return TCW_MEMORY;
+        memset(items,0,count*sizeof(*items));
+        uint32_t j=0;
+        for(uint32_t i=0;i<f->object_count;i++) {
+            CxFragmentObject* o=f->objects+i;
+            if(cf_root(f,o->net)==f->selected&&co_section(o->type)) {
+                items[j].x=o->x;
+                items[j].y=o->y;
+                items[j++].tile=o->type;
+            }
+        }
+        for(uint32_t i=1;i<count;i++)if(!co_item_compare(items+i-1,items+i))goto done;
+        const uint32_t sections[]= {
+            2,3,5
+        };
+        for(uint32_t s=0;s<3;s++) {
+            CoCursor cursor;
+            if(!co_cursor(w->world,sections[s],&cursor))goto done;
+            CoItem value;
+            int next;
+            while((next=co_next(&cursor,&value))==1) {
+                CoItem* item=co_find(items,count,value.x,value.y);
+                if(!item)continue;
+                if(item->seen||co_section(item->tile)!=value.section||(value.section==5&&item->tile!=value.tile))goto done;
+                uint32_t tile=item->tile;
+                *item=value;
+                item->tile=tile;
+                item->seen=1;
+                if(value.length>w->command.width-total||32>w->command.width-total-value.length) {
+                    result=TCW_MEMORY;
+                    goto done;
+                }
+                total+=32+value.length;
+            }
+            if(next!=2)goto done;
+        }
+        for(uint32_t i=0;i<count;i++)if(!items[i].seen)goto done;
+    }
+    f->object_payload=cx_alloc(w,total);
+    if(!f->object_payload) {
+        result=TCW_MEMORY;
+        goto done;
+    }
+    f->object_bytes=total;
+    f->object_offset=0;
+    uint8_t* p=f->object_payload;
+    uint32_t header[]= {
+        CO_MAGIC,1,w->world->version,count,total,origin_x,origin_y,0
+    };
+    for(uint32_t i=0;i<8;i++)co_put(p+i*4,header[i]);
+    p+=32;
+    for(uint32_t i=0;i<count;i++) {
+        CoItem* a=items+i;
+        uint32_t h[]= {
+            a->section,a->kind,a->x-origin_x,a->y-origin_y,a->tile,a->length,0,0
+        };
+        for(uint32_t k=0;k<8;k++)co_put(p+k*4,h[k]);
+        memcpy(p+32,a->payload,a->length);
+        p+=32+a->length;
+    }
+    result=TCW_OK;
+    done:cx_free(w,items);
+    return result?cx_fail(w,result,result==TCW_MEMORY?"fragment object bytes exceed host budget":"object section is malformed, duplicated or missing its tile record"):TCW_OK;
+}
 uint32_t cx_fragments_result_count(CxWorld* w){return w->fragments?(w->command.kind==TCW_FRAGMENTS?w->fragments->total:w->fragments->result_count):0;}
 static int cf_emit_page(CxWorld* w){CxFragments* f=w->fragments;uint32_t n=w->command.x<f->total?f->total-w->command.x:0;if(n>w->command.count)n=w->command.count;int s=reserve_result(w,n*2);if(s)return s;if(n)memcpy(w->result,f->descriptors+w->command.x*8,n*32u);cx_emit(w,TCW_RESULT,0,0,n*32u,w->result);w->event.result_kind=TCW_FRAGMENTS;w->event.result_count=n;return TCW_CONTINUE;}
 int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd){
     if(!cmd->count||cmd->count>32768u||cmd->data_count>65536u||(!cmd->data_ptr&&cmd->data_count))return TCW_INVALID;
     if(cmd->kind==TCW_EXTRACT&&(!w->fragments||!w->fragments->ready||cmd->data_count))return TCW_STATE;
+    if(cmd->kind==TCW_EXTRACT&&(cmd->flags&1)&&(!cmd->aux_source_id||cmd->aux_source_id==w->world_source||cmd->aux_source_id==w->scratch_source||cmd->aux_source_id==w->twld_source||cmd->width<32||cmd->width>CO_LIMIT||!cmd->height||cmd->height>CO_COUNT))return TCW_INVALID;
 #ifdef __wasm__
     if(cmd->data_count&&!tx_bridge_range_is_valid(cmd->data_ptr,cmd->data_count*16u))return TCW_INVALID;
 #endif
     w->error=0;
     if(cmd->kind==TCW_FRAGMENTS&&w->fragments&&w->fragments->ready){if(cmd->data_count)return TCW_STATE;w->command=*cmd;return cf_emit_page(w);}
-    if(cmd->kind==TCW_EXTRACT){CxFragments* f=w->fragments;uint32_t i=0;while(i<f->total&&f->descriptors[i*8]!=cmd->mask)i++;if(i==f->total)return TCW_INVALID;if(f->descriptors[i*8+5]>cmd->count)return cx_fail(w,TCW_MEMORY,"selected circuit exceeds extraction cell budget");
+    if(cmd->kind==TCW_EXTRACT){CxFragments* f=w->fragments;cx_fragments_cancel(w);uint32_t i=0;while(i<f->total&&f->descriptors[i*8]!=cmd->mask)i++;if(i==f->total)return TCW_INVALID;if(f->descriptors[i*8+5]>cmd->count)return cx_fail(w,TCW_MEMORY,"selected circuit exceeds extraction cell budget");
         int s=reserve_result(w,f->descriptors[i*8+5]*2u);if(s)return s;w->command=*cmd;f->selected=cmd->mask;f->result_count=0;f->stage=3;f->object_first=f->object_end=0;seek_checkpoint(w,f->descriptors[i*8+1]);w->query_x1=f->descriptors[i*8+1]+f->descriptors[i*8+3];w->phase=CX_FRAGMENTS;return TCW_OK;}
     CxGeometry* saved_geometry=NULL;uint32_t saved_count=0;
     if(w->fragments&&!cmd->data_count){saved_geometry=w->fragments->geometry;saved_count=w->fragments->geometry_count;w->fragments->geometry=NULL;}
@@ -104,6 +188,7 @@ memory:cx_fragments_free(w);return TCW_MEMORY;
 }
 int cx_fragments_step(CxWorld* w,uint32_t* work){
     CxFragments* f=w->fragments;uint32_t end=f->stage==3?w->query_x1:w->width;
+    if(f->stage==4){if(f->object_offset<f->object_bytes){uint32_t n=f->object_bytes-f->object_offset;if(n>65536)n=65536;cx_emit(w,TCW_WRITE,w->command.aux_source_id,f->object_offset,n,f->object_payload+f->object_offset);return TCW_CONTINUE;}cx_fragments_cancel(w);cx_emit(w,TCW_RESULT,0,0,f->result_count*32u,w->result);w->event.result_kind=TCW_EXTRACT;w->event.result_count=f->result_count;return TCW_CONTINUE;}
     while(*work&&w->x<end){int status=cx_scan_step(w,work);if(status<0||w->event.kind)return status;if(status!=2)return TCW_CONTINUE;
         if(!w->emit_y){if(f->stage==1){int s=cf_gate_stacks(w);if(s)return s;}else cf_column_owners(w);}
         while(*work&&w->emit_y<w->height){uint32_t y=w->emit_y++,groups[9],masks[9];--*work;
@@ -119,5 +204,6 @@ int cx_fragments_step(CxWorld* w,uint32_t* work){
     if(w->x<end)return TCW_CONTINUE;
     if(f->stage==1){if(f->object_count>1)qsort(f->objects,f->object_count,sizeof(*f->objects),cf_object_compare);cx_free(w,f->slots);f->slots=NULL;f->slot_capacity=0;f->stage=2;f->object_first=f->object_end=0;seek_checkpoint(w,0);return TCW_OK;}
     if(f->stage==2){uint32_t n=0;for(uint32_t i=0;i<w->networks;i++){uint32_t* d=f->descriptors+i*8;if(d[5]){d[3]-=d[1]-1u;d[4]-=d[2]-1u;if(n!=i)memcpy(f->descriptors+n*8,d,32);n++;}}f->total=n;f->ready=1;return cf_emit_page(w);}
+    if(w->command.flags&1){int status=cf_objects_build(w);if(status)return status;f->stage=4;return TCW_OK;}
     cx_emit(w,TCW_RESULT,0,0,f->result_count*32u,w->result);w->event.result_kind=TCW_EXTRACT;w->event.result_count=f->result_count;return TCW_CONTINUE;
 }

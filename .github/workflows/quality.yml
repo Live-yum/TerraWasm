@@ -56,6 +56,10 @@ jobs:
         run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
       - name: Run sanitizer contracts
         run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
+      # Stream events use Wasm32 addresses. The low-address native harness is
+      # incompatible with ASan's address space, but supports full UBSan checks.
+      - name: Run stream and circuit object contracts under UBSan
+        run: python3 scripts/test-stream-native.py --ubsan
 
   wasm-release:
     runs-on: ubuntu-latest

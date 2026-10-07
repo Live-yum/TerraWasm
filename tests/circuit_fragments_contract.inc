@@ -3,13 +3,17 @@
 #include "terra_circuit_world.h"
 extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
 static uint8_t* fragment_scratch;static uint32_t fragment_scratch_size;
-static uint32_t fragment_rows[1024],fragment_row_count,fragment_total;
+static uint32_t fragment_rows[4096],fragment_row_count,fragment_total;
+static uint8_t* fragment_objects;static uint32_t fragment_objects_size;
+static int fragment_cancel_objects;
+static const uint8_t* stamp_objects;static uint32_t stamp_objects_size;
 static void fragment_pump(uint32_t handle){
  TerraCircuitWorldEvent e;fragment_row_count=fragment_total=0;
  for(uint32_t n=0;n<1000000;n++){
   int s=terra_circuit_world_step(handle,17,&e);assert(s==0||s==1);
+  if(fragment_cancel_objects&&e.kind==TCW_WRITE&&e.source_id==11){assert(e.offset==0&&e.length>=32);fragment_cancel_objects=0;assert(!terra_circuit_world_cancel(handle));return;}
   if(e.kind==TCW_READ){const uint8_t* b=e.source_id==1?source:fragment_scratch;uint32_t size=e.source_id==1?source_size:fragment_scratch_size;assert(e.offset<=size&&e.length<=size-e.offset);memcpy(bridge,b+e.offset,e.length);assert(!terra_circuit_world_supply(handle,e.source_id,e.offset,bridge,e.length));}
-  else if(e.kind==TCW_WRITE){if(e.source_id==2){uint32_t end=e.offset+e.length;if(end>fragment_scratch_size){fragment_scratch=realloc(fragment_scratch,end);assert(fragment_scratch);fragment_scratch_size=end;}memcpy(fragment_scratch+e.offset,(void*)(uintptr_t)e.data_ptr,e.length);}else assert(e.source_id==9);assert(!terra_circuit_world_ack(handle));}
+  else if(e.kind==TCW_WRITE){if(e.source_id==2){uint32_t end=e.offset+e.length;if(end>fragment_scratch_size){fragment_scratch=realloc(fragment_scratch,end);assert(fragment_scratch);fragment_scratch_size=end;}memcpy(fragment_scratch+e.offset,(void*)(uintptr_t)e.data_ptr,e.length);}else if(e.source_id==11){assert(e.offset==fragment_objects_size&&e.length<=65536);fragment_objects_size+=e.length;fragment_objects=realloc(fragment_objects,fragment_objects_size);assert(fragment_objects);memcpy(fragment_objects+e.offset,(void*)(uintptr_t)e.data_ptr,e.length);}else assert(e.source_id==9);assert(!terra_circuit_world_ack(handle));}
   else if(e.kind==TCW_RESULT){assert(e.length==e.result_count*32u&&e.length<=sizeof(fragment_rows));memcpy(fragment_rows,(void*)(uintptr_t)e.data_ptr,e.length);fragment_row_count=e.result_count;assert(!terra_circuit_world_ack(handle));}
   else if(e.kind==TCW_READY){fragment_total=e.result_count;return;}
  }assert(!"fragment command exceeded bounded execution");
@@ -34,8 +38,8 @@ static void circuit_fragments_contract(const char* path){
 static uint8_t* stamp_pump(uint32_t id,const uint32_t* records,uint32_t bytes,uint32_t* size,int expect_failure,int lease){
  uint8_t* output=NULL;uint32_t capacity=0;*size=0;
  for(uint32_t step=0;step<1000000;step++){
-  int status=terra_world_stream_step(id,7,ep);if(status<0){assert(expect_failure);if(expect_failure==2)assert(!capacity&&!output);free(output);return NULL;}
-  if(ep->kind==TX_STREAM_NEED_SOURCE){const uint8_t* b=ep->source_id==1?source:(const uint8_t*)records;uint32_t n=ep->source_id==1?source_size:bytes;assert(ep->source_id==1||ep->source_id==9);assert(ep->offset<=n&&ep->length<=n-ep->offset);
+  int status=terra_world_stream_step(id,7,ep);if(status<0){assert(expect_failure);if(expect_failure==2)assert(!capacity&&!output);uint32_t retained=tx_native_heap_used();assert(terra_world_stream_step(id,7,ep)<0);assert(terra_world_stream_step(id,7,ep)<0);assert(tx_native_heap_used()==retained);free(output);return NULL;}
+  if(ep->kind==TX_STREAM_NEED_SOURCE){const uint8_t* b=ep->source_id==1?source:ep->source_id==10?stamp_objects:(const uint8_t*)records;uint32_t n=ep->source_id==1?source_size:ep->source_id==10?stamp_objects_size:bytes;assert(ep->source_id==1||ep->source_id==9||ep->source_id==10);assert(ep->offset<=n&&ep->length<=n-ep->offset);
    if(lease){check(terra_world_stream_acquire_input(id,lp));memcpy((void*)(uintptr_t)lp->data_ptr,b+lp->offset,lp->length);check(terra_world_stream_commit_input(id,lp->lease_id,lp->source_id,lp->offset,lp->length));}
    else{memcpy(bridge,b+ep->offset,ep->length);check(terra_world_stream_supply_source(id,ep->source_id,ep->offset,bridge,ep->length));}
   }else if(ep->kind==TX_STREAM_OUTPUT){assert(!expect_failure||ep->offset>=0);uint32_t end=ep->offset+ep->length;if(end>capacity){capacity=end+1024;output=realloc(output,capacity);assert(output);}memcpy(output+ep->offset,(void*)(uintptr_t)ep->data_ptr,ep->length);check(terra_world_stream_ack_output(id));}

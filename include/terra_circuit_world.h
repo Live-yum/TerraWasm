@@ -66,6 +66,11 @@ typedef struct TerraCircuitWorldCommand {
  * wall|tilePaint<<16|wallPaint<<24,liquidAmount|liquidType<<8|brickStyle<<16|wires<<24,0,0].
  * Tile flags bits 0..6: active, actuator, inactive, invisible block/wall,
  * fullbright block/wall. Frame coordinates are signed 16-bit values.
+ * EXTRACT flags bit 0: emit a COB1 object companion to aux_source_id using
+ * sequential WRITE events, then the original cell RESULT. width limits bytes
+ * (32..4194304); height limits objects (1..32768). Requires the numeric
+ * circuitWorld.fragmentObjects=1 capability. No implicit empty inventories.
+ * See docs/CIRCUIT_FRAGMENTS.md for the bounded COB1/overlay protocol.
  * READY.result_count is the total fragment count or extracted cell count.
  * Neither command changes electrical connectivity or simulation state. */
 /* Exactly twenty-four words. Byte figures count retained native allocations;

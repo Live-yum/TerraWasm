@@ -38,8 +38,9 @@ FRAGMENTS emits 32-byte records, eight little-endian u32 words:
 `[id, x, y, width, height, cellCount, wireCellCount, flags]`
 
 Flags: **1** incomplete/ambiguous object geometry; **2** an object needs a
-chest/sign/tile-entity section; **4** a mod tile needs its companion data. A
-caller must not advertise a safe complete world round trip for these flags.
+chest/sign/tile-entity section; **4** a mod tile needs its companion data. Flags
+1 and 4 prevent a complete supported world round trip. Flag 2 requires the
+object companion described below; tile records alone cannot preserve it.
 RESULT `result_count` counts this page; READY `result_count` is the total number
 of descriptors. IDs remain stable for this compiled world, but need not be
 consecutive. Empty worlds return a valid empty page.
@@ -100,7 +101,7 @@ an identical tile/frame or adding wires is safe. Source object completeness is
 the verified fragment/editor encoder's responsibility; this layer does not
 invent missing object cells from a bounding rectangle.
 
-Objects requiring additional sections are rejected as foreground sources:
+Without an object companion, these foreground sources are rejected:
 21/467 containers, 88 dressers, 55/85/425/573 signs/gravestones/announcement
 boxes, and tile entities 378/395/423/470/471/475/520/597/698/723/724. The last
 three are the Dead Cells display jar, kite anchor, and critter anchor; their
@@ -109,15 +110,101 @@ The complete list is checked against `TileID.Sets.IsAContainer`, `Main.tileSign`
 and every registration in [TileEntitiesManager.RegisterAll](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.DataStructures/TileEntitiesManager.cs)
 and its entity-specific tile validation at that pinned game source. The old
 frame-encoded weapon rack (334) is not mistaken for the tile-entity weapon rack
-(471). A future payload must explicitly carry and
-relocate associated section records before lifting this restriction. Likewise,
-the host must not apply this WLD-only writer to a TWLD companion transaction.
+(471). The bounded companion protocol below carries the associated records.
+The host must not apply this WLD-only writer to a TWLD companion transaction.
 
 All other sections and unselected tile values are preserved. The result remains
 an unadopted candidate until the existing host verification/publish protocol
 completes. Failure/cancellation discards it and leaves the active world intact.
 After adoption, discard any circuit compiled from the previous tile topology
 and compile the new immutable world before simulating it.
+
+## Object companions (COB1)
+
+This is an internal transfer payload, not a new world or circuit file format.
+It preserves raw section encodings without the length-limited display JSON.
+Require numeric `manifest.abi.circuitWorld.fragmentObjects === 1` and
+`manifest.abi.stream.stampObjects === 1`. The compiled build identity must agree
+through `circuitWorldFragmentObjects` and `stream.stampObjects`; changing a
+manifest cannot enable the feature in older binaries. Existing exports,
+command/event sizes, and stream ABI versions remain unchanged.
+
+Command 8 with `flags = 1` takes `aux_source_id` as a distinct writable output,
+`width` as the byte budget (32–4194304), and `height` as the object budget
+(1–32768). The source must differ from world, scratch, and TWLD sources. After
+validating the whole selected payload, native emits sequential WRITE events
+from offset zero in blocks up to 65536 bytes. The first block includes the
+complete 32-byte header; there are no backpatches. The original cell RESULT and
+READY follow the companion. The host must only publish both after success.
+
+All words are little-endian u32; there is no padding between item payloads.
+
+| Global header word | Value |
+| --- | --- |
+| 0–1 | `0x31424f43` (COB1), schema version 1 |
+| 2–4 | source WLD version, object count, total bytes including header |
+| 5–7 | fragment origin x, fragment origin y, reserved zero |
+
+| Item header word | Value |
+| --- | --- |
+| 0–1 | section (2 chest, 3 sign, 5 tile entity), entity type (zero for chest/sign) |
+| 2–4 | anchor x/y relative to fragment origin, tile type |
+| 5–7 | payload byte length, reserved zero, reserved zero |
+
+Each header is followed immediately by its complete payload. Chest payloads
+contain the original 7-bit length-prefixed UTF-8 name, u32 slot count, and every
+slot (i16 stack; positive stacks also have i32 item type and u8 prefix). Signs
+contain their full length-prefixed UTF-8 text. Empty strings are valid; embedded
+NUL and long text are copied verbatim. Entity payloads contain only saved extra
+data; original IDs and coordinates are replaced at destination.
+
+| Entity type | Tile | Extra payload in WLD 326 |
+| --- | --- | --- |
+| 0 | 378 training dummy | i16 runtime NPC slot |
+| 1 | 395 item frame | i16 item type, u8 prefix, i16 stack |
+| 2 | 423 logic sensor | u8 logic check (0–7), u8 saved On (0–1) |
+| 3 | 470 display doll | two inventory masks, pose byte, extra mask; populated items |
+| 4 | 471 weapon rack | item record (5 bytes) |
+| 5 | 475 hat rack | mask byte; populated items |
+| 6 | 520 food platter | item record (5 bytes) |
+| 7 | 597 teleportation pylon | empty (zero bytes) |
+| 8 | 698 Dead Cells display jar | item record (5 bytes) |
+| 9 | 723 kite anchor | i16 item type |
+| 10 | 724 critter anchor | i16 item type |
+
+All 18 tile kinds use their verified complete root/occupancy geometry. A source
+object with missing or duplicate section metadata fails extraction; it never
+becomes an empty container implicitly. An editor may explicitly construct a
+new empty container, a sign with its text, or a new sensor with a valid payload.
+Saved sensor state is preserved rather than inferred from simulation feedback.
+Training dummy NPC slots are reset to -1 when written: the source world's
+runtime index is not valid in a different world. The destination game recreates
+the dummy NPC. Leashed anchors retain their saved item, which Terraria uses to
+recreate the kite or critter on loading; runtime motion is not stored in WLD.
+
+Add `objectSourceId`, `objectBytes`, and `objectCount` to `stamp_tiles` together.
+The immutable object source must differ from world and tile-record sources.
+Native reads 64 KiB windows into one selected-payload buffer capped at 4 MiB,
+then validates exact sizes, kinds, anchors, frame offsets, complete foreground
+coverage, and unique/nonoverlapping objects. No complete world grid enters JS.
+Metadata scans use the existing bounded metadata image. The candidate rebuild
+uses the effective sections, including earlier queued overrides, and keeps
+untouched original records byte-for-byte. The temporary compact image is freed
+before allocating the final image, whose existing limit remains 16 MiB.
+
+Nonempty object bundles currently require **326 → 326**. Older chest and entity
+layouts have version-specific differences (including display doll order in
+311), so unsupported conversions fail explicitly. An empty bundle is valid
+for older tile-only worlds and imposes no new version restriction.
+
+Any existing target object metadata anchor inside the incoming footprint,
+including an orphan record, is a conflict. An incoming object cannot replace
+an active framed target, even with the same frame, so inventories cannot be
+overwritten. Chest/sign capacity and entity ID overflow are checked. Failures
+before or during writing leave the original world unchanged; partial output
+must be discarded. A failed stamp is terminal and can only be cancelled or
+closed, preventing repeated-step allocation leaks or an OOM retry on a released
+candidate. Cancellation and close release the selected companion/index.
 
 ## Regression coverage
 
@@ -127,6 +214,13 @@ including its UBSan variant; no production test exports are added.
 Wasm in the existing combined/WLD builds. Synthetic independent WLD encoders
 cover color crossings, complete frames, gate stacks, pagination, malformed
 geometry, resource bounds, metadata byte preservation, multiple stamp windows,
-lease ownership, rejection, cancellation and complete release. All 18
-section-backed tile types are valid in-range fixture IDs and must be rejected
-before any stamp output; fragment descriptors must mark each one with flag 2.
+lease ownership, rejection, cancellation and complete release. The additional
+`tests/circuit_objects_contract.inc` uses independently encoded public 326
+fixtures for all 18 objects and 11 entities, 200-slot inventories, long UTF-8/NUL
+text, complete raw payload equality, metadata overrides, orphan/duplicate target
+conflicts, malformed packets, partial objects, old-version rejection, empty
+legacy companions, cancellation during side output/input, repeated failed steps,
+and heap return to baseline. The sanitizer job also runs the stream harness
+under UBSan; its Wasm32 pointer layout requires low native addresses.
+The real-Wasm tests exercise the same public commands without production test
+exports or private application sources.

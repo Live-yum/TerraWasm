@@ -9,6 +9,7 @@
 #include "terra_stream_map.h"
 #include "terra_stream_png.h"
 #include "terra_tile_record.h"
+#include "terra_circuit_objects.h"
 #include <string.h>
 #include <limits.h>
 
@@ -53,11 +54,13 @@ void txw_test_stream_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
 }
 #endif
 
-enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY,PNG_CURSOR_SCAN,WRITE_COPY,PNG_MARKER_SCAN,STAMP_VALIDATE };
+enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY,PNG_CURSOR_SCAN,WRITE_COPY,PNG_MARKER_SCAN,STAMP_VALIDATE,STAMP_FAILED };
 typedef struct StreamStamp {
     uint32_t source_id,count,index,x,y,width,height;
     uint32_t offset,length,previous_x,previous_y,has_previous;
     uint8_t bytes[65536];
+    uint32_t object_source,object_length,object_count,object_loaded,objects_valid,object_max_id;
+    uint8_t* objects;CoItem* items;
 } StreamStamp;
 typedef struct PngMarkerCursor {uint32_t offset,y;} PngMarkerCursor;
 typedef struct PngColumnCursor {
@@ -511,6 +514,10 @@ invalid:
 }
 static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uint32_t length){
     counter_add(&t->stats.source_bytes,length);
+    if(t->stamp&&t->event.source_id==t->stamp->object_source){
+        StreamStamp* s=t->stamp;if(offset!=s->object_loaded||offset>s->object_length||length>s->object_length-offset)return fail("TERRAX_INVALID_ARGUMENT","object source window mismatch");
+        if(bytes!=s->objects+offset){memcpy(s->objects+offset,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}s->object_loaded+=length;clear_event(t);return 0;
+    }
     if(t->stamp&&t->event.source_id==t->stamp->source_id){
         if(length>sizeof(t->stamp->bytes))return fail("TERRAX_INVALID_ARGUMENT","stamp window exceeds 64 KiB");
         if(bytes!=t->stamp->bytes){memcpy(t->stamp->bytes,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}
@@ -547,6 +554,7 @@ static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uin
     clear_event(t);return 0;
 }
 static uint8_t* input_destination(StreamTask* t){
+    if(t->stamp&&t->event.source_id==t->stamp->object_source)return t->stamp->objects+t->event.offset;
     if(t->stamp&&t->event.source_id==t->stamp->source_id)return t->stamp->bytes;
     if(t->png_cache_request)return t->png_source_cache+t->x*t->png_cache_stride;
     if(t->stage==OPEN_PREFIX)return t->candidate->file+t->event.offset;
@@ -716,8 +724,9 @@ static int finish_write_tiles(StreamTask* t){
     if((w->pixel_art_indexed&&!tx_stream_metadata_finish(w,&t->metadata))||!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return -1;
     t->suffix_offset=w->starts[2];t->stage=WRITE_SUFFIX;return 0;
 }
-int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
     StreamTask* t=task(id);if(!t||t->stage==ADOPTED||!valid_range(out,sizeof(*out)))return fail("TERRAX_STATE_ERROR","invalid stream task/event pointer");
+    if(t->stage==STAMP_FAILED)return fail("TERRAX_STATE_ERROR","failed stamp must be cancelled or closed");
     if(t->old_handle&&tx_get_world(t->old_handle)!=t->source)return fail("TERRAX_INVALID_HANDLE","source world changed during stream task");
     if(t->event.kind){*out=t->event;return 0;}
     uint32_t budget=units?units:1;if(budget>4096)budget=4096;budget*=256;
@@ -850,9 +859,10 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             if(t->result_offset<t->result_length){uint32_t n=t->result_length-t->result_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->result_offset,n,t->result+t->result_offset);break;}
             t->stage=DONE;
         }else if(t->stage==STAMP_VALIDATE){
+            if(t->stamp->object_source&&!t->stamp->objects_valid){int s=stamp_objects_prepare(t);if(s<0)return s;if(!s)break;}
             uint32_t record[8];int r=stamp_record(t,record);if(r<0)return -1;if(!r)break;
-            if(r==2){t->stamp->index=0;t->stamp->length=0;t->stamp->has_previous=0;t->stage=WRITE_PREFIX;continue;}
-            if(!stamp_validate_record(t,record))return fail("TERRAX_INVALID_STAMP","stamp records must be valid, ordered unique cells without section-backed objects");
+            if(r==2){if(!stamp_objects_finish(t))return fail("TERRAX_INVALID_STAMP","object payload does not cover complete source objects");t->stamp->index=0;t->stamp->length=0;t->stamp->has_previous=0;t->stage=WRITE_PREFIX;continue;}
+            if(!stamp_validate_record(t,record))return fail("TERRAX_INVALID_STAMP","stamp records must be ordered unique cells with complete matching object payloads");
             t->stamp->index++;
         }else if(t->stage==WRITE_PREFIX){
             if(t->output_offset<t->prefix_length){uint32_t n=t->prefix_length-t->output_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->output_offset,n,w->file+t->output_offset);break;}
@@ -938,6 +948,19 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
     }
     *out=t->event;return 0;
 }
+int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+    int32_t result=stream_step_impl(id,units,out);
+    if(result<0&&current&&current->id==id&&current->stamp&&
+       current->stage!=CANCELLED&&current->stage!=ADOPTED){
+        /* Validation can own a partial object index, and a failed metadata
+         * rebuild may already have released the temporary candidate image.
+         * Neither phase may be retried. Keep cancel/close ownership intact. */
+        current->stage=STAMP_FAILED;
+        memset(&current->lease,0,sizeof(current->lease));
+        clear_event(current);
+    }
+    return result;
+}
 int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     StreamTask* t=task(id);if(out&&valid_range(out,4))*out=0;
     if(!t||t->stage!=DONE||t->result_kind||t->event.kind!=TX_STREAM_READY||!source_id||!valid_range(out,4))return fail("TERRAX_STATE_ERROR","candidate is not ready for adoption");
@@ -971,6 +994,6 @@ int32_t terra_world_stream_close(uint32_t id){
     if(t->map_encoder)tx_stream_map_free(t->map_encoder);if(t->png_encoder)tx_stream_png_free(t->png_encoder);
     if(t->input)tx_internal_free(t->input);if(t->output.data)tx_internal_free(t->output.data);
     if(t->stripe)tx_internal_free(t->stripe);if(t->stripe_nodes)tx_internal_free(t->stripe_nodes);
-    if(t->stamp)tx_internal_free(t->stamp);
+    if(t->stamp){if(t->stamp->objects)tx_internal_free(t->stamp->objects);if(t->stamp->items)tx_internal_free(t->stamp->items);tx_internal_free(t->stamp);}
     tx_internal_free(t);current=NULL;return 0;
 }

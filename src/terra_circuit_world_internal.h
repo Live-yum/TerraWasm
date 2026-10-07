@@ -184,6 +184,8 @@ void cx_devices_end_columns(CxWorld*);
 int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*);
 int cx_fragments_step(CxWorld*,uint32_t*);
 void cx_fragments_free(CxWorld*);
+void cx_fragments_cancel(CxWorld*);
+void cx_fragments_ack(CxWorld*);
 uint32_t cx_fragments_result_count(CxWorld*);
 
 #endif

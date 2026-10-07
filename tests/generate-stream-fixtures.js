@@ -33,5 +33,7 @@ if(require.main===module){const dir=process.argv[2];fs.mkdirSync(dir,{recursive:
  for(let x=24;x<=28;x++)cell(x,10,{wires:1});for(let y=8;y<=12;y++)cell(26,y,{wires:1});cell(26,10,{type:424});
  cell(30,25,{type:1,wires:2,paint:4,wall:3,wallPaint:6});
  fs.writeFileSync(path.join(dir,'circuit-fragments.wld'),makeCircuitWorld([...cells.values()]));
+ const objects=require('./helpers/circuit-objects').fixture();fs.writeFileSync(path.join(dir,'circuit-objects.wld'),objects.world);fs.writeFileSync(path.join(dir,'circuit-objects.cob'),objects.companion);fs.writeFileSync(path.join(dir,'circuit-objects.geometry'),require('./helpers/circuit-objects').words(objects.geometry.flat()));
+ fs.writeFileSync(path.join(dir,'circuit-objects-old.wld'),makeCircuitWorld([],100,32));
 }
 module.exports={fixture};

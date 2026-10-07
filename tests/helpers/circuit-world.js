@@ -6,8 +6,8 @@ const { makeSectionedWorld } = require('./sectioned-world');
 
 // Independent, small sectioned WLD encoder for mechanism contracts. It uses
 // WorldFile's published flags and never asks the DUT to construct its fixture.
-function makeCircuitWorld(cells, width = 40, height = 32) {
-  const name = 'circuit-contract', base = makeSectionedWorld(196, { worldName: name });
+function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
+  const name = 'circuit-contract', base = makeSectionedWorld(version, { worldName: name });
   const count = base.readUInt16LE(24), oldStart = base.readUInt32LE(26);
   const header = Buffer.from(base.subarray(oldStart));
   const dimensions = Buffer.alloc(8); dimensions.writeInt32LE(500); dimensions.writeInt32LE(1000, 4);
@@ -39,7 +39,9 @@ function makeCircuitWorld(cells, width = 40, height = 32) {
     records.push(Buffer.from(out));
   }
   const footer = Buffer.concat([Buffer.from([1, Buffer.byteLength(name)]), Buffer.from(name), Buffer.from([1, 0, 0, 0])]);
-  const sections = [header, Buffer.concat(records), Buffer.from([0, 0, 40, 0]), Buffer.alloc(2), Buffer.alloc(2), Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(4), footer];
+  const sections = version === 326
+    ? [header, Buffer.concat(records), Buffer.alloc(2), Buffer.alloc(2), Buffer.alloc(6), Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(12), Buffer.alloc(1), footer]
+    : [header, Buffer.concat(records), Buffer.from([0, 0, 40, 0]), Buffer.alloc(2), Buffer.alloc(2), Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(4), footer];
   assert.equal(sections.length, count);
   let offset = format.length;
   sections.forEach((s, i) => { format.writeUInt32LE(offset, 26 + i * 4); offset += s.length; });

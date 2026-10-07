@@ -101,7 +101,7 @@ int cx_command_complete(CxWorld* w){
 }
 int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(!input)return TCW_INVALID;if(w->phase!=CX_IDLE||w->event.kind)return TCW_STATE;
-    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
+    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
     /* A rejected bounded query must not poison SAVE's earlier dispatch path. */
     w->error=0;
     if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd);

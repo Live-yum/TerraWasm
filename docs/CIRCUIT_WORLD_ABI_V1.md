@@ -29,7 +29,8 @@ identity field `circuitWorldAbiVersion: 1`, and the following manifest group:
       "compactState": true,
       "atomicCommands": true,
       "wallLayer": true,
-      "fragments": true
+      "fragments": true,
+      "fragmentObjects": 1
     }
   }
 }

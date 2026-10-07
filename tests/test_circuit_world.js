@@ -4,6 +4,67 @@ const assert = require('node:assert/strict');
 const { makeCircuitWorld, makeCircuitTwld, makeDriver } = require('./helpers/circuit-world');
 const line = (x1, x2, y, wires) => Array.from({ length: x2 - x1 + 1 }, (_, n) => ({ x: x1 + n, y, wires }));
 
+test('COB1 preserves all 18 section-backed objects and exact long strings through the real WASM writer', async () => {
+  const { fixture, sectionRecords, replaceSections } = require('./helpers/circuit-objects');
+  const f = fixture(), d = await makeDriver(), M = d.M, pointers = [];
+  const alloc = bytes => { const p = M._tx_malloc(typeof bytes === 'number' ? bytes : bytes.length); assert.ok(p); pointers.push(p); if (typeof bytes !== 'number') M.HEAPU8.set(bytes, p); return p; };
+  const str = s => alloc(Buffer.from(s + '\0')), hp = alloc(4), ep = alloc(48), lease = alloc(32); let task = 0;
+  function stamp(records, companion, expectFailure = false) {
+    const cells = Buffer.from(new Uint32Array(records.flat()).buffer), pieces = [];
+    const request = { x: 3, y: 20, width: 90, height: 4, recordCount: records.length, recordSourceId: 9, mode: 'overlay', objectSourceId: 10, objectBytes: companion.length, objectCount: companion.readUInt32LE(12) };
+    const status = M._terra_world_stream_operation_begin(d.worldHandle, str('stamp_tiles'), str(JSON.stringify(request)), hp);
+    if (status < 0) { assert.ok(expectFailure); return null; } task = M.HEAPU32[hp >>> 2];
+    try {
+      for (let n = 0; n < 100000; n++) {
+        const status = M._terra_world_stream_step(task, 7, ep);
+        if (status < 0) { assert.ok(expectFailure); assert.equal(pieces.length, 0, 'invalid metadata fails before output'); return null; }
+        const e = Array.from(M.HEAPU32.subarray(ep >>> 2, (ep >>> 2) + 12));
+        if (e[1] === 1) {
+          const source = e[2] === 9 ? cells : e[2] === 10 ? companion : d.sources.get(e[2]); assert.ok(source); assert.ok(e[3] + e[4] <= source.length);
+          assert.equal(M._terra_world_stream_acquire_input(task, lease), 0);
+          const l = Array.from(M.HEAPU32.subarray(lease >>> 2, (lease >>> 2) + 8));
+          M.HEAPU8.set(source.subarray(e[3], e[3] + e[4]), l[5]); assert.equal(M._terra_world_stream_commit_input(task, l[1], e[2], e[3], e[4]), 0);
+        } else if (e[1] === 3) { pieces.push([e[3], Buffer.from(M.HEAPU8.subarray(e[5], e[5] + e[4]))]); assert.equal(M._terra_world_stream_ack_output(task), 0); }
+        else if (e[1] === 4) { assert.ok(!expectFailure); const out = Buffer.alloc(e[10]); for (const [at, bytes] of pieces) bytes.copy(out, at); return out; }
+      } assert.fail('object stamp did not finish');
+    } finally { assert.equal(M._terra_world_stream_close(task), 0); task = 0; }
+  }
+  const part = (bytes, section) => bytes.subarray(bytes.readUInt32LE(26 + section * 4), section === 10 ? bytes.length : bytes.readUInt32LE(30 + section * 4));
+  try {
+    d.open(f.world); const list = d.command(7, { count: 8, rawRecords: f.geometry }); assert.equal(list.rows.length, 1); assert.equal(list.rows[0][7], 2);
+    const before = M._tx_native_heap_used();
+    const extracted = d.command(8, { mask: list.rows[0][0], count: 512, flags: 1, auxSource: 11, width: 4 * 1024 * 1024, height: 32768 });
+    const companion = d.sources.get(11); assert.deepEqual(companion, f.companion); assert.ok(companion.length > 65536);
+    const records = extracted.rows.map(row => [row[0] - 3, row[1] - 4, ...row.slice(2)]);
+    const baseline = M._tx_native_heap_used(), output = stamp(records, companion); assert.equal(M._tx_native_heap_used(), baseline);
+    for (const section of [2,3,5]) {
+      const old = part(f.world, section), prefix = section === 5 ? 4 : 2, appended = sectionRecords(f.objects, section, 0, 16, 111, true);
+      const expected = Buffer.concat([old.subarray(0, prefix), old.subarray(prefix), appended.subarray(prefix)]);
+      if (prefix === 4) expected.writeUInt32LE(old.readUInt32LE(0) * 2, 0); else expected.writeUInt16LE(old.readUInt16LE(0) * 2, 0);
+      assert.deepEqual(part(output, section), expected, `section ${section} keeps every original byte and complete appended payload`);
+    }
+    for (const section of [0,4,6,7,8,9,10]) assert.deepEqual(part(output, section), part(f.world, section));
+    for (const [offset, value] of [[0,0],[8,325],[28,1],[32+16,1],[32+8,90]]) { const bad = Buffer.from(companion); bad.writeUInt32LE(value, offset); assert.equal(stamp(records, bad, true), null); assert.equal(M._tx_native_heap_used(), baseline); }
+    const missing = records.map(row => row.slice()), cell = missing.find(row => (row[2] & 65535) === 378 && row[1] === 2); cell[2] = 0;
+    assert.equal(stamp(missing, companion, true), null);
+    d.open(output); assert.equal(stamp(records, companion, true), null, 'existing destination inventory cannot be overwritten');
+    d.open(makeCircuitWorld([], 100, 32)); assert.equal(stamp(records, companion, true), null, 'nonempty object payloads cannot be written into old layouts');
+    // A missing source record fails extraction, never silently creates empty storage.
+    d.open(replaceSections(f.world, { 2: Buffer.alloc(2) })); const missingList = d.command(7, { count: 8, rawRecords: f.geometry });
+    assert.throws(() => d.command(8, { mask: missingList.rows[0][0], count: 512, flags: 1, auxSource: 11, width: 4 * 1024 * 1024, height: 32768 }), /native status/);
+    assert.ok(before > 0);
+  } finally { if (task) M._terra_world_stream_close(task); d.dispose(); for (const p of pointers) M._tx_free(p); }
+});
+
+test('old tile-only worlds can request an empty bounded COB1 companion', async () => {
+  const d = await makeDriver();
+  try {
+    d.open(makeCircuitWorld(line(3, 8, 4, 1))); const list = d.command(7, { count: 8 });
+    d.command(8, { mask: list.rows[0][0], count: 8, flags: 1, auxSource: 11, width: 32, height: 1 });
+    const bytes = d.sources.get(11); assert.equal(bytes.length, 32); assert.equal(bytes.readUInt32LE(8), 196); assert.equal(bytes.readUInt32LE(12), 0);
+  } finally { d.dispose(); }
+});
+
 test('fragment enumeration keeps crossing colors separate and completes exact multi-tile layouts', async () => {
   const d = await makeDriver();
   try {
