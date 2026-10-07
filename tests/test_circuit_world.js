@@ -52,6 +52,20 @@ test('ambiguous or broken frame layouts and section-backed objects are explicitl
   } finally { d.dispose(); }
 });
 
+test('every pinned container, sign and tile entity is marked as requiring section data', async () => {
+  const d = await makeDriver();
+  try {
+    const types = [21, 55, 85, 88, 378, 395, 423, 425, 467, 470, 471, 475, 520, 573, 597, 698, 723, 724];
+    d.open(makeCircuitWorld(types.map((type, i) => ({ x: 3 + i * 2, y: 5, type, wires: 1 }))));
+    const list = d.command(7, { count: types.length });
+    assert.equal(list.event[10], types.length); assert.equal(list.rows.length, types.length);
+    for (let i = 0; i < types.length; i++) {
+      const descriptor = list.rows.find(row => row[1] === 3 + i * 2);
+      assert.ok(descriptor); assert.equal(descriptor[7] & 2, 2, `tile ${types[i]} cannot be copied without its section record`);
+    }
+  } finally { d.dispose(); }
+});
+
 test('stamp_tiles replays bounded source windows, preserves terrain and metadata, and cancels without adoption', async () => {
   const d = await makeDriver(), M = d.M, pointers = [];
   const alloc = data => { const p = M._tx_malloc(typeof data === 'number' ? data : data.length); assert.ok(p); pointers.push(p); if (typeof data !== 'number') M.HEAPU8.set(data, p); return p; };

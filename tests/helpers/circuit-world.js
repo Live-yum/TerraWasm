@@ -13,9 +13,11 @@ function makeCircuitWorld(cells, width = 40, height = 32) {
   const dimensions = Buffer.alloc(8); dimensions.writeInt32LE(500); dimensions.writeInt32LE(1000, 4);
   const at = header.indexOf(dimensions); assert.ok(at >= 0);
   header.writeInt32LE(height, at); header.writeInt32LE(width, at + 4);
-  const framed = new Set([4, 10, 21, 33, 49, 132, 135, 136, 138, 144, 235, 314, 411, 419, 420, 424, 445]);
-  const mask = Buffer.alloc(88); for (const type of framed) mask[type >>> 3] |= 1 << (type & 7);
-  const important = Buffer.alloc(2); important.writeUInt16LE(700);
+  const framed = new Set([4, 10, 21, 33, 49, 55, 85, 88, 132, 135, 136, 138, 144, 235, 314, 378, 395, 411, 419, 420, 423, 424, 425, 445, 467, 470, 471, 475, 520, 573, 597, 698, 723, 724]);
+  // Include all pinned 1.4.5.8 entity tile IDs so rejection tests exercise the
+  // section-data guard, rather than accidentally failing a type-count bound.
+  const tileCount = 754, mask = Buffer.alloc(Math.ceil(tileCount / 8)); for (const type of framed) mask[type >>> 3] |= 1 << (type & 7);
+  const important = Buffer.alloc(2); important.writeUInt16LE(tileCount);
   const format = Buffer.concat([base.subarray(0, oldStart - 3), important, mask]);
   const records = [], map = new Map(cells.map(cell => [`${cell.x},${cell.y}`, cell]));
   for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) {

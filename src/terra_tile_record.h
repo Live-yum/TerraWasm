@@ -22,9 +22,11 @@ static int tx_tile_unrecord(const uint32_t* r,TxTile* t){
 }
 /* These objects require accompanying section records. Until those records have
  * an explicit transfer protocol, callers must never silently manufacture empty
- * inventories, lose sign text, or leave an orphaned tile entity. */
+ * inventories, lose sign text, or leave an orphaned tile entity. The complete
+ * set is pinned to TileID.Sets.IsAContainer, Main.tileSign and all registrations
+ * in TileEntitiesManager at game source 8255d34616c780af12079425ac92a0a7aed87d71. */
 static int tx_tile_needs_section(uint32_t type){
-    switch(type){case 21:case 55:case 85:case 88:case 378:case 395:case 423:case 425:case 467:case 470:case 471:case 475:case 520:case 573:case 597:return 1;default:return 0;}
+    switch(type){case 21:case 55:case 85:case 88:case 378:case 395:case 423:case 425:case 467:case 470:case 471:case 475:case 520:case 573:case 597:case 698:case 723:case 724:return 1;default:return 0;}
 }
 static int tx_tile_framed(const TxWorld* w,uint32_t type){return (type>>3)<w->important_len&&(w->important[type>>3]&(1u<<(type&7)));}
 #endif

@@ -34,7 +34,7 @@ static void circuit_fragments_contract(const char* path){
 static uint8_t* stamp_pump(uint32_t id,const uint32_t* records,uint32_t bytes,uint32_t* size,int expect_failure,int lease){
  uint8_t* output=NULL;uint32_t capacity=0;*size=0;
  for(uint32_t step=0;step<1000000;step++){
-  int status=terra_world_stream_step(id,7,ep);if(status<0){assert(expect_failure);free(output);return NULL;}
+  int status=terra_world_stream_step(id,7,ep);if(status<0){assert(expect_failure);if(expect_failure==2)assert(!capacity&&!output);free(output);return NULL;}
   if(ep->kind==TX_STREAM_NEED_SOURCE){const uint8_t* b=ep->source_id==1?source:(const uint8_t*)records;uint32_t n=ep->source_id==1?source_size:bytes;assert(ep->source_id==1||ep->source_id==9);assert(ep->offset<=n&&ep->length<=n-ep->offset);
    if(lease){check(terra_world_stream_acquire_input(id,lp));memcpy((void*)(uintptr_t)lp->data_ptr,b+lp->offset,lp->length);check(terra_world_stream_commit_input(id,lp->lease_id,lp->source_id,lp->offset,lp->length));}
    else{memcpy(bridge,b+ep->offset,ep->length);check(terra_world_stream_supply_source(id,ep->source_id,ep->offset,bridge,ep->length));}
@@ -49,7 +49,14 @@ static void circuit_stamp_contract(const char* path){
  uint32_t id=begin("stamp_tiles",request),n;uint8_t* output=stamp_pump(id,records,sizeof(records),&n,0,1);assert(output&&n);check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
  uint32_t tail=get32(source+34),new_tail=get32(output+34);assert(source_size-tail==n-new_tail&&!memcmp(source+tail,output+new_tail,n-new_tail));
  records[8]=0;id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,sizeof(records),&n,1,0));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);records[8]=1;
- records[10]=21u|(1u<<16);id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,sizeof(records),&n,1,1));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);records[10]=1u|(1u<<16);
+ /* Container/sign/TileEntitiesManager registrations at the pinned game source.
+  * Every ID is in-range and otherwise valid: reject before writing a candidate,
+  * without losing its inventory, text, display item or anchored entity state. */
+ const uint32_t section_tiles[]={21,55,85,88,378,395,423,425,467,470,471,475,520,573,597,698,723,724};
+ assert(tx_get_world(world)->tile_type_count>724);
+ for(uint32_t i=0;i<sizeof(section_tiles)/sizeof(section_tiles[0]);i++){
+  records[10]=section_tiles[i]|(1u<<16);id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,sizeof(records),&n,2,i&1));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
+ }records[10]=1u|(1u<<16);
  records[2]=1u|(1u<<16);id=begin("stamp_tiles","{\"x\":12,\"y\":10,\"width\":3,\"height\":1,\"recordCount\":3,\"recordSourceId\":9,\"mode\":\"overlay\"}");assert(!stamp_pump(id,records,sizeof(records),&n,1,1));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);records[2]=0;
  id=begin("stamp_tiles",request);check(terra_world_stream_step(id,1,ep));check(terra_world_stream_cancel(id));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
  uint32_t saved_size=new_tail+source_size-tail;check(terra_world_close(world));world=0;check(terra_world_open_from_buffer(output,saved_size,&world));TxWorld* w=tx_get_world(world);uint32_t cursor=w->starts[1];int found=0;

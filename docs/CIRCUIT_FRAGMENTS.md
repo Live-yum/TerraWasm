@@ -102,9 +102,14 @@ invent missing object cells from a bounding rectangle.
 
 Objects requiring additional sections are rejected as foreground sources:
 21/467 containers, 88 dressers, 55/85/425/573 signs/gravestones/announcement
-boxes, and tile entities 378/395/423/470/471/475/520/597. These IDs are pinned
-game `TileID` facts; the old frame-encoded weapon rack (334) is not mistaken for
-the tile-entity weapon rack (471). A future payload must explicitly carry and
+boxes, and tile entities 378/395/423/470/471/475/520/597/698/723/724. The last
+three are the Dead Cells display jar, kite anchor, and critter anchor; their
+displayed item and anchored entity state cannot be reconstructed from tiles.
+The complete list is checked against `TileID.Sets.IsAContainer`, `Main.tileSign`,
+and every registration in [TileEntitiesManager.RegisterAll](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.DataStructures/TileEntitiesManager.cs)
+and its entity-specific tile validation at that pinned game source. The old
+frame-encoded weapon rack (334) is not mistaken for the tile-entity weapon rack
+(471). A future payload must explicitly carry and
 relocate associated section records before lifting this restriction. Likewise,
 the host must not apply this WLD-only writer to a TWLD companion transaction.
 
@@ -122,4 +127,6 @@ including its UBSan variant; no production test exports are added.
 Wasm in the existing combined/WLD builds. Synthetic independent WLD encoders
 cover color crossings, complete frames, gate stacks, pagination, malformed
 geometry, resource bounds, metadata byte preservation, multiple stamp windows,
-lease ownership, rejection, cancellation and complete release.
+lease ownership, rejection, cancellation and complete release. All 18
+section-backed tile types are valid in-range fixture IDs and must be rejected
+before any stamp output; fragment descriptors must mark each one with flag 2.
