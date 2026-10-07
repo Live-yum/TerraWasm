@@ -126,6 +126,7 @@ if ($Test) {
     )
     $wldTests = @(
         "tests/test_circuit_world.js",
+        "tests/test_circuit_fragments_supports.js",
         "tests/test_memory_lifecycle.js",
         "tests/test_map_streaming_contract.js",
         "tests/test_stream_lease.js",

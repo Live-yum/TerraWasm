@@ -24,7 +24,7 @@ test('every WLD export profile declares source ABI additions without modifying P
 })
 
 test('world circuit claims require the complete streaming, compact-state and atomic contract',()=>{
- const capability={version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true,fragments:true,fragmentObjects:1}
+ const capability={version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true,fragments:true,fragmentObjects:1,fragmentSupports:1}
  function worldFixture(){
   const m=fixture();m.abi.circuitWorld={...capability};m.abi.requiredExports.push(...CIRCUIT_WORLD_EXPORTS)
   m.abi.exportHash=hash(m.abi.requiredExports.join('\n')+'\n')

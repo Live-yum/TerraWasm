@@ -181,6 +181,10 @@ jobs:
         with:
           name: terrawasm-wld-${{ github.sha }}
           path: ${{ runner.temp }}/circuit-wld-artifact
+      - name: Verify natural traps, sparse fragments and placement anchors in the compiled WLD artifact
+        env:
+          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
+        run: node --test tests/test_circuit_fragments_supports.js
       - name: Fetch and verify the pinned public WLD
         run: python3 tests/computerraria/fetch-inputs.py "$RUNNER_TEMP/computerraria" --wld-only
       - name: Verify original PixelBox rules and physical RV32I execution

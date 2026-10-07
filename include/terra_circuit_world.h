@@ -55,13 +55,17 @@ typedef struct TerraCircuitWorldCommand {
     uint32_t count, data_ptr, data_count, source_id, flags, aux_source_id, reserved1, reserved2;
 } TerraCircuitWorldCommand;
 /* FRAGMENTS: x=page offset, count=page size (1..32768). Optional geometry
- * data_count 16-byte records [type,frameX|frameY<<16,dx|dy<<8|width<<16|height<<24,0]
- * is copied on the first request. Exact frame layouts must come from the target
- * game's TileObjectData, never a rendered atlas. Later requests reuse the index.
+ * data_count 16-byte records [type,frameX|frameY<<16,dx|dy<<8|width<<16|height<<24,anchor]
+ * is copied on the first request. With fragmentSupports=1, anchor is the
+ * documented 0..17 placement rule; zero retains legacy no-extra-anchor behavior.
+ * Exact frame layouts must come from the target game's TileObjectData or its
+ * procedural frame checks, never a rendered atlas. Later requests reuse the index.
  * Result records (32 bytes): [id,x,y,width,height,cells,wireCells,flags]. Flags:
- * 1=incomplete/ambiguous object geometry, 2=section-backed object, 4=modded tile.
+ * 1=incomplete/ambiguous object geometry, 2=section-backed object, 4=modded tile,
+ * 8=missing placement support (readable; repair/check before world placement).
  * EXTRACT: mask=fragment id, count=maximum cells (1..32768). Whole selected
- * objects and their circuit wires only; unrelated cells in the bounds are absent.
+ * objects, their circuit wires and selected necessary supports only;
+ * unrelated cells in the bounds are absent.
  * Result records (32 bytes): [x,y,type|flags<<16,frameX|frameY<<16,
  * wall|tilePaint<<16|wallPaint<<24,liquidAmount|liquidType<<8|brickStyle<<16|wires<<24,0,0].
  * Tile flags bits 0..6: active, actuator, inactive, invisible block/wall,
