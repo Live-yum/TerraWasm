@@ -25,6 +25,7 @@ extern int tx_bridge_range_is_valid(uint32_t,uint32_t);
 extern TxWorld* tx_get_world(uint32_t);
 extern void tx_set_error(const char*,const char*);
 extern void tx_clear_error(void);
+extern char tx_last_error[];
 extern int parse_format(TxWorld*);
 extern int parse_header(TxWorld*);
 extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
@@ -221,13 +222,14 @@ static char* copy_bridge_string(const char* p,uint32_t maximum){
     char* result=(char*)tx_persistent_alloc(n+1);if(result)memcpy(result,p,n+1);return result;
 }
 static StreamTask* new_task(uint32_t* out){
+    tx_clear_error();
     if(tx_checkpoint_active()){fail("TERRAX_STATE_ERROR","finish workspace transaction before streaming");return NULL;}
     if(out&&valid_range(out,4))*out=0;
     if(!valid_range(out,4)||current){fail("TERRAX_STATE_ERROR","invalid stream output pointer or another task is active");return NULL;}
-    StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t)return NULL;
+    StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t){fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
     memset(t,0,sizeof(*t));t->stats.abi_version=2;t->stats.candidate_count=1;t->id=generation++;if(!t->id)t->id=generation++;
     t->candidate=(TxWorld*)tx_persistent_alloc(sizeof(TxWorld));t->input=tx_persistent_alloc(WINDOW);
-    if(!t->candidate||!t->input){if(t->candidate)tx_internal_free(t->candidate);if(t->input)tx_internal_free(t->input);tx_internal_free(t);return NULL;}
+    if(!t->candidate||!t->input){if(t->candidate)tx_internal_free(t->candidate);if(t->input)tx_internal_free(t->input);tx_internal_free(t);fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
     memset(t->candidate,0,sizeof(TxWorld));clear_event(t);current=t;*out=t->id;return t;
 }
 static int source_event(StreamTask* t,uint32_t offset,uint32_t limit){
@@ -237,7 +239,7 @@ static int source_event(StreamTask* t,uint32_t offset,uint32_t limit){
 int32_t terra_world_stream_open_begin(uint32_t source_id,uint32_t size,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
     if(!source_id||size<16||size>TX_MAX_STREAM_BYTES)return fail("TERRAX_INVALID_ARGUMENT","invalid stream source");
-    StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","stream open allocation failed");
+    StreamTask* t=new_task(out);if(!t)return -1;
     t->stage=OPEN_FORMAT;t->source_id=source_id;t->source_size=size;
     event(t,TX_STREAM_NEED_SOURCE,0,size<65536?size:65536,NULL);return 0;
 }
@@ -272,7 +274,7 @@ int32_t terra_world_stream_pixel_begin(uint32_t handle,const TxStreamPixelSpec* 
     for(uint32_t i=0;i<spec->resolved_maps_count;i++)if(maps[i].active_mode>4||maps[i].block_inactive>1)return fail("TERRAX_INVALID_ARGUMENT","invalid resolved pixel map");
     uint64_t cols=((uint64_t)spec->width+63)/64,rows=((uint64_t)spec->height+63)/64;
     if(cols>65536||rows>65536||cols*rows>WINDOW/sizeof(TxPixelArtChunk*))return fail("TERRAX_INVALID_ARGUMENT","pixel stripe table exceeds bound");
-    StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","pixel task allocation failed");
+    StreamTask* t=new_task(out);if(!t)return -1;
     t->is_write=1;t->old_handle=handle;t->source=source;
     TxWorld* w=t->candidate;
     if(!compact_copy(w,source))goto oom;
@@ -407,7 +409,7 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     if(out&&valid_range(out,4))*out=0;
     TxWorld* source=tx_get_world(handle);
     if(!source||source->legacy_wld)return fail("TERRAX_INVALID_HANDLE","stream operation needs a modern world");
-    StreamTask* t=new_task(out);if(!t)return fail("TERRAX_WASM_OOM","operation task allocation failed");
+    StreamTask* t=new_task(out);if(!t)return -1;
     t->operation=copy_bridge_string(name,128);t->request=copy_bridge_string(request,WINDOW);
     if(!t->operation||!t->request||!json_validate_document(t->request,(int)strlen(t->request)))goto invalid;
     if(tx_world_is_future(source) && (!strcmp(t->operation,"batch_update_tiles") ||
@@ -510,7 +512,8 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     return 0;
 invalid:
     terra_world_stream_cancel(t->id);terra_world_stream_close(t->id);if(out&&valid_range(out,4))*out=0;
-    return fail("TERRAX_STREAM_OPERATION_FAILED","invalid operation or bounded preparation failed");
+    if(!tx_last_error[0])fail("TERRAX_STREAM_OPERATION_FAILED","invalid operation or bounded preparation failed");
+    return -1;
 }
 static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uint32_t length){
     counter_add(&t->stats.source_bytes,length);

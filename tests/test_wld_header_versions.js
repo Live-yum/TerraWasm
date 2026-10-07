@@ -24,6 +24,22 @@ function save(M, handle) {
   } finally { if (output) M._tx_free(output); M._tx_free(required); }
 }
 
+test("successful alternate header layout does not mask a later stream operation error", async () => {
+  const M = await TerraWorldWasm();
+  const h = open(M, makeSectionedWorld(326));
+  const name = alloc(M, Buffer.from("unknown_operation\0")), request = alloc(M, Buffer.from("{}\0"));
+  const out = M._tx_malloc(4), error = M._tx_malloc(512), required = M._tx_malloc(8);
+  try {
+    assert.equal(M._terra_world_stream_operation_begin(h, name, request, out), -1);
+    assert.equal(M.HEAPU32[out >>> 2], 0);
+    assert.equal(M._terra_info_get_last_error_json(error, 512n, required), 0);
+    assert.equal(JSON.parse(M.UTF8ToString(error)).code, "TERRAX_STREAM_OPERATION_FAILED");
+  } finally {
+    for (const p of [name, request, out, error, required]) M._tx_free(p);
+    M._terra_world_close(h);
+  }
+});
+
 test("header JSON preserves the complete long manifest from original, patched and reopened headers", async () => {
   const M = await TerraWorldWasm();
   const original = fs.readFileSync(path.join(__dirname, "files", "1.wld"));
@@ -105,7 +121,7 @@ test("old xindong v326 exports omit lightning flags only before an empty manifes
 
 test("modern header gate boundaries stay aligned through parse and patch", async () => {
   const M = await TerraWorldWasm();
-  for (const version of [128, 129, 139, 195, 196]) {
+  for (const version of [128, 129, 139, 195, 196, 269]) {
     const options = { savedTaxCollector: true, fastForwardTimeToDawn: true, bgTree2: 21, bgTree3: 22, bgTree4: 23 };
     const bytes = makeSectionedWorld(version, options);
     let h = 0; let reopened = 0;
@@ -136,5 +152,29 @@ test("modern header gate boundaries stay aligned through parse and patch", async
       } finally { if (output) M._tx_free(output); M._tx_free(required); }
 
     } finally { if (reopened) M._terra_world_close(reopened); if (h) M._terra_world_close(h); }
+  }
+});
+
+test("v208 classic, expert and master flags preserve the following header fields through patch and reopen", async () => {
+  const M = await TerraWorldWasm();
+  for (const gameMode of [0, 1, 2]) {
+    const bytes = makeSectionedWorld(208, { gameMode, moonType: 7, bgTree4: 23, lanternNightCooldown: 305 });
+    let h = 0;
+    try {
+      h = open(M, bytes);
+      const before = header(M, h);
+      assert.equal(before.gameMode, gameMode);
+      assert.equal(before.creationTime, 11);
+      assert.equal(before.moonType, 7);
+      assert.equal(before.treeBG4, 23);
+      assert.equal(before.lanternNightCooldown, 305);
+      const expected = { ...before, gameMode: (gameMode + 1) % 3, spawnTileX: 123 };
+      op(M, h, { patch: { gameMode: expected.gameMode, spawnTileX: expected.spawnTileX } });
+      assert.deepEqual(header(M, h), expected);
+      const saved = save(M, h);
+      assert.equal(M._terra_world_close(h), 0); h = 0;
+      h = open(M, saved);
+      assert.deepEqual(header(M, h), expected, 'both difficulty bytes stay aligned with the complete header');
+    } finally { if (h) M._terra_world_close(h); }
   }
 });

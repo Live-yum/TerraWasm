@@ -383,7 +383,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
         }
     else if (w->version==208u){
         uint8_t tempMode=rd_u8(p,len,&off);
-        w->gameMode=(tempMode==1)?2:0;
+        if (tempMode)w->gameMode=2;
         }
     /* Timestamps */if (w->version>=141u)w->creationTime=rd_u64le(p,len,&off);
     if (w->version>=284u)w->lastPlayed=rd_u64le(p,len,&off);
@@ -810,6 +810,7 @@ int parse_header(TxWorld *w){
     candidate=*w;
     if (parse_header_layout(&candidate,w->version<289u)) {
         *w=candidate;
+        tx_clear_error();
         return 1;
     }
     return 0;

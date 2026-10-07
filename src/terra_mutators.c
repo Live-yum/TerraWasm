@@ -798,7 +798,7 @@ static int encode_header_model(TxWorld *w,TxJsonParser *request,TxPatchField *fi
         if(version>=241u)WB("notTheBeesWorld",notTheBeesWorld);if(version>=249u)WB("remixWorld",remixWorld);
         if(version>=266u)WB("noTrapsWorld",noTrapsWorld);if(version>=267u)WB("zenithWorld",zenithWorld);
         if(version>=302u)WB("skyblockWorld",skyblockWorld);
-        }else if(version==208u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,2,&mode))return 0;buf_u8(header,mode==2?1u:0u);}
+        }else if(version==208u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,2,&mode))return 0;buf_u8(header,mode==1?1u:0u);buf_u8(header,mode==2?1u:0u);}
     else if(version>=112u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,1,&mode))return 0;buf_u8(header,(uint8_t)mode);}
     if(version>=141u)WU64("creationTime",creationTime);if(version>=284u)WU64("lastPlayed",lastPlayed);
     WU8("moonType",moonType);
@@ -1042,7 +1042,7 @@ static int parse_items(TxJsonParser *p,TxBuf *items,uint32_t *item_count){
     return 1;
     }
 
-static int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section){
+static int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32_t shared_slots){
     int first=1,done=0;
     uint32_t seen=0u,item_count=0u;
     int64_t x=0,y=0,max_items=0;
@@ -1069,17 +1069,21 @@ static int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section){
         tx_internal_free(items.data);
         return mut_fail("TERRAX_VALIDATION_ERROR","chest requires x, y, name, maxItems, and exactly maxItems item slots");
         }
+    if (w->version<294u&&(uint32_t)max_items!=shared_slots){
+        tx_internal_free(items.data);
+        return mut_fail("TERRAX_VALIDATION_ERROR","legacy chests must retain the world's shared item slot count");
+        }
     buf_u32le(section,(uint32_t)x);
     buf_u32le(section,(uint32_t)y);
     buf_7bit(section,name_len);
     buf_bytes(section,name,name_len);
-    buf_u32le(section,(uint32_t)max_items);
+    if (w->version>=294u)buf_u32le(section,(uint32_t)max_items);
     buf_bytes(section,items.data,items.len);
     tx_internal_free(items.data);
     return section->ok||mut_fail("TERRAX_WASM_OOM","failed to encode chest section");
     }
 
-static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32_t *chest_count){
+static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32_t *chest_count,uint32_t shared_slots){
     int first=1,done=0,seen_chests=0;
     if (!jp_take(p,'{'))return 0;
     while (!done){
@@ -1098,7 +1102,7 @@ static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32
             if (array_done)break;
             if (*chest_count>=TX_MUTATOR_MAX_CHESTS)
                 return mut_fail("TERRAX_VALIDATION_ERROR","world has too many chests");
-            if (!parse_chest(w,p,section))return 0;
+            if (!parse_chest(w,p,section,shared_slots))return 0;
             (*chest_count)++;
             }
         }
@@ -1110,16 +1114,35 @@ int tx_mutate_replace_chests(TxWorld *w,const char *request,uint32_t request_len
     if (!tx_world_require_writable(w)) return -1;
     if (!w||!request||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)
         return mut_error("TERRAX_INVALID_ARGUMENT","invalid replace_chests request");
-    if (w->version<294u)
-        return mut_error("TERRAX_NOT_SUPPORTED","replace_chests requires WLD version 294 or newer");
+    if (w->version<88u)
+        return mut_error("TERRAX_NOT_SUPPORTED","replace_chests requires a sectioned WLD version 88 or newer");
     if (w->pointer_count<=2u)
         return mut_error("TERRAX_NOT_SUPPORTED","world has no chest section");
+    uint32_t shared_slots=40u;
+    if (w->version<294u){
+        const uint8_t *source=w->section_overrides[2].data;
+        uint32_t source_len=w->section_overrides[2].len;
+        if (!w->section_overrides[2].active){
+            if (w->starts[2]>w->ends[2]||w->ends[2]>w->file_len)
+                return mut_error("TERRAX_VALIDATION_ERROR","invalid legacy chest section bounds");
+            source_len=w->ends[2]-w->starts[2];
+            source=w->file?w->file+w->starts[2]:NULL;
+            }
+        if (source_len){
+            if (!source||source_len<4u)
+                return mut_error("TERRAX_VALIDATION_ERROR","legacy chest section is missing its shared item slot count");
+            shared_slots=(uint32_t)source[2]|((uint32_t)source[3]<<8u);
+            if (shared_slots>TX_MUTATOR_MAX_CHEST_ITEMS)
+                return mut_error("TERRAX_VALIDATION_ERROR","legacy shared item slot count exceeds the supported limit");
+            }
+        }
     TxBuf encoded;buf_init(&encoded,1024u);
     if (!encoded.ok)return mut_error("TERRAX_WASM_OOM","failed to allocate chest encoder");
     buf_u16le(&encoded,0u);
+    if (w->version<294u)buf_u16le(&encoded,shared_slots);
     TxJsonParser parser={request,request_len,0u};
     uint32_t chest_count=0u;
-    if (!parse_chests_request(w,&parser,&encoded,&chest_count)||!encoded.ok){
+    if (!parse_chests_request(w,&parser,&encoded,&chest_count,shared_slots)||!encoded.ok){
         tx_internal_free(encoded.data);
         if (!encoded.ok)mut_fail("TERRAX_WASM_OOM","failed to encode chest section");
         return -1;

@@ -240,6 +240,26 @@ static void lease_contract(const char*path){FILE*f=fopen(path,"rb");assert(f);fs
  check(terra_world_stream_cancel(id));assert(terra_world_stream_commit_input(id,lease,1,0,lp->length)<0);check(terra_world_stream_close(id));
  check(terra_world_stream_open_begin(1,n,hp));uint32_t next=*hp;assert(next!=id);assert(terra_world_stream_commit_input(next,lease,1,0,lp->length)<0);check(terra_world_stream_close(next));
 }
+static void begin_error_contract(const char*path){
+ load(path);
+ char error[512];uint64_t required;
+ char*name=string("header_patch"),*request=string("{\"patch\":{\"unknownField\":true}}");
+ assert(terra_world_stream_operation_begin(world,name,request,hp)<0);assert(!*hp);
+ check(terra_info_get_last_error_json(error,sizeof(error),&required));
+ assert(strstr(error,"TERRAX_NOT_SUPPORTED")&&strstr(error,"not writable"));
+ uint32_t id=begin("save","{}");
+ assert(terra_world_stream_operation_begin(world,name,request,hp)<0);assert(!*hp);
+ check(terra_info_get_last_error_json(error,sizeof(error),&required));
+ assert(strstr(error,"TERRAX_STATE_ERROR")&&strstr(error,"another task is active"));
+ check(terra_world_stream_close(id));
+ tx_free((uint32_t)(uintptr_t)name);name=string("unknown_operation");
+ assert(terra_world_stream_operation_begin(world,name,request,hp)<0);assert(!*hp);
+ check(terra_info_get_last_error_json(error,sizeof(error),&required));
+ assert(strstr(error,"TERRAX_STREAM_OPERATION_FAILED")); /* no stale busy/detail */
+ tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);
+ id=begin("save","{}");check(terra_world_stream_close(id));
+ check(terra_world_close(world));world=0;free(source);source=NULL;
+}
 #include "circuit_fragments_contract.inc"
 #include "circuit_objects_contract.inc"
 #include "circuit_supports_contract.inc"
@@ -255,7 +275,7 @@ int main(int argc,char**argv){assert(argc==2);
  const char* marker_requests[]={"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":0,\"line_width\":0,\"color\":\"#ff000080\"}]}",
  "{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":60,\"line_width\":15,\"color\":\"#ff000080\"},{\"tile_type\":2,\"locate\":0,\"radius\":3,\"line_width\":1,\"color\":\"#0000ff40\"}]}"};
  for(unsigned i=0;i<2;i++){snprintf(path,sizeof(path),"%s/marker-wide.wld",argv[1]);marker_contract(path,marker_requests[i]);snprintf(path,sizeof(path),"%s/marker-narrow.wld",argv[1]);marker_contract(path,marker_requests[i]);}
- snprintf(path,sizeof(path),"%s/small.wld",argv[1]);tile_rule_validation_contract(path);
+ snprintf(path,sizeof(path),"%s/small.wld",argv[1]);tile_rule_validation_contract(path);begin_error_contract(path);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);faults_contract(path);
  tx_free((uint32_t)(uintptr_t)bridge);tx_free((uint32_t)(uintptr_t)sp);tx_free((uint32_t)(uintptr_t)lp);tx_free((uint32_t)(uintptr_t)ep);tx_free((uint32_t)(uintptr_t)hp);puts("native stream boundaries passed");return 0;
 }
