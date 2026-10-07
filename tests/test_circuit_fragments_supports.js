@@ -11,7 +11,9 @@ test('natural trap fragments strip cave decor, retain exact anchors, and remain 
   const d = await makeDriver(), f = fixture();
   try {
     d.open(f.world);
-    const identity = JSON.parse(d.M.UTF8ToString(d.M._terra_build_info_json()));
+    const identityPointer = d.M._terra_build_info_json(), identityEnd = d.M.HEAPU8.indexOf(0, identityPointer);
+    assert.ok(identityPointer > 0 && identityEnd > identityPointer, 'build identity is a bounded native string');
+    const identity = JSON.parse(Buffer.from(d.M.HEAPU8.subarray(identityPointer, identityEnd)).toString('utf8'));
     assert.equal(identity.circuitWorldFragmentSupports, 1, 'the compiled artifact claims the exercised support ABI');
     d.start(7, { count: 2, rawRecords: f.geometry }); d.event(false, 1); d.cancel();
     const first = d.command(7, { count: 2 }), descriptors = [...first.rows];
