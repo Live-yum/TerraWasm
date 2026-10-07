@@ -27,6 +27,7 @@ test('fragment enumeration keeps crossing colors separate and completes exact mu
     const extracted = d.command(8, { mask: pure[0], count: 32 }); assert.equal(extracted.event[10], 7);
     assert.ok(extracted.rows.every(r => r[5] >>> 24 === 1), 'the other color at the crossing is absent');
     assert.equal(d.start(8, { mask: object[0], count: 5 }), -4, 'reject the whole selection before any truncated output');
+    assert.ok(d.command(6, { source: 9 }).event[10] > 0, 'a rejected extraction must not poison a subsequent save');
     const complete = d.command(8, { mask: object[0], count: 6 }).rows.filter(r => (r[2] & 65535) === 132);
     assert.equal(complete.length, 4); assert.ok(complete.every(r => r[4] === (2 | 7 << 16 | 9 << 24)));
   } finally { d.dispose(); }

@@ -9,7 +9,7 @@ static void fragment_pump(uint32_t handle){
  for(uint32_t n=0;n<1000000;n++){
   int s=terra_circuit_world_step(handle,17,&e);assert(s==0||s==1);
   if(e.kind==TCW_READ){const uint8_t* b=e.source_id==1?source:fragment_scratch;uint32_t size=e.source_id==1?source_size:fragment_scratch_size;assert(e.offset<=size&&e.length<=size-e.offset);memcpy(bridge,b+e.offset,e.length);assert(!terra_circuit_world_supply(handle,e.source_id,e.offset,bridge,e.length));}
-  else if(e.kind==TCW_WRITE){assert(e.source_id==2);uint32_t end=e.offset+e.length;if(end>fragment_scratch_size){fragment_scratch=realloc(fragment_scratch,end);assert(fragment_scratch);fragment_scratch_size=end;}memcpy(fragment_scratch+e.offset,(void*)(uintptr_t)e.data_ptr,e.length);assert(!terra_circuit_world_ack(handle));}
+  else if(e.kind==TCW_WRITE){if(e.source_id==2){uint32_t end=e.offset+e.length;if(end>fragment_scratch_size){fragment_scratch=realloc(fragment_scratch,end);assert(fragment_scratch);fragment_scratch_size=end;}memcpy(fragment_scratch+e.offset,(void*)(uintptr_t)e.data_ptr,e.length);}else assert(e.source_id==9);assert(!terra_circuit_world_ack(handle));}
   else if(e.kind==TCW_RESULT){assert(e.length==e.result_count*32u&&e.length<=sizeof(fragment_rows));memcpy(fragment_rows,(void*)(uintptr_t)e.data_ptr,e.length);fragment_row_count=e.result_count;assert(!terra_circuit_world_ack(handle));}
   else if(e.kind==TCW_READY){fragment_total=e.result_count;return;}
  }assert(!"fragment command exceeded bounded execution");
@@ -25,7 +25,9 @@ static void circuit_fragments_contract(const char* path){
  assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==7&&fragment_row_count==7);for(uint32_t i=0;i<7;i++)assert(fragment_rows[i*8+5]>>24==1);
  command.mask=multi;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==6);uint32_t objects=0;
  for(uint32_t i=0;i<6;i++){uint32_t* r=fragment_rows+i*8;if((r[2]&65535u)==132){objects++;assert((r[4]&65535u)==2&&((r[4]>>16)&255u)==7&&(r[4]>>24)==9);}}assert(objects==4);
- command.count=5;assert(terra_circuit_world_command(handle,&command)==TCW_MEMORY);command.count=32;assert(!terra_circuit_world_command(handle,&command));assert(!terra_circuit_world_cancel(handle));assert(!terra_circuit_world_close(handle));assert(tx_native_heap_used()==baseline);
+ command.count=5;assert(terra_circuit_world_command(handle,&command)==TCW_MEMORY);
+ command.kind=TCW_SAVE;command.source_id=9;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total>0);
+ command.kind=TCW_EXTRACT;command.count=32;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==6);assert(!terra_circuit_world_cancel(handle));assert(!terra_circuit_world_close(handle));assert(tx_native_heap_used()==baseline);
  tx_free((uint32_t)(uintptr_t)geometry);free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;check(terra_world_close(world));world=0;free(source);source=NULL;
  puts("circuit fragments: color crossings, full 2x2 objects, lamp stacks, pagination, bounds and release passed");
 }
