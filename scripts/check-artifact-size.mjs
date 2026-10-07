@@ -9,13 +9,13 @@ export const WEB_ARTIFACT_LIMITS = Object.freeze({
   // The standalone PLR module and unknown profiles retain the original cap.
   wasmBytes: 320 * 1024,
 })
-// Streaming WLD/TWLD circuit compilation, the native VM and save replay are
-// included only in WLD/all. Emscripten 5.0.7 measures 401955 / 427925 Web bytes
-// for those profiles. Keep explicit per-feature headroom; PLR, wrappers and
+// Streaming circuits and versioned legacy writers are included only in WLD/all.
+// Emscripten 5.0.7 measures about 421 KiB (431014 bytes) for WLD with all
+// historical encoders. Keep explicit per-feature headroom; PLR, wrappers and
 // the 64/160 MiB Web memory limits do not inherit this functionality's budget.
 export const WEB_ARTIFACT_LIMITS_BY_FEATURE = Object.freeze({
   all: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 448 * 1024 }),
-  wld: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 416 * 1024 }),
+  wld: Object.freeze({ wrapperBytes: 128 * 1024, wasmBytes: 424 * 1024 }),
   plr: WEB_ARTIFACT_LIMITS,
 })
 

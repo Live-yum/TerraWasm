@@ -268,8 +268,9 @@ int main(int argc,char**argv){assert(argc==2);
  mallopt(M_MMAP_MAX,0);mallopt(M_MMAP_THRESHOLD,1024*1024*1024);
 #endif
  hp=alloc(4);ep=alloc(sizeof(*ep));lp=alloc(sizeof(*lp));sp=alloc(sizeof(*sp));bridge=alloc(1024*1024);
+ if(getenv("TERRAX_TEST_CIRCUIT_OBJECTS_ONLY")){circuit_objects_contract(argv[1]);circuit_object_versions_stream_contract(argv[1]);goto finished;}
  char circuit_path[1024];snprintf(circuit_path,sizeof(circuit_path),"%s/circuit-fragments.wld",argv[1]);circuit_fragments_contract(circuit_path);circuit_stamp_contract(circuit_path);
- circuit_objects_contract(argv[1]);circuit_supports_contract(argv[1]);circuit_anchor_edges_contract(argv[1]);circuit_falling_contract(argv[1]);
+ circuit_objects_contract(argv[1]);circuit_object_versions_stream_contract(argv[1]);circuit_supports_contract(argv[1]);circuit_anchor_edges_contract(argv[1]);circuit_falling_contract(argv[1]);
  char path[1024];snprintf(path,sizeof(path),"%s/high.wld",argv[1]);lease_contract(path);png_contract(path,0);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);png_contract(path,1);snprintf(path,sizeof(path),"%s/short-columns.wld",argv[1]);png_contract(path,2);snprintf(path,sizeof(path),"%s/small.wld",argv[1]);edit_contract(path);mixed_plan_contract(path);legacy_supply_contract(path);snprintf(path,sizeof(path),"%s/markers.wld",argv[1]);marker_contract(path,"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":3,\"line_width\":1,\"color\":\"#ff000080\"}]}");
  const char* marker_requests[]={"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":0,\"line_width\":0,\"color\":\"#ff000080\"}]}",
@@ -277,5 +278,6 @@ int main(int argc,char**argv){assert(argc==2);
  for(unsigned i=0;i<2;i++){snprintf(path,sizeof(path),"%s/marker-wide.wld",argv[1]);marker_contract(path,marker_requests[i]);snprintf(path,sizeof(path),"%s/marker-narrow.wld",argv[1]);marker_contract(path,marker_requests[i]);}
  snprintf(path,sizeof(path),"%s/small.wld",argv[1]);tile_rule_validation_contract(path);begin_error_contract(path);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);faults_contract(path);
+finished:
  tx_free((uint32_t)(uintptr_t)bridge);tx_free((uint32_t)(uintptr_t)sp);tx_free((uint32_t)(uintptr_t)lp);tx_free((uint32_t)(uintptr_t)ep);tx_free((uint32_t)(uintptr_t)hp);puts("native stream boundaries passed");return 0;
 }

@@ -1,4 +1,4 @@
-/* Read-only JSON view of the pre-release-88 contiguous WLD tail. */
+/* JSON view of the pre-release-88 contiguous WLD tail. */
 #include "terra_types.h"
 #include "terra_reader.h"
 
@@ -43,6 +43,8 @@ int serialize_legacy_section_json(TxWorld *w,int logical,TxBuf *b) {
     const uint8_t *p; uint32_t n,o,slots; int present;
     if(!w||!w->legacy_wld||!b) return 0;
     p=w->file; n=w->file_len; o=w->legacy_chest_start; slots=w->version<58u?20u:40u;
+    int actual=logical==10?5:logical;
+    if(actual>=2&&actual<=5&&w->section_overrides[actual].active){p=w->section_overrides[actual].data;n=w->section_overrides[actual].len;o=0;}
     if(logical==2) {
         buf_u8(b,'['); int first=1;
         for(uint32_t c=0;c<1000u;c++) { present=boolv(p,n,&o); if(present<0)return 0; if(!present)continue;
@@ -54,7 +56,7 @@ int serialize_legacy_section_json(TxWorld *w,int logical,TxBuf *b) {
         } buf_u8(b,']'); return 1;
     }
     if(logical==3) {
-        o=w->legacy_sign_start; buf_u8(b,'['); int first=1;
+        o=w->section_overrides[3].active?0:w->legacy_sign_start; buf_u8(b,'['); int first=1;
         for(uint32_t i=0;i<1000u;i++){present=boolv(p,n,&o);if(present<0)return 0;if(!present)continue;char text[1024]={0};if(!str(p,n,&o,text,sizeof(text))||!terra_reader_has(o,8,n))return 0;int32_t x=rd_i32le(p,n,&o),y=rd_i32le(p,n,&o);if(!first)buf_u8(b,',');first=0;buf_cstr(b,"{\"x\":");json_i32(b,x);buf_cstr(b,",\"y\":");json_i32(b,y);buf_cstr(b,",\"text\":");json_string(b,text);buf_u8(b,'}');}buf_u8(b,']');return 1;
     }
     if(logical==4) {
@@ -68,6 +70,6 @@ int serialize_legacy_section_json(TxWorld *w,int logical,TxBuf *b) {
         buf_cstr(b,logical==8?"{\"kills\":[],\"sightings\":[],\"chats\":[]}":"[]"); return 1;
     }
     if (logical==10 && w->version<7u) { buf_cstr(b,"{\"valid\":false,\"worldName\":\"\",\"worldId\":0,\"present\":false}"); return 1; }
-    if(logical==10){char footer_name[160]={0};o=w->legacy_footer_start;present=boolv(p,n,&o);if(present<0||!str(p,n,&o,footer_name,sizeof(footer_name))||!terra_reader_has(o,4,n))return 0;int32_t footer_id=rd_i32le(p,n,&o);buf_cstr(b,"{\"valid\":");if(present)buf_cstr(b,"true");else buf_cstr(b,"false");buf_cstr(b,",\"worldName\":");json_string(b,footer_name);buf_cstr(b,",\"worldId\":");json_i32(b,footer_id);buf_u8(b,'}');return 1;}
+    if(logical==10){char footer_name[160]={0};o=w->section_overrides[5].active?0:w->legacy_footer_start;present=boolv(p,n,&o);if(present<0||!str(p,n,&o,footer_name,sizeof(footer_name))||!terra_reader_has(o,4,n))return 0;int32_t footer_id=rd_i32le(p,n,&o);buf_cstr(b,"{\"valid\":");if(present)buf_cstr(b,"true");else buf_cstr(b,"false");buf_cstr(b,",\"worldName\":");json_string(b,footer_name);buf_cstr(b,",\"worldId\":");json_i32(b,footer_id);buf_u8(b,'}');return 1;}
     return 0;
 }

@@ -420,6 +420,7 @@ static int validate_bestiary_strings(TxWorld* world) {
 }
 
 int terra_validate_string_sections(TxWorld* world) {
+    if(world->legacy_wld)return 1; /* The continuous decoder validates its tail. */
     return validate_header_late_strings(world)
         && validate_chest_strings(world)
         && validate_sign_strings(world)
@@ -428,6 +429,7 @@ int terra_validate_string_sections(TxWorld* world) {
 }
 
 int parse_header(TxWorld* world) {
+    if(world&&world->legacy_wld)return terra_parse_header_unchecked(world);
     if (!validate_header_prefix(world)) return 0;
     if (!terra_parse_header_unchecked(world)) return 0;
     return terra_validate_string_sections(world) && tx_validate_future_sections(world);

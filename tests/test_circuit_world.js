@@ -44,11 +44,11 @@ test('COB1 preserves all 18 section-backed objects and exact long strings throug
       assert.deepEqual(part(output, section), expected, `section ${section} keeps every original byte and complete appended payload`);
     }
     for (const section of [0,4,6,7,8,9,10]) assert.deepEqual(part(output, section), part(f.world, section));
-    for (const [offset, value] of [[0,0],[8,325],[28,1],[32+16,1],[32+8,90]]) { const bad = Buffer.from(companion); bad.writeUInt32LE(value, offset); assert.equal(stamp(records, bad, true), null); assert.equal(M._tx_native_heap_used(), baseline); }
+    for (const [offset, value] of [[0,0],[8,87],[28,1],[32+16,1],[32+8,90]]) { const bad = Buffer.from(companion); bad.writeUInt32LE(value, offset); assert.equal(stamp(records, bad, true), null); assert.equal(M._tx_native_heap_used(), baseline); }
     const missing = records.map(row => row.slice()), cell = missing.find(row => (row[2] & 65535) === 378 && row[1] === 2); cell[2] = 0;
     assert.equal(stamp(missing, companion, true), null);
     d.open(output); assert.equal(stamp(records, companion, true), null, 'existing destination inventory cannot be overwritten');
-    d.open(makeCircuitWorld([], 100, 32)); assert.equal(stamp(records, companion, true), null, 'nonempty object payloads cannot be written into old layouts');
+    d.open(makeCircuitWorld([], 100, 32)); assert.equal(stamp(records, companion, true), null, 'incompatible chest capacity or mannequin state is rejected before writing');
     // A missing source record fails extraction, never silently creates empty storage.
     d.open(replaceSections(f.world, { 2: Buffer.alloc(2) })); const missingList = d.command(7, { count: 8, rawRecords: f.geometry });
     assert.throws(() => d.command(8, { mask: missingList.rows[0][0], count: 512, flags: 1, auxSource: 11, width: 4 * 1024 * 1024, height: 32768 }), /native status/);

@@ -40,7 +40,7 @@ static int prepare_stamp(StreamTask* t,int length) {
            !json_extract_int(t->request,length,c,&objects) ||
            id<=0||(uint32_t)id==source||(uint32_t)id==t->source_id ||
            bytes<32||bytes>CO_LIMIT||objects<0||objects>CO_COUNT)return 0;
-        if(objects&&t->candidate->version!=326)return 0;
+        if(objects&&(t->candidate->version<88||t->candidate->version>326))return 0;
         s->object_source=(uint32_t)id;
         s->object_length=(uint32_t)bytes;
         s->object_count=(uint32_t)objects;
@@ -64,7 +64,7 @@ static int stamp_objects_prepare(StreamTask* t) {
     if(co_u32(p)!=CO_MAGIC||co_u32(p+4)!=1 ||
        co_u32(p+12)!=s->object_count||co_u32(p+16)!=end||co_u32(p+28) ||
        !co_u32(p+8)||co_u32(p+8)>326 ||
-       (s->object_count&&co_u32(p+8)!=326))goto invalid;
+       (s->object_count&&co_u32(p+8)<88))goto invalid;
     if(co_u32(p+20)>INT32_MAX-s->width||co_u32(p+24)>INT32_MAX-s->height)goto invalid;
     if(s->object_count) {
         s->items=(CoItem*)tx_persistent_alloc(s->object_count*sizeof(CoItem));
@@ -83,6 +83,7 @@ static int stamp_objects_prepare(StreamTask* t) {
         a->tile=co_u32(h+16);
         a->length=co_u32(h+20);
         a->payload=p+off;
+        a->version=326;
         if(co_u32(h+24)||co_u32(h+28) ||
            !co_section(a->tile)||co_section(a->tile)!=a->section ||
            (a->section==5?co_entity_tile(a->kind)!=a->tile:a->kind!=0) ||
@@ -91,6 +92,10 @@ static int stamp_objects_prepare(StreamTask* t) {
         if(!co_payload(a->section,a->kind,a->payload,a->length,&n)||n!=a->length ||
            a->x>=s->width||a->y>=s->height||w>s->width-a->x||hh>s->height-a->y ||
            (a->section==5&&(s->x+a->x>INT16_MAX||s->y+a->y>INT16_MAX)))goto invalid;
+        if(a->tile>=t->candidate->tile_type_count ||
+           (a->section==5&&(t->candidate->version<116 ||
+                            (t->candidate->version<122&&a->kind))) ||
+           (a->length&&!co_encode_payload(a,NULL,t->candidate->version)))goto invalid;
     }
     if(off!=end)goto invalid;
     if(s->object_count>1)qsort(s->items,s->object_count,sizeof(CoItem),co_item_compare);
@@ -103,12 +108,18 @@ static int stamp_objects_prepare(StreamTask* t) {
             CoCursor c;
             if(!co_cursor(t->candidate,sections[k],&c))goto invalid;
             uint32_t added=0;
-            for(uint32_t i=0;i<s->object_count;i++)added+=s->items[i].section==sections[k];
+            for(uint32_t i=0;i<s->object_count;i++)if(s->items[i].section==sections[k]){
+                added++;
+                if(sections[k]==2&&t->candidate->version<294){
+                    uint32_t name=0;co_string(s->items[i].payload,s->items[i].length,&name);
+                    if(co_u32(s->items[i].payload+name)!=c.slots)goto invalid;
+                }
+            }
             if((sections[k]==2&&added>8000-c.count)||(sections[k]==3&&added>32000-c.count))goto invalid;
             CoItem a;
             int next;
             while((next=co_next(&c,&a))==1) {
-                if(a.section==5) {
+                if(a.section==5&&t->candidate->version>=122) {
                     uint32_t id=co_u32(c.bytes+a.offset+1);
                     if(id>INT32_MAX-s->object_count)goto invalid;
                     if(id>=s->object_max_id)s->object_max_id=id+1;
@@ -158,24 +169,27 @@ static int stamp_object_cell(StreamTask* t,const uint32_t* r,const TxTile* tile)
     return 1;
 }
 /* Validate the complete foreground coverage before any output is visible. */
-static uint32_t stamp_objects_size(StreamStamp* s, uint32_t old_size,
+static uint32_t stamp_objects_size(StreamStamp* s,TxWorld* world,
                                    uint32_t* new_count) {
-    uint64_t total=old_size;
+    uint64_t total=world->file_len;
     for(uint32_t i=0;i<s->object_count;i++) {
         CoItem* a=s->items+i;
         uint32_t shape=co_shape(a->tile),cells=(shape&255)*(shape>>8);
         if(a->seen!=(1u<<cells)-1)return 0;
-        uint32_t n=a->length+(a->section==5?9:8);
+        uint32_t n=a->section==5&&world->version<122?4:
+            co_encode_payload(a,NULL,world->version)+(a->section==5?9:8);
+        if(!new_count[a->section]&&world->starts[a->section]==world->ends[a->section])
+            total+=a->section==5||(a->section==2&&world->version<294)?4:2;
         new_count[a->section]++;
         total+=n;
     }
     return total<=METADATA_LIMIT?(uint32_t)total:0;
 }
 
-/* Payloads retain their source encoding, including arbitrary length UTF-8 and
- * item arrays. Only the relocated anchors and world-local entity IDs change. */
+/* Canonical payloads adapt to the destination layout without dropping item
+ * arrays, strings or state. Anchors and world-local entity IDs are relocated. */
 static uint32_t stamp_append_object(uint8_t* output, const CoItem* a,
-                                    uint32_t x, uint32_t y, uint32_t* next_id) {
+                                    uint32_t x, uint32_t y, uint32_t* next_id,uint32_t version) {
     uint32_t at=0;
     if(a->section==3) {
         memcpy(output,a->payload,a->length);
@@ -184,6 +198,7 @@ static uint32_t stamp_append_object(uint8_t* output, const CoItem* a,
         return a->length+8;
     }
     if(a->section==5) {
+        if(version<122){put16(output,x);put16(output+2,y);return 4;}
         output[at++]=(uint8_t)a->kind;
         co_put(output+at,(*next_id)++);
         at+=4;
@@ -195,13 +210,13 @@ static uint32_t stamp_append_object(uint8_t* output, const CoItem* a,
         co_put(output+at+4,y);
         at+=8;
     }
-    memcpy(output+at,a->payload,a->length);
+    uint32_t length=co_encode_payload(a,output+at,version);
     if(a->section==5&&a->kind==0) {
         /* A dummy's NPC slot belongs to the source world's runtime. Terraria
          * recreates it in the destination when the saved slot is -1. */
         output[at]=output[at+1]=255;
     }
-    return at+a->length;
+    return at+length;
 }
 
 static uint32_t stamp_append_section(StreamTask* t, uint32_t section_id,
@@ -215,14 +230,18 @@ static uint32_t stamp_append_section(StreamTask* t, uint32_t section_id,
     const uint8_t* source=section(t->source,section_id,&length);
     memcpy(output+at,source,length);
     if(!count)return at+length;
-    count+=section_id==5?co_u32(source):co_u16(source);
+    if(length)count+=section_id==5?co_u32(source):co_u16(source);
     if(section_id==5)co_put(output+at,count);
     else put16(output+at,count);
+    if(!length){
+        length=section_id==5||(section_id==2&&t->candidate->version<294)?4:2;
+        if(section_id==2&&t->candidate->version<294)put16(output+at+2,40);
+    }
     at+=length;
     for(uint32_t i=0;i<s->object_count;i++) {
         CoItem* a=s->items+i;
         if(a->section==section_id) {
-            at+=stamp_append_object(output+at,a,s->x+a->x,s->y+a->y,next_id);
+            at+=stamp_append_object(output+at,a,s->x+a->x,s->y+a->y,next_id,t->candidate->version);
         }
     }
     return at;
@@ -233,7 +252,7 @@ static int stamp_objects_finish(StreamTask* t) {
     if(!s->object_count)return 1;
     TxWorld* w=t->candidate;
     uint32_t new_count[TX_MAX_SECTIONS]={0};
-    uint32_t total=stamp_objects_size(s,w->file_len,new_count);
+    uint32_t total=stamp_objects_size(s,w,new_count);
     if(!total)return 0;
     /* Source metadata stays immutable. Release the temporary compact candidate
      * before allocating its final image: never retain three metadata images.

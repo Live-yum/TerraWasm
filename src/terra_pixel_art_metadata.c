@@ -10,6 +10,7 @@ extern uint32_t rd_u32le(const uint8_t*,uint32_t,uint32_t*);
 extern int legacy_skip_string(const uint8_t*,uint32_t,uint32_t*);
 extern void buf_init(TxBuf*,uint32_t);
 extern void buf_bytes(TxBuf*,const void*,uint32_t);
+extern void buf_u8(TxBuf*,uint8_t);
 extern void tx_internal_free(void*);
 extern void tx_set_error(const char*,const char*);
 extern int set_section_override_data(TxWorld*,int,uint8_t*,uint32_t);
@@ -97,11 +98,11 @@ static int filter_metadata(TxWorld* w,int section,TxBuf* out,uint32_t** columns)
     TxSectionOverride* old=&w->section_overrides[section];
     const uint8_t* p=old->active?old->data:w->file+w->starts[actual];
     uint32_t len=old->active?old->len:w->ends[actual]-w->starts[actual],off=0;
-    uint32_t count_bytes=section>=5?4u:2u;
+    uint32_t count_bytes=w->legacy_wld?0u:section>=5?4u:2u;
     if (!terra_reader_has(off,count_bytes,len)) return 0;
-    uint32_t count=section>=5?rd_u32le(p,len,&off):rd_u16le(p,len,&off),kept=0;
-    uint32_t slots=0;
-    if (section==2 && w->version<294u) {
+    uint32_t count=w->legacy_wld?1000u:section>=5?rd_u32le(p,len,&off):rd_u16le(p,len,&off),kept=0;
+    uint32_t slots=w->version<58u?20u:40u;
+    if (section==2 && w->version>=88u && w->version<294u) {
         if (!terra_reader_has(off,2u,len)) return 0;
         slots=rd_u16le(p,len,&off);
     }
@@ -110,6 +111,10 @@ static int filter_metadata(TxWorld* w,int section,TxBuf* out,uint32_t** columns)
     for (uint32_t i=0;i<count;i++) {
         uint32_t start=off,type=0,width=section==6?1u:2u,height=section==6?1u:2u;
         int32_t x,y;
+        if(w->legacy_wld){
+            if(!terra_reader_has(off,1u,len))return 0;
+            if(!p[off++]){buf_u8(out,0);kept++;continue;}
+        }
         if (section==3 && !legacy_skip_string(p,len,&off)) return 0;
         if (section==5 && w->version>=122u) {
             if (!terra_reader_take(&off,5u,len)) return 0;
@@ -120,15 +125,21 @@ static int filter_metadata(TxWorld* w,int section,TxBuf* out,uint32_t** columns)
         x=section==5?(int16_t)rd_u16le(p,len,&off):(int32_t)rd_u32le(p,len,&off);
         y=section==5?(int16_t)rd_u16le(p,len,&off):(int32_t)rd_u32le(p,len,&off);
         if (section==2) {
-            if (!legacy_skip_string(p,len,&off)) return 0;
+            if (w->version>=85u&&!legacy_skip_string(p,len,&off)) return 0;
             if (w->version>=294u) {
                 if (!terra_reader_has(off,4u,len)) return 0;
                 slots=rd_u32le(p,len,&off);
             }
             if (slots>504u) return 0;
             for (uint32_t slot=0;slot<slots;slot++) {
-                if (!terra_reader_has(off,2u,len)) return 0;
-                if (rd_u16le(p,len,&off) && !terra_reader_take(&off,5u,len)) return 0;
+                uint32_t stack_bytes=w->version<59u?1u:2u;
+                if (!terra_reader_has(off,stack_bytes,len)) return 0;
+                uint32_t stack=stack_bytes==1u?p[off++]:rd_u16le(p,len,&off);
+                if(stack){
+                    if(w->version<38u){if(!legacy_skip_string(p,len,&off))return 0;}
+                    else if(!terra_reader_take(&off,4u,len))return 0;
+                    if(w->version>=36u&&!terra_reader_take(&off,1u,len))return 0;
+                }
             }
         } else if (section==5) {
             static const uint8_t widths[]={2,2,1,2,3,3,1,3,1,1,1};
@@ -144,6 +155,7 @@ static int filter_metadata(TxWorld* w,int section,TxBuf* out,uint32_t** columns)
             replaced=dresser;
         }
         if (!replaced) { buf_bytes(out,p+start,off-start); kept++; }
+        else if(w->legacy_wld)buf_u8(out,0);
     }
     if (off!=len || !out->ok) return 0;
     if (kept==count) { tx_internal_free(out->data); out->data=NULL; return 1; }

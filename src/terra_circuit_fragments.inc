@@ -137,7 +137,7 @@ static int cf_objects_build(CxWorld* w) {
     }
     for(uint32_t i=0;i<f->object_count;i++)if(cf_root(f,f->objects[i].net)==f->selected&&co_section(f->objects[i].type))count++;
     if(count>w->command.height)return cx_fail(w,TCW_MEMORY,"fragment object count exceeds budget");
-    if(count&&w->world->version!=326)return cx_fail(w,TCW_UNSUPPORTED,"object transfer requires WLD 326");
+    if(count&&(w->world->version<88||w->world->version>326))return cx_fail(w,TCW_UNSUPPORTED,"object transfer requires a supported sectioned WLD");
     if(count) {
         items=cx_alloc(w,count*sizeof(*items));
         if(!items)return TCW_MEMORY;
@@ -168,11 +168,12 @@ static int cf_objects_build(CxWorld* w) {
                 *item=value;
                 item->tile=tile;
                 item->seen=1;
-                if(value.length>w->command.width-total||32>w->command.width-total-value.length) {
+                uint32_t length=co_encode_payload(item,NULL,326);
+                if(length>w->command.width-total||32>w->command.width-total-length) {
                     result=TCW_MEMORY;
                     goto done;
                 }
-                total+=32+value.length;
+                total+=32+length;
             }
             if(next!=2)goto done;
         }
@@ -193,12 +194,13 @@ static int cf_objects_build(CxWorld* w) {
     p+=32;
     for(uint32_t i=0;i<count;i++) {
         CoItem* a=items+i;
+        uint32_t length=co_encode_payload(a,NULL,326);
         uint32_t h[]= {
-            a->section,a->kind,a->x-origin_x,a->y-origin_y,a->tile,a->length,0,0
+            a->section,a->kind,a->x-origin_x,a->y-origin_y,a->tile,length,0,0
         };
         for(uint32_t k=0;k<8;k++)co_put(p+k*4,h[k]);
-        memcpy(p+32,a->payload,a->length);
-        p+=32+a->length;
+        co_encode_payload(a,p+32,326);
+        p+=32+length;
     }
     result=TCW_OK;
     done:cx_free(w,items);

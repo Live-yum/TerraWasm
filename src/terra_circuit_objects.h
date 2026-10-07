@@ -1,8 +1,8 @@
 #ifndef TERRA_CIRCUIT_OBJECTS_H
 #define TERRA_CIRCUIT_OBJECTS_H
-/* Internal COB1 codec. Raw strings/items never pass through display JSON.
+/* Internal versioned WLD/COB1 codec. Raw strings/items never pass through display JSON.
 * WorldFile and all eleven TileEntitiesManager registrations are pinned to
-* 8255d34616c780af12079425ac92a0a7aed87d71 (WLD 326). */
+* 8255d34616c780af12079425ac92a0a7aed87d71 (WLD 326); older layouts follow its readers. */
 #include "terra_types.h"
 #include <string.h>
 #include <stdlib.h>
@@ -10,12 +10,12 @@
 #define CO_LIMIT (4u*1024u*1024u)
 #define CO_COUNT 32768u
 typedef struct CoItem {
-    uint32_t section,kind,x,y,tile,length,offset,seen;
+    uint32_t section,kind,x,y,tile,length,offset,seen,version,slots;
     const uint8_t* payload;
 } CoItem;
 typedef struct CoCursor {
     const uint8_t* bytes;
-    uint32_t length,offset,count,index,section;
+    uint32_t length,offset,count,index,section,version,slots;
 } CoCursor;
 static uint32_t co_u16(const uint8_t* p) {
     return p[0]|((uint32_t)p[1]<<8);
@@ -74,11 +74,11 @@ static uint32_t co_shape(uint32_t t) {
     for(uint32_t k=0;k<11;k++)if(co_entity_tile(k)==t)return widths[k]|((uint32_t)heights[k]<<8);
     return 0;
 }
-static int co_payload(uint32_t section,uint32_t kind,const uint8_t* p,uint32_t end,uint32_t* off) {
+static int co_payload_version(uint32_t section,uint32_t kind,const uint8_t* p,uint32_t end,uint32_t* off,uint32_t version,uint32_t slots) {
     if(section==3)return !kind&&co_string(p,end,off);
     if(section==2) {
-        if(kind||!co_string(p,end,off)||!co_take(off,4,end))return 0;
-        uint32_t slots=co_u32(p+*off-4);
+        if(kind||!co_string(p,end,off))return 0;
+        if(version>=294){if(!co_take(off,4,end))return 0;slots=co_u32(p+*off-4);}
         if(slots>(end-*off)/2)return 0;
         for(uint32_t i=0;i<slots;i++) {
             if(!co_take(off,2,end))return 0;
@@ -100,8 +100,11 @@ static int co_payload(uint32_t section,uint32_t kind,const uint8_t* p,uint32_t e
         case 7:
             break; /* A pylon has no extra saved data. */
         case 3:
-            if(!co_take(off,4,end)||p[*off-1]&~7u)return 0;
-            n=5u*(co_bits(p[*off-4])+co_bits(p[*off-3])+co_bits(p[*off-1]));
+            {uint32_t start=*off,head=2u+(version>=307)+(version>=308);
+            if(!co_take(off,head,end))return 0;
+            uint32_t extra=version>=308?p[start+3]:0;
+            if(extra&~7u)return 0;
+            n=5u*(co_bits(p[start])+co_bits(p[start+1])+co_bits(extra));}
             break;
         case 5:
             if(!co_take(off,1,end)||p[*off-1]&~15u)return 0;
@@ -113,21 +116,64 @@ static int co_payload(uint32_t section,uint32_t kind,const uint8_t* p,uint32_t e
     if(kind==2&&(p[start]>7||p[start+1]>1))return 0;
     return 1;
 }
+static int co_payload(uint32_t section,uint32_t kind,const uint8_t* p,uint32_t end,uint32_t* off) {
+    return co_payload_version(section,kind,p,end,off,326,0);
+}
+/* COB1 uses the modern payload independent of its sourceVersion header. */
+static void co_copy(uint8_t* out,uint32_t* at,const uint8_t* p,uint32_t n) {
+    if(out&&n)memcpy(out+*at,p,n);*at+=n;
+}
+static uint32_t co_encode_payload(const CoItem* a,uint8_t* out,uint32_t version) {
+    const uint8_t* p=a->payload;uint32_t at=0;
+    if(a->section==2){
+        uint32_t name=0;if(!co_string(p,a->length,&name))return 0;
+        uint32_t slots=a->version<294?a->slots:co_u32(p+name);
+        uint32_t body=name+(a->version>=294?4u:0u);
+        co_copy(out,&at,p,name);
+        if(version>=294){if(out)co_put(out+at,slots);at+=4;}
+        co_copy(out,&at,p+body,a->length-body);return at;
+    }
+    if(a->section==5&&a->kind==3){
+        uint32_t head=2u+(a->version>=307)+(a->version>=308);
+        uint8_t pose=a->version>=307?p[2]:0,extra=a->version>=308?p[3]:0;
+        if((version<307&&pose)||(version<308&&extra))return 0;
+        uint32_t equip=5u*co_bits(p[0]),dyes=5u*(co_bits(p[1])+!!(extra&4u)),e8=extra&2u?5u:0u;
+        const uint8_t* equip8=a->version==311?p+a->length-e8:p+head+equip;
+        const uint8_t* dye=p+head+equip+(a->version==311?0:e8);
+        co_copy(out,&at,p,2);
+        if(version>=307){if(out)out[at]=pose;at++;}
+        if(version>=308){if(out)out[at]=extra;at++;}
+        co_copy(out,&at,p+head,equip);
+        if(version!=311)co_copy(out,&at,equip8,e8);
+        co_copy(out,&at,dye,dyes);
+        co_copy(out,&at,dye+dyes,extra&1u?5u:0u);
+        if(version==311)co_copy(out,&at,equip8,e8);
+        return at;
+    }
+    co_copy(out,&at,p,a->length);return at;
+}
 static int co_cursor(TxWorld* w,uint32_t section,CoCursor* c) {
     memset(c,0,sizeof(*c));
     c->section=section;
-    if(w->version!=326||section>=w->pointer_count)return 0;
+    c->version=w->version;c->slots=40;
+    if(w->version<88||w->version>326)return 0;
+    if(section==5&&w->version<116)return 1;
+    if(section>=w->pointer_count)return 0;
     if(w->section_overrides[section].active) {
         c->bytes=w->section_overrides[section].data;
         c->length=w->section_overrides[section].len;
     } else {
-        c->bytes=w->file+w->starts[section];
+        if(w->starts[section]>w->ends[section]||w->ends[section]>w->file_len)return 0;
+        c->bytes=w->file?w->file+w->starts[section]:NULL;
         c->length=w->ends[section]-w->starts[section];
     }
-    c->offset=section==5?4:2;
+    if(!c->length)return 1;
+    if(!c->bytes)return 0;
+    c->offset=section==5|| (section==2&&w->version<294)?4:2;
     if(c->length<c->offset)return 0;
     c->count=section==5?co_u32(c->bytes):co_u16(c->bytes);
-    uint32_t minimum_record=section==2?13:9;
+    if(section==2&&w->version<294){c->slots=co_u16(c->bytes+2);if(c->slots>INT16_MAX)return 0;}
+    uint32_t minimum_record=section==5&&w->version<122?4:section==2&&w->version>=294?13:9;
     if(c->count>(c->length-c->offset)/minimum_record ||
        (section==2&&c->count>8000) ||
        (section==3&&c->count>32000))return 0;
@@ -137,6 +183,7 @@ static int co_next(CoCursor* c,CoItem* item) {
     if(c->index==c->count)return c->offset==c->length?2:0;
     memset(item,0,sizeof(*item));
     item->section=c->section;
+    item->version=c->version;item->slots=c->slots;
     const uint8_t* p=c->bytes;
     uint32_t n=c->length,o=c->offset,body;
     if(c->section==3) {
@@ -147,6 +194,11 @@ static int co_next(CoCursor* c,CoItem* item) {
         if(!co_take(&o,8,n))return 0;
         item->x=co_u32(p+o-8);
         item->y=co_u32(p+o-4);
+    } else if(c->section==5&&c->version<122){
+        static const uint8_t dummy[]={255,255};
+        if(!co_take(&o,4,n))return 0;
+        item->tile=378;item->x=co_u16(p+c->offset);item->y=co_u16(p+c->offset+2);
+        item->payload=dummy;item->length=2;
     } else {
         if(!co_take(&o,c->section==5?9:8,n))return 0;
         if(c->section==5) {
@@ -159,7 +211,7 @@ static int co_next(CoCursor* c,CoItem* item) {
             item->y=co_u32(p+c->offset+4);
         }
         body=o;
-        if(!co_payload(c->section,item->kind,p,n,&o))return 0;
+        if(!co_payload_version(c->section,item->kind,p,n,&o,c->version,c->slots))return 0;
         item->payload=p+body;
         item->length=o-body;
     }

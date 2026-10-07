@@ -808,33 +808,41 @@ static int encode_header_model(TxWorld *w,TxJsonParser *request,TxPatchField *fi
         }else if(version==208u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,2,&mode))return 0;buf_u8(header,mode==1?1u:0u);buf_u8(header,mode==2?1u:0u);}
     else if(version>=112u){int64_t mode=0;if(!patch_i64(request,fields,field_count,"gameMode",w->gameMode,0,1,&mode))return 0;buf_u8(header,(uint8_t)mode);}
     if(version>=141u)WU64("creationTime",creationTime);if(version>=284u)WU64("lastPlayed",lastPlayed);
-    WU8("moonType",moonType);
-    if(!write_fixed_u32_array(header,request,fields,field_count,"treeX",w->treeX,3u)||
-       !write_fixed_u32_array(header,request,fields,field_count,"treeStyle",w->treeStyle,4u)||
-       !write_fixed_u32_array(header,request,fields,field_count,"caveBackX",w->caveBackX,3u)||
-       !write_fixed_u32_array(header,request,fields,field_count,"caveBackStyle",w->caveBackStyle,4u))return 0;
-    WU32("iceBackStyle",iceBackStyle);WU32("jungleBackStyle",jungleBackStyle);WU32("hellBackStyle",hellBackStyle);
+    if(version<88u&&(max_x!=w->maxTilesX||max_y!=w->maxTilesY))return mut_fail("TERRAX_VALIDATION_ERROR","legacy dimensions must match the tile stream");
+    if(version>=63u)WU8("moonType",moonType);
+    if(version>=44u&&(!write_fixed_u32_array(header,request,fields,field_count,"treeX",w->treeX,3u)||
+       !write_fixed_u32_array(header,request,fields,field_count,"treeStyle",w->treeStyle,4u)))return 0;
+    if(version>=60u){
+        if(!write_fixed_u32_array(header,request,fields,field_count,"caveBackX",w->caveBackX,3u)||
+           !write_fixed_u32_array(header,request,fields,field_count,"caveBackStyle",w->caveBackStyle,4u))return 0;
+        WU32("iceBackStyle",iceBackStyle);
+        }
+    if(version>=61u){WU32("jungleBackStyle",jungleBackStyle);WU32("hellBackStyle",hellBackStyle);}
     if(!write_i32_field(header,request,fields,field_count,"spawnTileX",w->spawnTileX,&spawn_x)||
        !write_i32_field(header,request,fields,field_count,"spawnTileY",w->spawnTileY,&spawn_y))return 0;
     if(spawn_x<0||spawn_x>=max_x||spawn_y<0||spawn_y>=max_y)return mut_fail("TERRAX_VALIDATION_ERROR","spawn coordinates are outside the world bounds");
     WF64("worldSurface",worldSurface);WF64("rockLayer",rockLayer);WF64("time",gameTime);
-    WB("dayTime",isDayTime);WU32("moonPhase",moonPhase);WB("bloodMoon",isBloodMoon);WB("eclipse",isEclipse);
-    WI32("dungeonX",dungeonX);WI32("dungeonY",dungeonY);WB("crimson",isCrimson);
+    WB("dayTime",isDayTime);WU32("moonPhase",moonPhase);WB("bloodMoon",isBloodMoon);if(version>=70u)WB("eclipse",isEclipse);
+    WI32("dungeonX",dungeonX);WI32("dungeonY",dungeonY);if(version>=56u)WB("crimson",isCrimson);
     WB("downedEyeOfCthulhu",downedEye);WB("downedEaterOfWorldsOrBrainOfCthulhu",downedEaterBrain);
-    WB("downedSkeletron",downedSkeletron);WB("downedQueenBee",downedQueenBee);WB("downedDestroyer",downedDestroyer);
-    WB("downedTwins",downedTwins);WB("downedSkeletronPrime",downedSkeletronPrime);WB("downedAnyMechBoss",downedAnyMech);
-    WB("downedPlantera",downedPlantera);WB("downedGolem",downedGolem);if(version>=118u)WB("downedKingSlime",downedKingSlime);
-    WB("savedGoblin",savedGoblin);WB("savedWizard",savedWizard);WB("savedMech",savedMech);WB("downedGoblins",downedGoblins);
-    WB("downedClown",downedClown);WB("downedFrost",downedFrost);WB("downedPirates",downedPirates);
+    WB("downedSkeletron",downedSkeletron);if(version>=66u)WB("downedQueenBee",downedQueenBee);
+    if(version>=44u){WB("downedDestroyer",downedDestroyer);WB("downedTwins",downedTwins);WB("downedSkeletronPrime",downedSkeletronPrime);WB("downedAnyMechBoss",downedAnyMech);}
+    if(version>=64u){WB("downedPlantera",downedPlantera);WB("downedGolem",downedGolem);}if(version>=118u)WB("downedKingSlime",downedKingSlime);
+    if(version>=29u){
+        WB("savedGoblin",savedGoblin);WB("savedWizard",savedWizard);
+        if(version>=34u){WB("savedMech",savedMech);if(version>=80u&&version<88u)WB("savedStylist",savedStylist);}
+        WB("downedGoblins",downedGoblins);
+        }
+    if(version>=32u)WB("downedClown",downedClown);if(version>=37u)WB("downedFrost",downedFrost);if(version>=56u)WB("downedPirates",downedPirates);
     WB("shadowOrbSmashed",shadowOrbSmashed);WB("spawnMeteor",spawnMeteor);WU8("shadowOrbCount",shadowOrbCount);
-    WU32("altarCount",altarCount);WB("hardMode",hardMode);if(version>=257u)WB("afterPartyOfDoom",afterPartyOfDoom);
+    if(version>=23u){WU32("altarCount",altarCount);WB("hardMode",hardMode);}if(version>=257u)WB("afterPartyOfDoom",afterPartyOfDoom);
     WU32("invasionDelay",invasionDelay);WU32("invasionSize",invasionSize);WU32("invasionType",invasionType);WF64("invasionX",invasionX);
     if(version>=118u)WF64("slimeRainTime",slimeRainTime);if(version>=113u)WU8("sundialCooldown",sundialCooldown);
-    WB("raining",isRaining);WU32("rainTime",rainTime);WF32("maxRain",maxRain);
-    WI32("oreTierCobalt",oreTierCobalt);WI32("oreTierMythril",oreTierMythril);WI32("oreTierAdamantite",oreTierAdamantite);
-    WU8("treeBG1",bgTree);WU8("corruptBG",bgCorruption);WU8("jungleBG",bgJungle);WU8("snowBG",bgSnow);
-    WU8("hallowBG",bgHallow);WU8("crimsonBG",bgCrimson);WU8("desertBG",bgDesert);WU8("oceanBG",bgOcean);
-    WI32("cloudBGActive",cloudBgActive);WU16("numClouds",numClouds);WF32("windSpeedTarget",windSpeedSet);
+    if(version>=53u){WB("raining",isRaining);WU32("rainTime",rainTime);WF32("maxRain",maxRain);}
+    if(version>=54u){WI32("oreTierCobalt",oreTierCobalt);WI32("oreTierMythril",oreTierMythril);WI32("oreTierAdamantite",oreTierAdamantite);}
+    if(version>=55u){WU8("treeBG1",bgTree);WU8("corruptBG",bgCorruption);WU8("jungleBG",bgJungle);}
+    if(version>=60u){WU8("snowBG",bgSnow);WU8("hallowBG",bgHallow);WU8("crimsonBG",bgCrimson);WU8("desertBG",bgDesert);WU8("oceanBG",bgOcean);WI32("cloudBGActive",cloudBgActive);}
+    if(version>=62u){WU16("numClouds",numClouds);WF32("windSpeedTarget",windSpeedSet);}
     if(version>=95u&&!encode_string_array(header,w,request,fields,field_count))return 0;
     if(version>=99u)WB("savedAngler",savedAngler);if(version>=101u)WU32("anglerQuest",anglerQuest);
     if(version>=104u)WB("savedStylist",savedStylist);if(version>=129u)WB("savedTaxCollector",savedTaxCollector);
@@ -941,27 +949,30 @@ static void refresh_format_positions(TxWorld *w){
 TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,uint32_t request_len,TxBuf *response){
     if (!tx_world_require_writable(w)) return -1;
     if(!w||!request_text||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)return mut_error("TERRAX_INVALID_ARGUMENT","invalid header_patch request");
-    if(w->legacy_wld)return mut_error("TERRAX_NOT_SUPPORTED","pre-88 worlds support reading and original-byte export only");
     if(w->pointer_count<1u)return mut_error("TERRAX_NOT_SUPPORTED","world has no header section");
     TxJsonParser request={request_text,request_len,0u};TxPatchField fields[TX_MAX_HEADER_PATCH_FIELDS];uint32_t field_count=0u;
     if(!parse_patch_fields(&request,fields,&field_count))return -1;
     int64_t version_value=w->version,type_value=w->file_type,revision_value=w->revision,tile_count_value=w->tile_type_count;uint64_t favorite=w->favorite;
+    TxBuf bitmap={0};int bitmap_changed=0;
+    char magic[8];uint32_t magic_len=0u;
+    if(w->legacy_wld){
+        if(!patch_i64(&request,fields,field_count,"version",w->version,w->version,w->version,&version_value))return -1;
+        }else{
     if(!patch_i64(&request,fields,field_count,"version",w->version,88,326,&version_value)||
        !patch_i64(&request,fields,field_count,"type",w->file_type,0,UINT8_MAX,&type_value)||
        !patch_i64(&request,fields,field_count,"revision",w->revision,0,UINT32_MAX,&revision_value)||
        !patch_u64(&request,fields,field_count,"favoriteFlags",w->favorite,&favorite)||
        !patch_i64(&request,fields,field_count,"tileTypeCount",w->tile_type_count,0,UINT16_MAX,&tile_count_value))return -1;
-    uint32_t next_version=(uint32_t)version_value;
-    if(next_version>=135u&&type_value!=2)return mut_error("TERRAX_VALIDATION_ERROR","WLD metadata must use world file type 2");
-    if(!header_versions_compatible(w->version,next_version))return mut_error("TERRAX_NOT_SUPPORTED","version change crosses an unsupported header layout boundary");
-    char magic[8];uint32_t magic_len=0u;
+    if(version_value>=135&&type_value!=2)return mut_error("TERRAX_VALIDATION_ERROR","WLD metadata must use world file type 2");
+    if(!header_versions_compatible(w->version,(uint32_t)version_value))return mut_error("TERRAX_NOT_SUPPORTED","version change crosses an unsupported header layout boundary");
     if(!patch_string(&request,fields,field_count,"magic",w->magic[0]?w->magic:"relogic",magic,sizeof(magic),&magic_len))return -1;
-    if(next_version>=135u&&(!tx_streq_c(magic,"relogic")&&!tx_streq_c(magic,"xindong")))return mut_error("TERRAX_VALIDATION_ERROR","magic must be relogic or xindong");
-    TxBuf bitmap={0};int bitmap_changed=0;
+    if(version_value>=135&&(!tx_streq_c(magic,"relogic")&&!tx_streq_c(magic,"xindong")))return mut_error("TERRAX_VALIDATION_ERROR","magic must be relogic or xindong");
     if(!parse_format_bitmap(&request,fields,field_count,(uint16_t)tile_count_value,w->important,w->important_len,&bitmap,&bitmap_changed)){tx_internal_free(bitmap.data);return -1;}
     if((uint16_t)tile_count_value!=w->tile_type_count&&!patch_find(fields,field_count,"tileFrameImportantBitmap")){
         tx_internal_free(bitmap.data);return mut_error("TERRAX_VALIDATION_ERROR","changing tileTypeCount requires tileFrameImportantBitmap");
         }
+        }
+    uint32_t next_version=(uint32_t)version_value;
     uint32_t source_len=w->section_overrides[0].active?w->section_overrides[0].len:w->ends[0]-w->starts[0];
     TxBuf encoded;buf_init(&encoded,source_len+4096u);
     if(!encoded.ok){tx_internal_free(bitmap.data);return mut_error("TERRAX_WASM_OOM","failed to allocate header encoder");}
@@ -974,7 +985,7 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     if(!parse_header(&candidate)){tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
     TxBuf footer={0};
     uint32_t footer_index=next_version>=220u?10u:next_version>=210u?9u:next_version>=189u?8u:next_version>=170u?7u:next_version>=116u?6u:5u;
-    if(candidate.worldId!=w->worldId||!tx_streq_c(candidate.worldName,w->worldName)){
+    if(next_version>=7u&&(candidate.worldId!=w->worldId||!tx_streq_c(candidate.worldName,w->worldName))){
         if(footer_index>=w->pointer_count){
             tx_internal_free(encoded.data);tx_internal_free(bitmap.data);
             return mut_error("TERRAX_NOT_SUPPORTED","world identity patch requires a footer section");
@@ -992,28 +1003,30 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     if(!set_section_override_data(w,0,encoded.data,encoded.len)){discard_response(response);tx_internal_free(footer.data);tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
     /* Both indices are already validated; publishing these owned buffers cannot allocate. */
     if(footer.data)set_section_override_data(w,(int)footer_index,footer.data,footer.len);
-    w->version=next_version;memset(w->magic,0,sizeof(w->magic));memcpy(w->magic,magic,magic_len);
+    w->version=next_version;
+    if(!w->legacy_wld){memset(w->magic,0,sizeof(w->magic));memcpy(w->magic,magic,magic_len);}
     w->file_type=(uint8_t)type_value;w->revision=(uint32_t)revision_value;w->favorite=favorite;w->tile_type_count=(uint16_t)tile_count_value;
     if(bitmap.data&&bitmap_changed){
         if(w->important_override)tx_internal_free(w->important_override);
         w->important_override=bitmap.data;w->important=bitmap.data;w->important_len=bitmap.len;bitmap.data=NULL;
         }
-    tx_internal_free(bitmap.data);w->format_dirty=1u;refresh_format_positions(w);
+    tx_internal_free(bitmap.data);if(!w->legacy_wld){w->format_dirty=1u;refresh_format_positions(w);}
     if(!parse_header(w)){discard_response(response);return mut_error("TERRAX_STATE_ERROR","encoded header could not be reopened");}
     return result;
     }
 
-static int parse_item(TxJsonParser *p,TxBuf *items){
+static int parse_item(TxWorld *w,TxJsonParser *p,TxBuf *items){
     jp_ws(p);
     if (p->pos<p->len&&p->text[p->pos]=='n'){
         if (!jp_null(p))return mut_fail("TERRAX_PARSE_ERROR","malformed null chest slot");
-        buf_u16le(items,0u);
+        if(w->version<59u)buf_u8(items,0u);else buf_u16le(items,0u);
         return items->ok;
         }
     if (!jp_take(p,'{'))return 0;
     int first=1,done=0;
     uint32_t seen=0u;
     int64_t stack=0,item_type=0,prefix=0;
+    char legacy_name[TX_MUTATOR_MAX_STRING_BYTES+1u];uint32_t legacy_len=0u;
     while (!done){
         char key[32];uint32_t key_len=0u;
         if (!jp_member_next(p,&first,&done))return 0;
@@ -1021,21 +1034,28 @@ static int parse_item(TxJsonParser *p,TxBuf *items){
         if (!jp_string(p,key,sizeof(key),&key_len)||!jp_take(p,':'))return 0;
         (void)key_len;
         uint32_t bit;
-        if (tx_streq_c(key,"stack")){bit=1u;if (!jp_integer(p,1,32767,&stack))return 0;}
-        else if (tx_streq_c(key,"itemType")){bit=2u;if (!jp_integer(p,1,TX_MUTATOR_MAX_ITEM_TYPE,&item_type))return 0;}
+        if (tx_streq_c(key,"stack")){bit=1u;if (!jp_integer(p,1,w->version<59u?255:32767,&stack))return 0;}
+        else if (tx_streq_c(key,"itemType")){bit=2u;if (!jp_integer(p,w->version<38u?0:1,TX_MUTATOR_MAX_ITEM_TYPE,&item_type))return 0;}
         else if (tx_streq_c(key,"prefix")){bit=4u;if (!jp_integer(p,0,255,&prefix))return 0;}
+        else if (w->version<38u&&tx_streq_c(key,"legacyName")){bit=8u;if(!jp_string(p,legacy_name,sizeof(legacy_name),&legacy_len))return 0;}
         else return mut_fail("TERRAX_VALIDATION_ERROR","unknown chest item field");
         if (seen&bit)return mut_fail("TERRAX_VALIDATION_ERROR","duplicate chest item field");
         seen|=bit;
         }
-    if (seen!=7u)return mut_fail("TERRAX_VALIDATION_ERROR","chest item requires stack, itemType, and prefix");
-    buf_u16le(items,(uint32_t)stack);
-    buf_u32le(items,(uint32_t)item_type);
-    buf_u8(items,(uint8_t)prefix);
+    if(w->version<38u){
+        if(!(seen&1u)||!(seen&8u)||!legacy_len||item_type!=0)
+            return mut_fail("TERRAX_VALIDATION_ERROR","name-based chest item requires stack and legacyName, with itemType absent or zero");
+        }else if((seen&(w->legacy_wld?3u:7u))!=(w->legacy_wld?3u:7u))
+        return mut_fail("TERRAX_VALIDATION_ERROR","chest item requires stack, itemType, and prefix");
+    if(w->version<36u&&prefix)return mut_fail("TERRAX_VALIDATION_ERROR","this chest version has no item prefixes");
+    if(w->version<59u)buf_u8(items,(uint8_t)stack);else buf_u16le(items,(uint32_t)stack);
+    if(w->version<38u){buf_7bit(items,legacy_len);buf_bytes(items,legacy_name,legacy_len);}
+    else buf_u32le(items,(uint32_t)item_type);
+    if(w->version>=36u)buf_u8(items,(uint8_t)prefix);
     return items->ok||mut_fail("TERRAX_WASM_OOM","failed to encode chest item");
     }
 
-static int parse_items(TxJsonParser *p,TxBuf *items,uint32_t *item_count){
+static int parse_items(TxWorld *w,TxJsonParser *p,TxBuf *items,uint32_t *item_count){
     int first=1,done=0;
     if (!jp_take(p,'['))return 0;
     while (!done){
@@ -1043,7 +1063,7 @@ static int parse_items(TxJsonParser *p,TxBuf *items,uint32_t *item_count){
         if (done)break;
         if (*item_count>=TX_MUTATOR_MAX_CHEST_ITEMS)
             return mut_fail("TERRAX_VALIDATION_ERROR","chest has too many item slots");
-        if (!parse_item(p,items))return 0;
+        if (!parse_item(w,p,items))return 0;
         (*item_count)++;
         }
     return 1;
@@ -1067,7 +1087,7 @@ static TX_COLD_MUTATOR int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section
         else if (tx_streq_c(key,"y")){bit=2u;if (!jp_integer(p,0,w->maxTilesY-1,&y)){tx_internal_free(items.data);return 0;}}
         else if (tx_streq_c(key,"name")){bit=4u;if (!jp_string(p,name,sizeof(name),&name_len)){tx_internal_free(items.data);return 0;}}
         else if (tx_streq_c(key,"maxItems")){bit=8u;if (!jp_integer(p,0,TX_MUTATOR_MAX_CHEST_ITEMS,&max_items)){tx_internal_free(items.data);return 0;}}
-        else if (tx_streq_c(key,"items")){bit=16u;if (!parse_items(p,&items,&item_count)){tx_internal_free(items.data);return 0;}}
+        else if (tx_streq_c(key,"items")){bit=16u;if (!parse_items(w,p,&items,&item_count)){tx_internal_free(items.data);return 0;}}
         else{tx_internal_free(items.data);return mut_fail("TERRAX_VALIDATION_ERROR","unknown chest field");}
         if (seen&bit){tx_internal_free(items.data);return mut_fail("TERRAX_VALIDATION_ERROR","duplicate chest field");}
         seen|=bit;
@@ -1080,10 +1100,11 @@ static TX_COLD_MUTATOR int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section
         tx_internal_free(items.data);
         return mut_fail("TERRAX_VALIDATION_ERROR","legacy chest capacity must match source");
         }
+    if(w->version<85u&&name_len){tx_internal_free(items.data);return mut_fail("TERRAX_VALIDATION_ERROR","this chest version has no chest names");}
+    if(w->legacy_wld)buf_u8(section,1u);
     buf_u32le(section,(uint32_t)x);
     buf_u32le(section,(uint32_t)y);
-    buf_7bit(section,name_len);
-    buf_bytes(section,name,name_len);
+    if(w->version>=85u){buf_7bit(section,name_len);buf_bytes(section,name,name_len);}
     if (w->version>=294u)buf_u32le(section,(uint32_t)max_items);
     buf_bytes(section,items.data,items.len);
     tx_internal_free(items.data);
@@ -1121,12 +1142,10 @@ TX_COLD_MUTATOR int tx_mutate_replace_chests(TxWorld *w,const char *request,uint
     if (!tx_world_require_writable(w)) return -1;
     if (!w||!request||request_len==0u||request_len>TX_MUTATOR_MAX_JSON_BYTES)
         return mut_error("TERRAX_INVALID_ARGUMENT","invalid replace_chests request");
-    if (w->version<88u)
-        return mut_error("TERRAX_NOT_SUPPORTED","legacy chest writes are not implemented");
     if (w->pointer_count<=2u)
         return mut_error("TERRAX_NOT_SUPPORTED","world has no chest section");
-    uint32_t shared_slots=40u;
-    if (w->version<294u){
+    uint32_t shared_slots=w->version<58u?20u:40u;
+    if (w->version>=88u&&w->version<294u){
         const uint8_t *source=w->section_overrides[2].data;
         uint32_t source_len=w->section_overrides[2].len;
         if (!w->section_overrides[2].active){
@@ -1145,8 +1164,7 @@ TX_COLD_MUTATOR int tx_mutate_replace_chests(TxWorld *w,const char *request,uint
         }
     TxBuf encoded;buf_init(&encoded,1024u);
     if (!encoded.ok)return mut_error("TERRAX_WASM_OOM","failed to allocate chest encoder");
-    buf_u16le(&encoded,0u);
-    if (w->version<294u)buf_u16le(&encoded,shared_slots);
+    if(!w->legacy_wld){buf_u16le(&encoded,0u);if (w->version<294u)buf_u16le(&encoded,shared_slots);}
     TxJsonParser parser={request,request_len,0u};
     uint32_t chest_count=0u;
     if (!parse_chests_request(w,&parser,&encoded,&chest_count,shared_slots)||!encoded.ok){
@@ -1154,8 +1172,9 @@ TX_COLD_MUTATOR int tx_mutate_replace_chests(TxWorld *w,const char *request,uint
         if (!encoded.ok)mut_fail("TERRAX_WASM_OOM","failed to encode chest section");
         return -1;
         }
-    encoded.data[0]=(uint8_t)chest_count;
-    encoded.data[1]=(uint8_t)(chest_count>>8u);
+    if(w->legacy_wld){for(uint32_t i=chest_count;i<TX_MUTATOR_MAX_CHESTS;i++)buf_u8(&encoded,0u);}
+    else{encoded.data[0]=(uint8_t)chest_count;encoded.data[1]=(uint8_t)(chest_count>>8u);}
+    if(!encoded.ok){tx_internal_free(encoded.data);return mut_error("TERRAX_WASM_OOM","failed to encode chest presence flags");}
     uint32_t override_mark=tx_mark();
     buf_cstr(response,"{\"status\":\"ok\",\"chestCount\":");
     json_u32(response,chest_count);buf_u8(response,'}');

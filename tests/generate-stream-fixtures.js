@@ -38,5 +38,11 @@ if(require.main===module){const dir=process.argv[2];fs.mkdirSync(dir,{recursive:
  const anchors=require('./helpers/circuit-supports').anchorFixture();fs.writeFileSync(path.join(dir,'circuit-anchor-edges.wld'),anchors.world);fs.writeFileSync(path.join(dir,'circuit-anchor-edges.geometry'),require('./helpers/circuit-objects').words(anchors.geometry.flat()));
  const falling=require('./helpers/circuit-supports').fallingFixture();fs.writeFileSync(path.join(dir,'circuit-falling.wld'),falling.world);fs.writeFileSync(path.join(dir,'circuit-falling.geometry'),require('./helpers/circuit-objects').words(falling.geometry.flat()));
  fs.writeFileSync(path.join(dir,'circuit-objects-old.wld'),makeCircuitWorld([],100,32));
+ for(const version of [88,115,116,121,122,196,208,210,269,293,294,306,307,308,311,312,326]){
+  const f=require('./helpers/circuit-objects').versionFixture(version),prefix=path.join(dir,`circuit-objects-v${version}`);
+  fs.writeFileSync(prefix+'.wld',f.world);fs.writeFileSync(prefix+'.cob',f.companion);
+  fs.writeFileSync(prefix+'.geometry',require('./helpers/circuit-objects').words(f.geometry.flat()));
+  for(const [section,bytes] of Object.entries(f.appended))fs.writeFileSync(prefix+`.append.${section}`,bytes);
+ }
 }
 module.exports={fixture};

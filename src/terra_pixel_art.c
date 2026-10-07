@@ -207,10 +207,6 @@ int txw_queue_pixel_art(
         tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
         return -1;
     }
-    if (w->legacy_wld) {
-        tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
-        return -1;
-    }
     uint64_t expected_len64 = (uint64_t)width * height * 4u;
     if (!pixels_ptr || !map_ptr || expected_len64 > UINT32_MAX ||
         pixels_len < (uint32_t)expected_len64 ||
@@ -295,10 +291,6 @@ int txw_begin_pixel_art_indexed(
     if (w && !tx_world_require_writable(w)) return -1;
     if (!w) {
         tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
-        return -1;
-    }
-    if (w->legacy_wld) {
-        tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
         return -1;
     }
     if (width == 0u || height == 0u) {
@@ -736,10 +728,6 @@ int txw_apply_pixel_art(
         return -1;
     }
 
-    if (w->legacy_wld) {
-        tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
-        return -1;
-    }
     uint64_t pixel_count64 = (uint64_t)width * height;
     uint64_t expected_len64 = pixel_count64 * 4u;
     if (!image_ptr || pixel_count64 > UINT32_MAX || expected_len64 > UINT32_MAX ||

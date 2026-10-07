@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "circuit_objects_versions_contract.inc"
 
 extern uint32_t tx_native_heap_used(void);
 extern void txw_test_allocation_limit(uint32_t maximum);
@@ -205,6 +206,7 @@ static void million_cell_contract(void) {
     OK(terra_circuit_close(h));assert(tx_native_heap_used()==baseline);
 }
 int main(void) {
+    circuit_object_versions_contract();
     assert(terra_circuit_abi_version()==1);
     lifecycle_contract();fifo_and_interleaving_contract();randomized_source_contract();million_cell_contract();
     assert(tx_native_heap_used()==0);

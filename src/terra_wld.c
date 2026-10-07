@@ -729,6 +729,7 @@ static TX_COLD_PARSER int parse_legacy_header(TxWorld *w) {
     uint8_t *p; uint32_t len, off=4u;
     if (!w || !w->file || w->file_len<4u) return 0;
     p=w->file; len=w->file_len;
+    if(w->section_overrides[0].active){p=w->section_overrides[0].data;len=w->section_overrides[0].len;off=0u;}
 #define L_U8(x) do { if (!terra_reader_has(off,1u,len)) goto truncated; (x)=p[off++]; } while(0)
 #define L_I32(x) do { if (!terra_reader_has(off,4u,len)) goto truncated; (x)=(int32_t)rd_u32le(p,len,&off); } while(0)
 #define L_U32(x) do { if (!terra_reader_has(off,4u,len)) goto truncated; (x)=rd_u32le(p,len,&off); } while(0)
@@ -763,8 +764,9 @@ static TX_COLD_PARSER int parse_legacy_header(TxWorld *w) {
     if(w->version>=55u){L_U8(w->bgTree);L_U8(w->bgCorruption);L_U8(w->bgJungle);}
     if(w->version>=60u){L_U8(w->bgSnow);L_U8(w->bgHallow);L_U8(w->bgCrimson);L_U8(w->bgDesert);L_U8(w->bgOcean);L_I32(w->cloudBgActive);}
     if(w->version>=62u){uint16_t clouds; if(!terra_reader_has(off,2u,len))goto truncated; clouds=rd_u16le(p,len,&off);w->numClouds=clouds;L_F32(w->windSpeedSet);}
-    w->legacy_tile_start=off;
     if(w->maxTilesX<=0||w->maxTilesY<=0||w->maxTilesX>100000||w->maxTilesY>100000){tx_set_error("TERRAX_BAD_HEADER","invalid world dimensions");return 0;}
+    if(w->section_overrides[0].active){if(off!=len)goto truncated;return 1;}
+    w->legacy_tile_start=off;w->ends[0]=off;
     /* Locate the end of the RLE tile stream.  This both prevents later tile
      * consumers from treating legacy chest bytes as tiles and gives malformed
      * old files the same bounded-read rejection as modern worlds. */
@@ -780,6 +782,12 @@ static TX_COLD_PARSER int parse_legacy_header(TxWorld *w) {
     }
     w->legacy_tile_end=off; w->starts[1]=w->legacy_tile_start; w->ends[1]=off;
     if (!validate_legacy_tail(w, off)) { tx_set_error("TERRAX_TRUNCATED_LEGACY_TAIL","legacy chest, sign, NPC, or footer data is truncated"); return 0; }
+    /* Logical ranges only: legacy files never contain a pointer table. */
+    w->pointer_count=6u;
+    w->starts[2]=w->legacy_chest_start;w->ends[2]=w->legacy_sign_start;
+    w->starts[3]=w->legacy_sign_start;w->ends[3]=w->legacy_npc_start;
+    w->starts[4]=w->legacy_npc_start;w->ends[4]=w->legacy_footer_start;
+    w->starts[5]=w->legacy_footer_start;w->ends[5]=len;
     return 1;
 truncated:
     tx_set_error("TERRAX_TRUNCATED_HEADER","legacy header fields exceed file bounds"); return 0;
@@ -908,7 +916,44 @@ int parse_header(TxWorld *w){
 #undef TILE_U16
     return *off<=end;
     }
+/* WorldFile.LoadWorld_Version1: mirror its byte widths and optional flags. */
+static TX_COLD_PARSER void write_legacy_tile(TxWorld *w,TxBuf *b,const TxTile *t,uint32_t same){
+    uint32_t v=w->version;
+    if((v<=77u&&t->active&&t->type>255u)||t->wall>255u||t->wire_yellow||
+       t->invisible_block||t->invisible_wall||t->fullbright_block||t->fullbright_wall||
+       (v<33u&&t->wire_red)||(v<43u&&(t->wire_blue||t->wire_green))||
+       (v<42u&&(t->actuator||t->inactive))||
+       (v<48u&&((t->active&&t->tile_color)||(t->wall&&t->wall_color)))||
+       (t->liquid_amount&&(t->liquid_type==4u||(v<51u&&t->liquid_type==3u)))||
+       t->brick_style>5u||(v<41u&&t->brick_style)||(v<49u&&t->brick_style>1u)){
+        b->ok=0;tx_set_error("TERRAX_VALIDATION_ERROR","tile properties cannot be represented by this world format");return;
+    }
+    do {
+        uint32_t repeat=v<25u?0u:same>32767u?32767u:same;
+        buf_u8(b,t->active);
+        if(t->active){
+            if(v<=77u)buf_u8(b,(uint8_t)t->type);else buf_u16le(b,t->type);
+            if((v<72u&&(t->type==35u||t->type==36u||t->type==170u||t->type==171u||t->type==172u))||
+               (tile_important(w,t->type)&&!(v<28u&&t->type==4u)&&!(v<40u&&t->type==19u)&&t->type!=49u)){
+                buf_u16le(b,(uint16_t)t->frame_x);buf_u16le(b,(uint16_t)t->frame_y);
+            }
+            if(v>=48u){buf_u8(b,t->tile_color!=0u);if(t->tile_color)buf_u8(b,t->tile_color);}
+        }
+        if(v<=25u)buf_u8(b,0);
+        buf_u8(b,t->wall!=0u);
+        if(t->wall){buf_u8(b,(uint8_t)t->wall);if(v>=48u){buf_u8(b,t->wall_color!=0u);if(t->wall_color)buf_u8(b,t->wall_color);}}
+        buf_u8(b,t->liquid_amount!=0u);
+        if(t->liquid_amount){buf_u8(b,t->liquid_amount);buf_u8(b,t->liquid_type==2u);if(v>=51u)buf_u8(b,t->liquid_type==3u);}
+        if(v>=33u)buf_u8(b,t->wire_red);
+        if(v>=43u){buf_u8(b,t->wire_blue);buf_u8(b,t->wire_green);}
+        if(v>=41u){buf_u8(b,t->brick_style==1u);if(v>=49u)buf_u8(b,t->brick_style>1u?t->brick_style-1u:0u);}
+        if(v>=42u){buf_u8(b,t->actuator);buf_u8(b,t->inactive);}
+        if(v>=25u)buf_u16le(b,repeat);
+        if(same==repeat)break;same-=repeat+1u;
+    }while(b->ok);
+}
 /* ==================================================================== * write_tile -- Serialize a tile back to binary * ==================================================================== */void write_tile(TxWorld *w,TxBuf *b,const TxTile *t,uint32_t same){
+    if(w->legacy_wld){write_legacy_tile(w,b,t,same);return;}
     uint8_t f1=0,f2=0,f3=0,f4=0;
     if (t->active)f1|=2u;
     if (t->wall)f1|=4u;
@@ -1017,8 +1062,8 @@ int section_index_by_name(const char *name,uint32_t len){
     buf_cstr(b," { \"version\":");
     json_u32(b,w->version);
     buf_cstr(b,",\"originalVersion\":"); json_u32(b,w->original_version ? w->original_version : w->version);
-    buf_cstr(b,",\"readOnly\":"); json_bool(b,w->legacy_wld || tx_world_is_future(w));
-    buf_cstr(b,",\"compatibility\":"); json_string(b,tx_world_is_future(w) ? "future-layout-readonly" : w->legacy_wld ? "legacy-readonly" : "known");
+    buf_cstr(b,",\"readOnly\":"); json_bool(b,tx_world_is_future(w));
+    buf_cstr(b,",\"compatibility\":"); json_string(b,tx_world_is_future(w) ? "future-layout-readonly" : "known");
     buf_cstr(b,",\"canExportOriginal\":true");
     buf_cstr(b,",\"magic\":");
     json_string(b,w->magic[0]?w->magic:"relogic");

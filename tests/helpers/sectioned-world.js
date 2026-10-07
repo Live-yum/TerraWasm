@@ -3,7 +3,7 @@
 /* Hand encoded modern header fixtures. This intentionally does not call any
  * TerraWasm encoder: the byte order follows WorldFile.LoadWorldFlags. */
 function makeSectionedWorld(version, options = {}) {
-  if (![128, 129, 139, 195, 196, 208, 269, 326].includes(version)) throw new RangeError("header fixture version");
+  if (!Number.isInteger(version) || version < 88 || version > 326) throw new RangeError("header fixture version");
   const h = [];
   const u8 = n => h.push(n & 255);
   const i16 = n => { u8(n); u8(n >> 8); };
@@ -15,7 +15,7 @@ function makeSectionedWorld(version, options = {}) {
   const str = value => { const b = Buffer.from(String(value || ""), "utf8"); let n = b.length; while (n >= 128) { u8((n & 127) | 128); n >>>= 7; } u8(n); h.push(...b); };
   const zero = n => { for (let i = 0; i < n; i++) u8(0); };
   str(options.worldName || `header-v${version}`);
-  if (version >= 179) { str("seed"); zero(8); }
+  if (version >= 179) { if (version === 179) i32(123); else str("seed"); zero(8); }
   if (version >= 181) zero(16);
   i32(1); i32(0); i32(1000); i32(0); i32(500); i32(500); i32(1000);
   if (version >= 209) {
@@ -77,7 +77,7 @@ function makeSectionedWorld(version, options = {}) {
   if (version >= 299 && version < 313) i32(0);
   if (version >= 299) str('{}');
   const metadata = version >= 135 ? Buffer.concat([Buffer.from("relogic"), Buffer.from([2]), Buffer.alloc(12)]) : Buffer.alloc(0);
-  const pointerCount = version >= 220 ? 11 : version >= 189 ? 9 : version >= 170 ? 8 : 7;
+  const pointerCount = version >= 220 ? 11 : version >= 210 ? 10 : version >= 189 ? 9 : version >= 170 ? 8 : version >= 116 ? 7 : 6;
   const formatLength = 4 + metadata.length + 2 + pointerCount * 4 + 2 + 1;
   const headerStart = formatLength;
   const fileLength = headerStart + h.length;

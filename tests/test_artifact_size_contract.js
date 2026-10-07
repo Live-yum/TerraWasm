@@ -120,7 +120,7 @@ test("artifact size gate rejects manifest drift, digest drift, and oversized web
       assert.throws(() => verifyArtifactSizes({ root: temp, manifest }), /wasm size/i,
         `${featureSet} must not inherit the circuit module budget`);
     }
-    for (const [featureSet, expectedKiB] of [["wld", 416], ["all", 448], ["plr", 320]]) {
+    for (const [featureSet, expectedKiB] of [["wld", 424], ["all", 448], ["plr", 320]]) {
       manifest.build.featureSet = featureSet;
       setWasmSize(WEB_ARTIFACT_LIMITS_BY_FEATURE[featureSet].wasmBytes);
       assert.equal(verifyArtifactSizes({ root: temp, manifest }).limits.wasmBytes, expectedKiB * 1024);

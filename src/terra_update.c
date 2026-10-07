@@ -312,8 +312,9 @@ static int pixel_art_run_overlap(TxWorld* w, uint32_t y, uint32_t run,
     return 1;
 }
 
+static void write_source_run(TxWorld*,TxBuf*,const TxTile*,const TxTile*,uint32_t,uint32_t,uint32_t);
 static void write_pixel_art_segment(TxWorld* w, TxBuf* out, TxTile* base,
-                                    uint32_t x, uint32_t start_y, uint32_t end_y) {
+                                    uint32_t x, uint32_t start_y, uint32_t end_y,uint32_t record_start,uint32_t record_end) {
     TxTile run_tile = *base;
     run_tile.same = 0;
     apply_pixel_art_at(w, x, start_y, &run_tile);
@@ -326,12 +327,22 @@ static void write_pixel_art_segment(TxWorld* w, TxBuf* out, TxTile* base,
         if (same_tile(&next, &run_tile) && run_count < 65535u) {
             run_count++;
         } else {
-            write_tile(w, out, &run_tile, run_count);
+            write_source_run(w,out,base,&run_tile,run_count,record_start,record_end);
             run_tile = next;
             run_count = 0;
         }
     }
-    write_tile(w, out, &run_tile, run_count);
+    write_source_run(w,out,base,&run_tile,run_count,record_start,record_end);
+}
+
+/* Preserve ignored legacy bytes (old lighting and frame normalization) on
+ * untouched runs, including either side of a split record. */
+static void write_source_run(TxWorld* w,TxBuf* out,const TxTile* source,
+                            const TxTile* tile,uint32_t repeat,uint32_t start,uint32_t end){
+    if(w->legacy_wld&&same_tile(source,tile)){
+        buf_bytes(out,w->file+start,end-start-(w->version>=25u?2u:0u));
+        if(w->version>=25u){extern void buf_u16le(TxBuf*,uint32_t);buf_u16le(out,repeat);}
+    }else write_tile(w,out,tile,repeat);
 }
 
 int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
@@ -385,22 +396,23 @@ int rebuild_tile_section_pixel_art(TxWorld* w, TxBuf* out) {
 
         while (y < world_h) {
             TxTile t;
-            if (!read_tile_at(w, &off, end, &t)) break;
+            uint32_t record_start=off;
+            if (!read_tile_at(w, &off, end, &t)) {out->ok=0;break;}
             uint32_t run = (uint32_t)t.same + 1u;
             uint32_t overlap_start = 0, overlap_end = 0;
 
             if (pixel_art_run_overlap(w, y, run, &overlap_start, &overlap_end)) {
                 if (overlap_start > y) {
                     uint32_t before_run = overlap_start - y;
-                    write_tile(w, out, &t, before_run - 1u);
+                    write_source_run(w,out,&t,&t,before_run-1u,record_start,off);
                 }
-                write_pixel_art_segment(w, out, &t, x, overlap_start, overlap_end);
+                write_pixel_art_segment(w, out, &t, x, overlap_start, overlap_end,record_start,off);
                 if (overlap_end < y + run) {
                     uint32_t after_run = (y + run) - overlap_end;
-                    write_tile(w, out, &t, after_run - 1u);
+                    write_source_run(w,out,&t,&t,after_run-1u,record_start,off);
                 }
             } else {
-                write_tile(w, out, &t, (uint32_t)t.same);
+                write_source_run(w,out,&t,&t,(uint32_t)t.same,record_start,off);
             }
             y += run;
         }
@@ -436,7 +448,7 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
     if (!out || !out->ok) {
         tx_set_error("TERRAX_INTERNAL_ERROR", "output buffer not initialized"); return 0;
     }
-    if (w->prepared_output && !w->prepared_output->ready && !world_has_pixel_art(w))
+    if (w->prepared_output && !w->prepared_output->ready && !world_has_pixel_art(w) && !w->legacy_wld)
         return tx_output_scan(w, rules, rule_count, out);
     const uint8_t* tile_src;
     uint32_t tile_src_len;
@@ -458,10 +470,11 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
 
     /* Column-major streaming pass (matching Terraria's tile order) */
     for (uint32_t x = 0; x < world_w; x++) {
-        uint32_t y = 0, remaining = 0;
+        uint32_t y = 0, remaining = 0,record_start=0;
         TxTile source;
         while (y < world_h) {
             if (!remaining) {
+                record_start=off;
                 if (!read_tile_at(w, &off, end, &source) || (uint32_t)source.same + 1u > world_h - y) {
                     out->ok = 0;
                     break;
@@ -494,7 +507,7 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
                     /* Segment before pixel art */
                     if (overlap_start > run_start) {
                         uint32_t before_run = (uint32_t)(overlap_start - run_start);
-                        write_tile(w, out, &t, before_run - 1u);
+                        write_source_run(w,out,&source,&t,before_run-1u,record_start,off);
                         tile_count += before_run;
                     }
 
@@ -532,20 +545,20 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
                                 run_count < 65535u) {
                                 run_count++;
                             } else {
-                                write_tile(w, out, &run_tile, run_count);
+                                write_source_run(w,out,&source,&run_tile,run_count,record_start,off);
                                 tile_count += run_count + 1u;
                                 run_tile = next;
                                 run_count = 0;
                             }
                         }
-                        write_tile(w, out, &run_tile, run_count);
+                        write_source_run(w,out,&source,&run_tile,run_count,record_start,off);
                         tile_count += run_count + 1u;
                     }
 
                     /* Segment after pixel art */
                     if (overlap_end < run_end) {
                         uint32_t after_run = (uint32_t)(run_end - overlap_end);
-                        write_tile(w, out, &t, after_run - 1u);
+                        write_source_run(w,out,&source,&t,after_run-1u,record_start,off);
                         tile_count += after_run;
                     }
 
@@ -555,7 +568,7 @@ int rebuild_tile_section(TxWorld* w, TxBuf* out,
             }
 
             /* No pixel art overlap: write original tile */
-            write_tile(w, out, &t, (uint32_t)t.same);
+            write_source_run(w,out,&source,&t,(uint32_t)t.same,record_start,off);
             tile_count += run;
             y += run;
         }
@@ -617,10 +630,6 @@ static int parse_material_frame(const char* json, int jlen, int pos, TxMaterialF
 
 int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTileRule** out_rules, uint32_t* out_count) {
     if (!tx_world_require_writable(w)) return -1;
-    if (w->legacy_wld) {
-        tx_set_error("TERRAX_NOT_SUPPORTED", "pre-88 worlds support reading and original-byte export only");
-        return -1;
-    }
     extern int json_find_key(const char* json, int jlen, const char* key);
     extern int json_array_count(const char* json, int jlen, int pos);
     extern int json_array_element(const char* json, int jlen, int pos, int index);
@@ -974,7 +983,8 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
     if (!rebuilt) {
         tx_internal_free(tile_buf.data);
         tx_internal_free(rules);
-        tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed");
+        extern char tx_last_error[];
+        if(!tx_last_error[0])tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed");
         return -1;
     }
     w->output_capture = w->prepared_output && w->prepared_output->ready;
