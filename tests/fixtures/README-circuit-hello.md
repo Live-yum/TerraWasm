@@ -6,6 +6,12 @@ no uploaded world data. The fixture stores the SHA-256 of its source generator,
 `features/circuit/domain/hello-example.mjs`. The native test additionally pins the
 exact JSON bytes; viewer's integration test regenerates and compares those bytes.
 
+The display is a continuous **10×10 square of 100 white gemspark blocks**. Each
+point in the 5×5 letter glyph occupies a 2×2 block. The layout declares
+`pitch = pixelSize = 2`, leaving no empty tile lanes inside the square. Ordinary
+wire-colour parity and physical relay gates drive the pixels; there are no host
+pixel writes, custom render overlays, or changes to the native wiring rules.
+
 Regenerate both copies from a viewer-app checkout with TerraWasm beside it:
 
 ```sh
@@ -16,11 +22,22 @@ sha256sum ../TerraWasm/tests/fixtures/circuit-hello.json
 After intentional circuit changes, update `fixtureHash` in `test_hello_display.js`.
 The native helper encodes the exported cells into a standard 326 WLD with a
 four-cell empty margin. Expected 5×5 letter pixels are independently declared in
-the test. Only native HitSwitch, UpdateMech and physical wire/gate propagation
+the test and expanded into all 100 physical cells. Every cell must remain an
+active white gemspark block, including the cells between the old sample points.
+Only native HitSwitch, UpdateMech and physical wire/gate propagation
 advance the display; no special display or clock behavior is supplied by the host.
 
 `build.ps1` runs this test in all/WLD profiles. The independent quality acceptance
 job repeats it on the uploaded Web artifact, checks its compiled commit identity,
-and uploads a report with the artifact hash. A disconnected-clock negative control
-checks that the display depends on the exported wires. The viewer integration also
-verifies actual full/selected transactional writes into another WLD.
+and uploads a report with the artifact hash. It verifies three HELLO cycles at
+29+1 tick boundaries, both independent L states, stop/restart, same-tick quick
+switching, and a WLD save/reopen. Three independent negative controls remove:
+
+- The blue clock wire at `(22,10)`: both state and screen stop at H.
+- The display feed at `(0,1)`: the five-state ring advances while all 100 display
+  cells remain H.
+- The blue wire on display cell `(5,3)`: the next E has first physical row
+  `##.#######`, with exactly that cell wrong and the other 99 cells correct.
+
+The viewer integration also verifies actual full/selected transactional writes
+into another WLD.
