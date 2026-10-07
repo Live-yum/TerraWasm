@@ -13,7 +13,7 @@ producer copies the probed value to `manifest.abi.stream` and requires it to mat
 between Node and Web, the native version query, and the export list:
 
 ```json
-{"version":2,"inputLease":true,"editPlan":true,"pngColumnCursors":true}
+{"version":2,"inputLease":true,"editPlan":true,"pngColumnCursors":true,"stampTiles":true}
 ```
 
 `terra_world_stream_abi_version()` returns 2. All four WLD export profiles include

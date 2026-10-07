@@ -81,7 +81,7 @@ static const char g_capabilities[] =
 #endif
 
 #if TERRAWASM_FEATURE_WLD
-#define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true}"
+#define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true,\"stampTiles\":true}"
 #else
 #define TERRAX_STREAM_IDENTITY_JSON ""
 #endif

@@ -411,12 +411,12 @@ else()
                     set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
                     add_custom_command(
                         OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                               "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld"
+                               "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
                         COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
-                        DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js
+                        DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js
                         VERBATIM)
                     add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                        "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld")
+                        "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld")
                     add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
                     target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG -fno-pie)
                     target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)

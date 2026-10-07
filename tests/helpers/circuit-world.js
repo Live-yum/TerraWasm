@@ -13,7 +13,7 @@ function makeCircuitWorld(cells, width = 40, height = 32) {
   const dimensions = Buffer.alloc(8); dimensions.writeInt32LE(500); dimensions.writeInt32LE(1000, 4);
   const at = header.indexOf(dimensions); assert.ok(at >= 0);
   header.writeInt32LE(height, at); header.writeInt32LE(width, at + 4);
-  const framed = new Set([4, 10, 21, 33, 49, 132, 135, 136, 138, 144, 235, 411, 419, 420, 424, 445]);
+  const framed = new Set([4, 10, 21, 33, 49, 132, 135, 136, 138, 144, 235, 314, 411, 419, 420, 424, 445]);
   const mask = Buffer.alloc(88); for (const type of framed) mask[type >>> 3] |= 1 << (type & 7);
   const important = Buffer.alloc(2); important.writeUInt16LE(700);
   const format = Buffer.concat([base.subarray(0, oldStart - 3), important, mask]);
@@ -91,16 +91,17 @@ async function makeDriver() {
       const bytes = Buffer.alloc(Math.max(old.length, e[3] + e[4])); old.copy(bytes); Buffer.from(M.HEAPU8.subarray(e[5], e[5] + e[4])).copy(bytes, e[3]); sources.set(e[2], bytes);
       okay(M._terra_circuit_world_ack(circuit));
     } else if (e[1] === 3 && !opening) {
-      assert.equal(e[4], e[10] * 16);
-      const values = M.HEAPU32.subarray(e[5] >>> 2, (e[5] >>> 2) + e[10] * 4);
-      for (let i = 0; i < values.length; i += 4) rows.push(Array.from(values.subarray(i, i + 4)));
+      const words = e[9] === 7 || e[9] === 8 ? 8 : 4;
+      assert.equal(e[4], e[10] * words * 4);
+      const values = M.HEAPU32.subarray(e[5] >>> 2, (e[5] >>> 2) + e[10] * words);
+      for (let i = 0; i < values.length; i += words) rows.push(Array.from(values.subarray(i, i + words)));
       okay(M._terra_circuit_world_ack(circuit));
     } else assert.fail('event does not need a host response');
     return rows;
   }
   function start(kind, o = {}) {
-    const records = o.records || [];
-    for (let i = 0; i < records.length; i++) M.HEAPU32.set([records[i].x, records[i].y, records[i].value || 0, 0], (data >>> 2) + i * 4);
+    const records = o.rawRecords || o.records || [];
+    for (let i = 0; i < records.length; i++) M.HEAPU32.set(o.rawRecords ? records[i] : [records[i].x, records[i].y, records[i].value || 0, 0], (data >>> 2) + i * 4);
     M.HEAPU32.set([1, kind, o.x || 0, o.y || 0, o.width || 1, o.height || 1, o.stride || 1, o.mask || 15, o.count || 0, records.length ? data : 0, records.length, o.source || 0, o.flags || 0, o.auxSource || 0, 0, 0], cp >>> 2);
     return M._terra_circuit_world_command(circuit, cp);
   }
@@ -118,7 +119,7 @@ async function makeDriver() {
     okay(M._terra_world_stream_adopt(openTask, 1, hp)); world = M.HEAPU32[hp >>> 2]; okay(M._terra_world_stream_close(openTask)); openTask = 0;
     okay(M._terra_circuit_world_begin(world, 2, sidecar ? 3 : 0, sidecar?.length || 0, maximum, hp)); circuit = M.HEAPU32[hp >>> 2]; return pump();
   }
-  return { M, open, close, command, start, event, respond, pump, stats, sources,
+  return { M, open, close, command, start, event, respond, pump, stats, sources, get worldHandle() { return world; },
     cancel() { okay(M._terra_circuit_world_cancel(circuit)); },
     cell(x, y) { const row = command(1, { x, y }).rows[0]; return { x: row[0], y: row[1], type: row[2] & 65535, flags: row[2] >>> 16 & 255, wires: row[2] >>> 24 & 15, fx: row[3] & 65535, fy: row[3] >>> 16 }; },
     dispose() { close(); for (const p of pointers) M._tx_free(p); },

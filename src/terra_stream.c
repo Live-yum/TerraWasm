@@ -8,6 +8,7 @@
 #include "terra_regions.h"
 #include "terra_stream_map.h"
 #include "terra_stream_png.h"
+#include "terra_tile_record.h"
 #include <string.h>
 #include <limits.h>
 
@@ -52,7 +53,12 @@ void txw_test_stream_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
 }
 #endif
 
-enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY,PNG_CURSOR_SCAN,WRITE_COPY,PNG_MARKER_SCAN };
+enum { OPEN_FORMAT=1,OPEN_PREFIX,OPEN_SUFFIX,OPEN_SCAN,WRITE_PREFIX,WRITE_SCAN,WRITE_SUFFIX,WRITE_PATCH,DONE,CANCELLED,ADOPTED,OP_SCAN,OP_REGION,OP_RESULT,OP_MEDIA,OP_MEDIA_SCAN,ORIGINAL_COPY,PNG_CURSOR_SCAN,WRITE_COPY,PNG_MARKER_SCAN,STAMP_VALIDATE };
+typedef struct StreamStamp {
+    uint32_t source_id,count,index,x,y,width,height;
+    uint32_t offset,length,previous_x,previous_y,has_previous;
+    uint8_t bytes[65536];
+} StreamStamp;
 typedef struct PngMarkerCursor {uint32_t offset,y;} PngMarkerCursor;
 typedef struct PngColumnCursor {
     uint32_t offset,y,remaining,cache_offset,cache_length;
@@ -104,6 +110,7 @@ typedef struct StreamTask {
     uint32_t chest_count,scan_end,indexed_map,full_png;
     TxStreamMap* map_encoder;
     TxStreamPng* png_encoder;
+    StreamStamp* stamp;
 } StreamTask;
 static StreamTask* current;
 static uint32_t generation=1, lease_generation=1;
@@ -392,6 +399,7 @@ static int apply_write_rules(StreamTask* t,TxTile* tile,uint32_t run){
     }
     return 1;
 }
+#include "terra_stream_stamp.inc"
 int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,const char* request,uint32_t* out){
     if(out&&valid_range(out,4))*out=0;
     TxWorld* source=tx_get_world(handle);
@@ -401,7 +409,7 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
     if(!t->operation||!t->request||!json_validate_document(t->request,(int)strlen(t->request)))goto invalid;
     if(tx_world_is_future(source) && (!strcmp(t->operation,"batch_update_tiles") ||
        !strcmp(t->operation,"header_patch") || !strcmp(t->operation,"replace_chests") ||
-       !strcmp(t->operation,"replace_bestiary") || !strcmp(t->operation,"edit_plan"))) {
+       !strcmp(t->operation,"replace_bestiary") || !strcmp(t->operation,"edit_plan") || !strcmp(t->operation,"stamp_tiles"))) {
         terra_world_stream_cancel(t->id);terra_world_stream_close(t->id);*out=0;
         tx_world_require_writable(source);return -1;
     }
@@ -423,9 +431,12 @@ int32_t terra_world_stream_operation_begin(uint32_t handle,const char* name,cons
         w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
         return 0;
     }
-    if(!strcmp(t->operation,"batch_update_tiles")||!strcmp(t->operation,"save")||!strcmp(t->operation,"header_patch")||!strcmp(t->operation,"replace_chests")||!strcmp(t->operation,"replace_bestiary")||!strcmp(t->operation,"edit_plan")){
+    if(!strcmp(t->operation,"batch_update_tiles")||!strcmp(t->operation,"save")||!strcmp(t->operation,"header_patch")||!strcmp(t->operation,"replace_chests")||!strcmp(t->operation,"replace_bestiary")||!strcmp(t->operation,"edit_plan")||!strcmp(t->operation,"stamp_tiles")){
         t->is_write=1;t->output.data=tx_persistent_alloc(WINDOW);t->output.cap=WINDOW;t->output.ok=t->output.data!=NULL;if(!t->output.ok)goto invalid;
-        if(!strcmp(t->operation,"edit_plan")){
+        if(!strcmp(t->operation,"stamp_tiles")){
+            if(!prepare_stamp(t,jlen))goto invalid;
+            t->prefix_length=w->starts[1];t->stage=STAMP_VALIDATE;
+        }else if(!strcmp(t->operation,"edit_plan")){
             if(!prepare_edit_plan(t))goto invalid;
             t->prefix_length=w->starts[1];t->stage=WRITE_PREFIX;
         }else if(!strcmp(t->operation,"batch_update_tiles")){
@@ -500,6 +511,11 @@ invalid:
 }
 static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uint32_t length){
     counter_add(&t->stats.source_bytes,length);
+    if(t->stamp&&t->event.source_id==t->stamp->source_id){
+        if(length>sizeof(t->stamp->bytes))return fail("TERRAX_INVALID_ARGUMENT","stamp window exceeds 64 KiB");
+        if(bytes!=t->stamp->bytes){memcpy(t->stamp->bytes,bytes,length);counter_add(&t->stats.input_copy_bytes,length);}
+        t->stamp->offset=offset;t->stamp->length=length;clear_event(t);return 0;
+    }
     if(t->stage==OPEN_FORMAT){
         if(length<16)return fail("TERRAX_TRUNCATED_FORMAT","format truncated");
         uint32_t version=u32(bytes),table=version>=135?26:6;
@@ -531,6 +547,7 @@ static int consume_source(StreamTask* t,uint32_t offset,const uint8_t* bytes,uin
     clear_event(t);return 0;
 }
 static uint8_t* input_destination(StreamTask* t){
+    if(t->stamp&&t->event.source_id==t->stamp->source_id)return t->stamp->bytes;
     if(t->png_cache_request)return t->png_source_cache+t->x*t->png_cache_stride;
     if(t->stage==OPEN_PREFIX)return t->candidate->file+t->event.offset;
     if(t->stage==OPEN_SUFFIX)return t->candidate->file+t->prefix_length+t->event.offset-t->original_end;
@@ -832,6 +849,11 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
         }else if(t->stage==OP_RESULT){
             if(t->result_offset<t->result_length){uint32_t n=t->result_length-t->result_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->result_offset,n,t->result+t->result_offset);break;}
             t->stage=DONE;
+        }else if(t->stage==STAMP_VALIDATE){
+            uint32_t record[8];int r=stamp_record(t,record);if(r<0)return -1;if(!r)break;
+            if(r==2){t->stamp->index=0;t->stamp->length=0;t->stamp->has_previous=0;t->stage=WRITE_PREFIX;continue;}
+            if(!stamp_validate_record(t,record))return fail("TERRAX_INVALID_STAMP","stamp records must be valid, ordered unique cells without section-backed objects");
+            t->stamp->index++;
         }else if(t->stage==WRITE_PREFIX){
             if(t->output_offset<t->prefix_length){uint32_t n=t->prefix_length-t->output_offset;if(n>WINDOW)n=WINDOW;event(t,TX_STREAM_OUTPUT,t->output_offset,n,w->file+t->output_offset);break;}
             if(t->copy_tiles){
@@ -853,7 +875,17 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
             counter_add(&t->stats.tile_copy_bytes,n);event(t,TX_STREAM_OUTPUT,t->output_offset,n,bytes);break;
         }else if(t->stage==WRITE_SCAN){
             if(t->output.len>WINDOW-2*TILE_MAX_BYTES){flush_output(t);break;}
-            if(t->x==(uint32_t)w->maxTilesX){if(!flush_merge(t)||finish_write_tiles(t)<0)return -1;if(flush_output(t))break;continue;}
+            if(t->x==(uint32_t)w->maxTilesX){if(t->stamp&&t->stamp->index!=t->stamp->count)return fail("TERRAX_INVALID_STAMP","stamp records extend outside the target world");if(!flush_merge(t)||finish_write_tiles(t)<0)return -1;if(flush_output(t))break;continue;}
+            if(t->stamp){
+                uint32_t record[8];int r=stamp_record(t,record);if(r<0)return -1;if(!r)break;
+                if(!t->remaining){if(!t->y)w->stream_columns[t->x]=t->output_offset+t->output.len;int got=read_next(t,&t->source_tile,NULL,NULL);if(got<0)return -1;if(!got)break;t->remaining=(uint32_t)t->source_tile.same+1;}
+                uint32_t run=t->remaining;TxTile tile=t->source_tile;
+                if(r==1){uint32_t x=t->stamp->x+record[0],y=t->stamp->y+record[1];
+                    if(x<t->x||(x==t->x&&y<t->y))return fail("TERRAX_INVALID_STAMP","stamp source changed while writing");
+                    if(x==t->x){if(y==t->y){if(!stamp_validate_record(t,record))return fail("TERRAX_INVALID_STAMP","stamp source changed after validation");if(!stamp_overlay(t,record,&tile))return fail("TERRAX_STAMP_OBJECT_CONFLICT","stamp would split or replace an existing framed object");run=1;t->stamp->index++;}else if(y-t->y<run)run=y-t->y;}}
+                write_tile(w,&t->output,&tile,run-1);if(!t->output.ok)return fail("TERRAX_WASM_OOM","stamp output window exhausted");t->remaining-=run;t->y+=run;
+                if(t->y==(uint32_t)w->maxTilesY){t->x++;t->y=0;}continue;
+            }
             if(!t->remaining){
                 if(!t->y)w->stream_columns[t->x]=t->output_offset+t->output.len;
                 if(want_stripe(t))break;
@@ -939,5 +971,6 @@ int32_t terra_world_stream_close(uint32_t id){
     if(t->map_encoder)tx_stream_map_free(t->map_encoder);if(t->png_encoder)tx_stream_png_free(t->png_encoder);
     if(t->input)tx_internal_free(t->input);if(t->output.data)tx_internal_free(t->output.data);
     if(t->stripe)tx_internal_free(t->stripe);if(t->stripe_nodes)tx_internal_free(t->stripe_nodes);
+    if(t->stamp)tx_internal_free(t->stamp);
     tx_internal_free(t);current=NULL;return 0;
 }

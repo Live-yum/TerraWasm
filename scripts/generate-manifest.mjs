@@ -49,8 +49,8 @@ const STREAM_EXPORTS = ['abi_version', 'acquire_input', 'commit_input', 'release
 function validateStreamAbi(stream, exports, label) {
   if (stream === undefined) return
   if (!stream || stream.version !== 2 || stream.inputLease !== true
-    || stream.editPlan !== true || stream.pngColumnCursors !== true
-    || Object.keys(stream).sort().join(',') !== 'editPlan,inputLease,pngColumnCursors,version') {
+    || stream.editPlan !== true || stream.pngColumnCursors !== true || stream.stampTiles !== true
+    || Object.keys(stream).sort().join(',') !== 'editPlan,inputLease,pngColumnCursors,stampTiles,version') {
     fail(`${label} stream ABI is invalid`)
   }
   for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
@@ -65,7 +65,7 @@ const PLAYER_WORKSPACE = {version:1,fieldPatches:true,rollbackJournal:true}
 export const CIRCUIT_EXPORTS = ['abi_version','create','close','stats','load','compile','patch','begin','step','cancel'].map(name => `_terra_circuit_${name}`)
 const CIRCUIT_ABI = {version:1,sparseTopology:true,pauseBeforeExpansion:true}
 export const CIRCUIT_WORLD_EXPORTS = ['abi_version','begin','step','supply','ack','command','stats','cancel','close'].map(name => `_terra_circuit_world_${name}`)
-const CIRCUIT_WORLD_ABI = {version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true}
+const CIRCUIT_WORLD_ABI = {version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true,fragments:true}
 function workspaceAbi(value, expected, exports, required, label) {
   if (value === undefined) return
   if (!value || Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',')

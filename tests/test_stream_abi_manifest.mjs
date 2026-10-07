@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {readFileSync} from 'node:fs'
 import {validateManifest, CIRCUIT_WORLD_EXPORTS} from '../scripts/generate-manifest.mjs'
-const stream={version:2,inputLease:true,editPlan:true,pngColumnCursors:true}
+const stream={version:2,inputLease:true,editPlan:true,pngColumnCursors:true,stampTiles:true}
 const exports=['_terra_build_info_json',...['abi_version','acquire_input','commit_input','release_input','get_stats'].map(x=>'_terra_world_stream_'+x)]
 const hash=x=>createHash('sha256').update(x).digest('hex')
 function fixture(){
@@ -15,7 +15,7 @@ test('source manifest validation accepts versioned stream contract and absent le
  const m=fixture();assert.deepEqual(validateManifest(m).abi.stream,stream);delete m.abi.stream;assert.equal(validateManifest(m).abi.stream,undefined)
 })
 test('stream claims require exact capability contract and every export',()=>{
- for(const change of [s=>s.version=1,s=>s.inputLease=false,s=>s.editPlan=false,s=>s.pngColumnCursors=false,s=>s.extra=true]){const m=fixture();change(m.abi.stream);assert.throws(()=>validateManifest(m),/stream ABI/)}
+ for(const change of [s=>s.version=1,s=>s.inputLease=false,s=>s.editPlan=false,s=>s.pngColumnCursors=false,s=>s.stampTiles=false,s=>s.extra=true]){const m=fixture();change(m.abi.stream);assert.throws(()=>validateManifest(m),/stream ABI/)}
  for(const name of exports.slice(1)){const m=fixture();m.abi.requiredExports=m.abi.requiredExports.filter(x=>x!==name);assert.throws(()=>validateManifest(m),/stream export/)}
 })
 test('every WLD export profile declares source ABI additions without modifying PLR',()=>{
@@ -24,7 +24,7 @@ test('every WLD export profile declares source ABI additions without modifying P
 })
 
 test('world circuit claims require the complete streaming, compact-state and atomic contract',()=>{
- const capability={version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true}
+ const capability={version:1,fileBacked:true,streamingWld:true,streamingTwld:true,compiledNetworks:true,compactState:true,atomicCommands:true,wallLayer:true,fragments:true}
  function worldFixture(){
   const m=fixture();m.abi.circuitWorld={...capability};m.abi.requiredExports.push(...CIRCUIT_WORLD_EXPORTS)
   m.abi.exportHash=hash(m.abi.requiredExports.join('\n')+'\n')
