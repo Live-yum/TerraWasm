@@ -54,8 +54,8 @@ test('source-specific anchor alternatives preserve trees, platforms, boulder hol
   const d = await makeDriver(), f = anchorFixture();
   try {
     d.open(f.world); const list = d.command(7, { count: 32, rawRecords: f.geometry });
-    assert.equal(list.rows.length, 15);
-    const expected = [[4,4,4,0],[12,5,1,8],[17,5,2,0],[24,4,3,0],[30,4,3,0],[36,4,5,0],[42,4,4,10],[50,3,3,0],[55,4,2,8],[60,3,2,0],[4,15,4,0],[12,16,2,0],[18,16,1,8],[24,16,1,8],[29,15,4,0]];
+    assert.equal(list.rows.length, 17);
+    const expected = [[4,4,4,0],[12,5,1,8],[17,5,2,0],[24,4,3,0],[30,4,3,0],[36,4,5,0],[42,4,4,10],[50,3,3,0],[55,4,2,8],[60,3,2,0],[4,15,4,0],[12,16,2,0],[18,16,1,8],[24,16,1,8],[29,15,4,0],[0,0,9,8],[24,0,3,8]];
     const output = new Map();
     for (const [x, y, count, flags] of expected) {
       const row = list.rows.find(r => r[1] === x && r[2] === y); assert.ok(row, `fragment at ${x},${y}`);
@@ -69,6 +69,8 @@ test('source-specific anchor alternatives preserve trees, platforms, boulder hol
     assert.ok(!output.get('42,4').has('42,6'), 'a chest cannot keep an invalid tabletop as a floor');
     assert.equal(activeType(output.get('50,3').get('50,3')), 1); assert.ok(!output.get('55,4').has('55,3'));
     assert.equal(activeType(output.get('60,3').get('60,3')), 225);
+    assert.equal(activeType(output.get('0,0').get('0,0')), 34, 'the complete boundary object survives');
+    assert.ok(!output.get('24,0').has('24,3'), 'one valid foot cannot replace the missing out-of-world ceiling');
   } finally { d.dispose(); }
 });
 

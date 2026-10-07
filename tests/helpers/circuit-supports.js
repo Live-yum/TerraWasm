@@ -56,6 +56,10 @@ function fixture() {
 // including cases where a visually adjacent block is not a legal anchor.
 function anchorFixture() {
   const { cells, geometry, put, object } = scene();
+  // Wiring excludes the outer two world rows; the wired interior part of a
+  // complete object still exercises an anchor just beyond the world edge.
+  object(34, 0, 0, 3, 3, 4, [2, 2, 1]);
+  object(10, 24, 0, 1, 3, 3, [0, 2, 1]); put(24, 3, { type: 1 });
   object(4, 5, 5, 1, 1, 13, [0, 0, 1], { fx: 22 });
   for (let y = 4; y <= 6; y++) put(4, y, { type: 5 });
   object(4, 12, 5, 1, 1, 13, [0, 0, 1], { fx: 22 });

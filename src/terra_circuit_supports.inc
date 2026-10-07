@@ -18,10 +18,13 @@ static int cf_support_compare(const void* a,const void* b) {
     return x->option<y->option?-1:x->option>y->option;
 }
 static int cf_support_cell(CxWorld* w,uint32_t object,uint32_t option,
-        int64_t x,int64_t y,uint32_t kind) {
+        uint32_t x,uint32_t y,uint32_t kind) {
     CxFragments* f=w->fragments;CxFragmentObject* o=f->objects+object;
     o->support_options|=1u<<option;
-    if(x<0||y<0||x>=w->width||y>=w->height) {
+    /* World dimensions are positive int32 values, and object spans <=255.
+     * A -1 neighbor wraps to UINT32_MAX and fails this check; valid positions
+     * need no i64 coordinates or conversions in the Wasm32 hot path. */
+    if(x>=w->width||y>=w->height) {
         o->support_bad|=1u<<option;return TCW_OK;
     }
     if(f->support_count==f->support_capacity) {
@@ -36,9 +39,9 @@ static int cf_support_cell(CxWorld* w,uint32_t object,uint32_t option,
     return TCW_OK;
 }
 static int cf_support_line(CxWorld* w,uint32_t object,uint32_t option,
-        int64_t x,int64_t y,uint32_t count,int dx,int dy,uint32_t kind) {
+        uint32_t x,uint32_t y,uint32_t count,uint32_t dx,uint32_t dy,uint32_t kind) {
     for(uint32_t i=0;i<count;i++) {
-        int s=cf_support_cell(w,object,option,x+(int64_t)i*dx,y+(int64_t)i*dy,kind);
+        int s=cf_support_cell(w,object,option,x+i*dx,y+i*dy,kind);
         if(s)return s;
     }
     return TCW_OK;
@@ -53,7 +56,7 @@ static int cf_support_wall(CxWorld* w,uint32_t object,uint32_t option) {
 }
 static int cf_support_object_prepare(CxWorld* w,uint32_t object) {
     CxFragmentObject o=w->fragments->objects[object];
-    int64_t x=o.x,y=o.y;int s=0;
+    uint32_t x=o.x,y=o.y;int s=0;
     /* A wired falling block is itself a mechanism payload. Its existing
      * vertical support chain is discovered in one already-decoded column. */
     if(cx_support_properties(o.type)&CX_SUPPORT_FALLING)
@@ -97,14 +100,14 @@ static int cf_support_object_prepare(CxWorld* w,uint32_t object) {
             return cf_support_cell(w,object,0,x+o.width,y,CF_SUPPORT_SOLID);
         case 13: {
             uint32_t direction=(o.frame&65535u)/22u%3u;
-            int64_t side=direction==1?x-1:direction==2?x+o.width:x;
+            uint32_t side=direction==1?x-1:direction==2?x+o.width:x;
             s=cf_support_cell(w,object,0,side,direction?y:y+o.height,direction?CF_SUPPORT_SIDE:CF_SUPPORT_FLOOR);if(s)return s;
             s=cf_support_wall(w,object,1);if(s||!direction)return s;
             return cf_support_line(w,object,2,side,y-1,3,0,1,CF_SUPPORT_TREE);
         }
         case 14:return cf_support_line(w,object,0,x,y+o.height,o.width,1,0,CF_SUPPORT_TABLE);
         case 15:case 16: {
-            int64_t side=o.anchor==15?x-1:x+o.width;
+            uint32_t side=o.anchor==15?x-1:x+o.width;
             s=cf_support_line(w,object,0,side,y,o.height,0,1,o.type==442u?CF_SUPPORT_SIDE:CF_SUPPORT_SOLID);
             if(s||o.type!=442u)return s;
             return cf_support_line(w,object,1,side,y-1,3,0,1,CF_SUPPORT_TREE);

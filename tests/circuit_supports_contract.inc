@@ -40,12 +40,12 @@ static void circuit_anchor_edges_contract(const char* directory) {
     uint32_t baseline=tx_native_heap_used();assert(!terra_circuit_world_begin(world,2,0,0,32u*1024u*1024u,hp));uint32_t handle=*hp;fragment_pump(handle);
     snprintf(path,sizeof(path),"%s/circuit-anchor-edges.geometry",directory);FILE* file=fopen(path,"rb");assert(file);fseek(file,0,SEEK_END);uint32_t bytes=ftell(file);rewind(file);uint32_t* geometry=alloc(bytes);assert(fread(geometry,1,bytes,file)==bytes);fclose(file);
     TerraCircuitWorldCommand cmd={0};cmd.abi_version=1;cmd.kind=TCW_FRAGMENTS;cmd.count=32;cmd.data_ptr=(uint32_t)(uintptr_t)geometry;cmd.data_count=bytes/16;
-    assert(!terra_circuit_world_command(handle,&cmd));fragment_pump(handle);assert(fragment_total==15&&fragment_row_count==15);
-    const uint32_t expected[][4]={{4,4,4,0},{12,5,1,8},{17,5,2,0},{24,4,3,0},{30,4,3,0},{36,4,5,0},{42,4,4,10},{50,3,3,0},{55,4,2,8},{60,3,2,0},{4,15,4,0},{12,16,2,0},{18,16,1,8},{24,16,1,8},{29,15,4,0}};
-    uint32_t descriptors[15*8];memcpy(descriptors,fragment_rows,sizeof(descriptors));
-    for(uint32_t i=0;i<15;i++) {
+    assert(!terra_circuit_world_command(handle,&cmd));fragment_pump(handle);assert(fragment_total==17&&fragment_row_count==17);
+    const uint32_t expected[][4]={{4,4,4,0},{12,5,1,8},{17,5,2,0},{24,4,3,0},{30,4,3,0},{36,4,5,0},{42,4,4,10},{50,3,3,0},{55,4,2,8},{60,3,2,0},{4,15,4,0},{12,16,2,0},{18,16,1,8},{24,16,1,8},{29,15,4,0},{0,0,9,8},{24,0,3,8}};
+    uint32_t descriptors[17*8];memcpy(descriptors,fragment_rows,sizeof(descriptors));
+    for(uint32_t i=0;i<17;i++) {
         const uint32_t* e=expected[i];uint32_t* d=NULL;
-        for(uint32_t j=0;j<15;j++)if(descriptors[j*8+1]==e[0]&&descriptors[j*8+2]==e[1])d=descriptors+j*8;
+        for(uint32_t j=0;j<17;j++)if(descriptors[j*8+1]==e[0]&&descriptors[j*8+2]==e[1])d=descriptors+j*8;
         if(!d||d[5]!=e[2]||d[7]!=e[3])fprintf(stderr,"anchor edge mismatch at %u,%u: cells=%u flags=%u\n",e[0],e[1],d?d[5]:0,d?d[7]:0);
         assert(d&&d[5]==e[2]&&d[7]==e[3]);
         cmd=(TerraCircuitWorldCommand){0};cmd.abi_version=1;cmd.kind=TCW_EXTRACT;cmd.mask=d[0];cmd.count=d[5];
@@ -59,6 +59,8 @@ static void circuit_anchor_edges_contract(const char* directory) {
         if(i==8)assert(!support_row(55,3));
         if(i==9)assert((support_row(60,3)[2]&65535u)==225u);
         if(i==11)assert((support_row(12,17)[2]&65535u)==435u);
+        if(i==15)assert((support_row(0,0)[2]&65535u)==34u);
+        if(i==16)assert(!support_row(24,3));
     }
     assert(!terra_circuit_world_close(handle));assert(tx_native_heap_used()==baseline);tx_free((uint32_t)(uintptr_t)geometry);
     free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;check(terra_world_close(world));world=0;free(source);source=NULL;
