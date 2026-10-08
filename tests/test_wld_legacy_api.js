@@ -165,7 +165,7 @@ for (const [target, factory] of [["Node", createNode], ["Web", webFactory]]) {
   });
 }
 
-test("legacy WLD rejects modern encoders without changing the original bytes", async () => {
+test("legacy WLD rejects unrepresentable edits without changing the original bytes", async () => {
   const M = await createNode();
   const bytes = makeLegacyWorld(87);
   const input = alloc(M, bytes), handleOut = alloc(M, 4), required = alloc(M, 8);
@@ -174,28 +174,84 @@ test("legacy WLD rejects modern encoders without changing the original bytes", a
     assert.equal(M._terra_world_open_from_buffer(input, bytes.length, handleOut), 0);
     handle = M.HEAPU32[handleOut >>> 2];
     const operations = [
-      ["batch_update_tiles", { rules: [{ where: { type: 3 }, patch: { type: 0 } }] }],
-      ["header_patch", { patch: { hardMode: true } }],
-      ["replace_bestiary", { kills: [], sightings: [], chats: [] }],
+      ["batch_update_tiles", { rules: [{ where: { type: 3 }, patch: { wire_yellow: true } }] }, "TERRAX_VALIDATION_ERROR"],
+      ["header_patch", { patch: { maxTilesX: 2 } }, "TERRAX_VALIDATION_ERROR"],
+      ["header_patch", { patch: { bloodMoon: true, boughtCat: true } }, "TERRAX_NOT_SUPPORTED"],
+      ["replace_bestiary", { kills: [], sightings: [], chats: [] }, "TERRAX_NOT_SUPPORTED"],
     ];
-    for (const [name, body] of operations) {
+    for (const [name, body, code] of operations) {
       const namePtr = alloc(M, Buffer.from(`${name}\0`));
       const requestPtr = alloc(M, Buffer.from(`${JSON.stringify(body)}\0`));
       try {
         assert.notEqual(M._terra_op_execute_json(handle, namePtr, requestPtr, 0, 0n, required), 0, name);
-        assert.equal(json(M, M._terra_info_get_last_error_json).code, "TERRAX_NOT_SUPPORTED");
+        assert.equal(json(M, M._terra_info_get_last_error_json).code, code);
       } finally { M._tx_free(requestPtr); M._tx_free(namePtr); }
       assert.deepEqual(save(M, handle), bytes);
     }
-    const rgba = alloc(M, Buffer.from([255, 0, 0, 255])), map = alloc(M, 32);
-    try {
-      assert.equal(M._txw_queue_pixel_art(handle, 0, 0, 1, 1, rgba, 4, map, 1, 1), -1);
-      assert.equal(json(M, M._terra_info_get_last_error_json).code, "TERRAX_NOT_SUPPORTED");
-    } finally { M._tx_free(map); M._tx_free(rgba); }
-    assert.deepEqual(save(M, handle), bytes);
   } finally {
     if (handle) M._terra_world_close(handle);
     M._tx_free(required); M._tx_free(handleOut); M._tx_free(input);
+  }
+  assert.equal(M._tx_native_heap_used(), 0);
+  assert.equal(M._tx_bridge_heap_used(), 0);
+});
+
+test("legacy WLD header and tile edits use the historical encoder and reopen byte-exactly", async () => {
+  const M = await createNode();
+  const bytes = makeLegacyWorld(87);
+  const input = alloc(M, bytes), handleOut = alloc(M, 4), required = alloc(M, 8);
+  let handle = 0;
+  try {
+    assert.equal(M._terra_world_open_from_buffer(input, bytes.length, handleOut), 0);
+    handle = M.HEAPU32[handleOut >>> 2];
+    const operations = [
+      ["header_patch", { patch: { worldName: "Patched Legacy", worldId: 123 } }],
+      ["batch_update_tiles", { rules: [{ where: { type: 3 }, patch: { wall: 1 } }] }],
+    ];
+    for (const [name, body] of operations) {
+      const namePtr = alloc(M, Buffer.from(`${name}\0`));
+      const requestPtr = alloc(M, Buffer.from(`${JSON.stringify(body)}\0`));
+      try { assert.equal(M._terra_op_execute_json(handle, namePtr, requestPtr, 0, 0n, required), 0, name); }
+      finally { M._tx_free(requestPtr); M._tx_free(namePtr); }
+    }
+    // The independent fixture writer checks the old wall field, frame bytes,
+    // both world identities and every untouched chest/sign/NPC byte.
+    const expected = makeLegacyWorld(87, { worldName: "Patched Legacy", worldId: 123, wall: 1 });
+    assert.deepEqual(save(M, handle), expected);
+    const committed = commit(M, handle);
+    handle = committed.handle;
+    assert.deepEqual(committed.bytes, expected);
+    assert.deepEqual(save(M, handle), expected);
+  } finally {
+    if (handle) M._terra_world_close(handle);
+    M._tx_free(required); M._tx_free(handleOut); M._tx_free(input);
+  }
+  assert.equal(M._tx_native_heap_used(), 0);
+  assert.equal(M._tx_bridge_heap_used(), 0);
+});
+
+test("legacy WLD pixel placement persists frames and removes overwritten object metadata", async () => {
+  const M = await createNode();
+  const bytes = makeLegacyWorld(87);
+  const input = alloc(M, bytes), handleOut = alloc(M, 4);
+  let handle = 0;
+  try {
+    assert.equal(M._terra_world_open_from_buffer(input, bytes.length, handleOut), 0);
+    handle = M.HEAPU32[handleOut >>> 2];
+    // TxPixelMap is 12 bytes; choose an important tile so the old encoder must
+    // write both zero frame coordinates, not only the tile ID.
+    const mapping = Buffer.from([255, 0, 0, 255, 3, 0, 0, 0, 0, 0, 1, 0]);
+    const rgba = alloc(M, mapping.subarray(0, 4)), map = alloc(M, mapping);
+    try { assert.equal(M._txw_queue_pixel_art(handle, 0, 0, 1, 1, rgba, 4, map, 1, 1), 0); }
+    finally { M._tx_free(map); M._tx_free(rgba); }
+    const expected = makeLegacyWorld(87, { frameX: 0, frameY: 0, chest: false, sign: false });
+    const committed = commit(M, handle);
+    handle = committed.handle;
+    assert.deepEqual(committed.bytes, expected);
+    assert.deepEqual(save(M, handle), expected);
+  } finally {
+    if (handle) M._terra_world_close(handle);
+    M._tx_free(handleOut); M._tx_free(input);
   }
   assert.equal(M._tx_native_heap_used(), 0);
   assert.equal(M._tx_bridge_heap_used(), 0);

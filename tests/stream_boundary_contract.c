@@ -25,6 +25,7 @@ extern void tx_internal_free(void*);
 static uint8_t* source;static uint32_t source_size,world;
 static uint32_t *hp;static TxStreamEvent* ep;static TxStreamInputLease* lp;static TxStreamStats* sp;
 static uint8_t* bridge;
+static uint32_t pump_work_units=1;
 static uint32_t get32(const uint8_t*p){return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t be(const uint8_t*p){return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];}
 static void check(int status){if(status){char error[512];uint64_t n;terra_info_get_last_error_json(error,sizeof(error),&n);fprintf(stderr,"status %d: %s\n",status,error);abort();}}
@@ -34,8 +35,8 @@ static uint32_t begin(const char*name,const char*request){char*n=string(name),*r
 static uint8_t* pump(uint32_t id,int leased,uint32_t*size){
  uint8_t* output=NULL;uint32_t cap=0;*size=0;
  for(uint32_t step=0;step<10000000;step++){
-  check(terra_world_stream_step(id,1,ep));TxStreamEvent first=*ep;
-  if(ep->kind){check(terra_world_stream_step(id,1,ep));assert(!memcmp(&first,ep,sizeof(first)));}
+  check(terra_world_stream_step(id,pump_work_units,ep));TxStreamEvent first=*ep;
+  if(ep->kind){check(terra_world_stream_step(id,pump_work_units,ep));assert(!memcmp(&first,ep,sizeof(first)));}
   if(ep->kind==TX_STREAM_NEED_SOURCE){assert(ep->source_id==1&&ep->offset<=source_size&&ep->length<=source_size-ep->offset);
    if(leased){check(terra_world_stream_acquire_input(id,lp));assert(lp->abi_version==2&&lp->length==ep->length&&lp->capacity>=lp->length);assert(terra_world_stream_acquire_input(id,lp)<0);
     memcpy((void*)(uintptr_t)lp->data_ptr,source+lp->offset,lp->length);uint32_t lease=lp->lease_id;
@@ -263,6 +264,7 @@ static void begin_error_contract(const char*path){
 #include "circuit_fragments_contract.inc"
 #include "circuit_objects_contract.inc"
 #include "circuit_supports_contract.inc"
+#include "stream_preview_contract.inc"
 int main(int argc,char**argv){assert(argc==2);
 #if defined(__GLIBC__) && !defined(__wasm__)
  mallopt(M_MMAP_MAX,0);mallopt(M_MMAP_THRESHOLD,1024*1024*1024);
@@ -272,6 +274,7 @@ int main(int argc,char**argv){assert(argc==2);
  char circuit_path[1024];snprintf(circuit_path,sizeof(circuit_path),"%s/circuit-fragments.wld",argv[1]);circuit_fragments_contract(circuit_path);circuit_stamp_contract(circuit_path);
  circuit_objects_contract(argv[1]);circuit_object_versions_stream_contract(argv[1]);circuit_supports_contract(argv[1]);circuit_anchor_edges_contract(argv[1]);circuit_falling_contract(argv[1]);
  char path[1024];snprintf(path,sizeof(path),"%s/high.wld",argv[1]);lease_contract(path);png_contract(path,0);
+ stream_preview_contract(argv[1]);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);png_contract(path,1);snprintf(path,sizeof(path),"%s/short-columns.wld",argv[1]);png_contract(path,2);snprintf(path,sizeof(path),"%s/small.wld",argv[1]);edit_contract(path);mixed_plan_contract(path);legacy_supply_contract(path);snprintf(path,sizeof(path),"%s/markers.wld",argv[1]);marker_contract(path,"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":3,\"line_width\":1,\"color\":\"#ff000080\"}]}");
  const char* marker_requests[]={"{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":0,\"line_width\":0,\"color\":\"#ff000080\"}]}",
  "{\"tile_markers\":[{\"tile_type\":1,\"locate\":0,\"radius\":60,\"line_width\":15,\"color\":\"#ff000080\"},{\"tile_type\":2,\"locate\":0,\"radius\":3,\"line_width\":1,\"color\":\"#0000ff40\"}]}"};

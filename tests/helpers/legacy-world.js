@@ -38,10 +38,11 @@ function makeLegacyWorld(version, options = {}) {
   const tileType = options.tileType === undefined ? 3 : options.tileType;
   const skipsFrame = (version < 28 && tileType === 4) || (version < 40 && tileType === 19) || (version < 195 && tileType === 49);
   bool(true); if (version <= 77) u8(tileType); else i16(tileType);
-  if (!skipsFrame) { i16(12); i16(34); }
+  if (!skipsFrame) { i16(options.frameX ?? 12); i16(options.frameY ?? 34); }
   if (version >= 48) { bool(false); } // tile paint
   if (version <= 25) bool(false); // obsolete tile flag
-  bool(false); // wall
+  const wall = options.wall || 0;
+  bool(wall !== 0); if (wall) { u8(wall); if (version >= 48) bool(false); }
   bool(false); // liquid
   if (version >= 33) bool(false); if (version >= 43) { bool(false); bool(false); }
   if (version >= 41) { bool(false); if (version >= 49) u8(0); }

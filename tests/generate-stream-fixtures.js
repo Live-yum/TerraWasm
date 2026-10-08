@@ -24,7 +24,19 @@ function fixture(width,height,noise) {
  return Buffer.concat([format,...sections]);
 }
 if(require.main===module){const dir=process.argv[2];fs.mkdirSync(dir,{recursive:true});for(const [name,w,h,n] of [['high',8400,2400,false],['noise',8400,257,true],['small',7,270,true],['markers',513,300,true],['short-columns',8400,2400,'short'],['marker-wide',513,385,false],['marker-narrow',7,1000,false]])fs.writeFileSync(path.join(dir,name+'.wld'),fixture(w,h,n));
+ for(const height of [8192,8193])fs.writeFileSync(path.join(dir,`preview-tall-${height}.wld`),fixture(31,height,false));
  const {makeCircuitWorld}=require('./helpers/circuit-world');const cells=new Map();
+ const previewCells=[];
+ for(let x=0;x<1537;x++)for(let y=0;y<129;y++){
+  const kind=(x*17+y*11)%13;
+  if(kind===0)continue;
+  const tile={x,y};
+  if(kind<10){tile.type=[1,2,21,135,419][kind%5];tile.fx=(kind%3)*18;tile.fy=(kind%4)*18;tile.paint=[0,1,13,25,30][kind%5];}
+  if(kind%3===0){tile.wall=1+kind;tile.wallPaint=kind%2?13:25;}
+  if(kind>=9){tile.liquid=255;tile.liquidType=1+(kind%4);}
+  previewCells.push(tile);
+ }
+ fs.writeFileSync(path.join(dir,'preview-rich.wld'),makeCircuitWorld(previewCells,1537,129));
  const cell=(x,y,v)=>cells.set(`${x},${y}`,{...(cells.get(`${x},${y}`)||{}),x,y,...v});
  for(let x=3;x<=9;x++)cell(x,4,{wires:1});for(let y=2;y<=8;y++)cell(6,y,{wires:y===4?3:2});
  for(let x=0;x<2;x++)for(let y=0;y<2;y++)cell(12+x,10+y,{type:132,fx:x*18,fy:y*18,paint:7,wall:2,wallPaint:9,wires:x===0&&y===0?1:x===1&&y===1?2:0});

@@ -734,6 +734,7 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
     if(t->event.kind){*out=t->event;return 0;}
     uint32_t budget=units?units:1;if(budget>4096)budget=4096;budget*=256;
     TxWorld* w=t->candidate;
+    if(w->prepared_output)tx_output_stream_begin_slice();
     while(budget--&&!t->event.kind){
         if(t->stage==ORIGINAL_COPY){
             if(t->output_offset==t->source_size){t->stage=DONE;continue;}

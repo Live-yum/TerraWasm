@@ -54,6 +54,7 @@ static void tx_render_refresh_color_tables(void) {
 #define SCALED_PREVIEW_CACHE_BUDGET (16u * 1024u * 1024u)
 #define SCALED_PREVIEW_CACHE_UNAVAILABLE (-2)
 #define OPEN_PREVIEW_MAX_RGBA_BYTES (16u * 1024u * 1024u)
+#define SCALED_PROJECTION_MAX_ROWS 8192u
 
 /* The initial 384px thumbnail is part of world opening. Unlike the public
  * preview renderer, this state machine keeps the tile-stream cursor between
@@ -420,6 +421,7 @@ void tx_output_free(TxPreparedOutput* p) {
   tx_persistent_free(p->rgb);
   tx_persistent_free(p->list_rgba);
   tx_persistent_free(p->preview_rgba);
+  tx_persistent_free(p->list_rows);
   tx_persistent_free(p->points.data);
   tx_map_base_free(p->map);
   tx_persistent_free(p);
@@ -449,12 +451,17 @@ int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, i
     tx_set_error("TERRAX_BAD_PREVIEW_SIZE", "prepared preview exceeds the image budget");
     return 0;
   }
+  /* A typical large world's two row tables cost 19 KiB. Keep exotic heights
+   * on the arithmetic path instead of adding an unbounded derived cache. */
+  uint32_t row_count = (uint32_t)w->maxTilesY <= SCALED_PROJECTION_MAX_ROWS
+      ? (uint32_t)w->maxTilesY + 1u : 0u;
   TxPreparedOutput* p = (TxPreparedOutput*)tx_persistent_alloc(sizeof(*p));
   if (!p) goto oom;
   memset(p, 0, sizeof(*p));
   w->prepared_output = p;
   p->width = (uint32_t)w->maxTilesX; p->height = (uint32_t)w->maxTilesY;
   p->list_width = pw; p->list_height = ph;
+  p->projected_x = UINT32_MAX;
   p->marker_count = count;
   if (count) memcpy(p->markers, markers, count * sizeof(*markers));
   if (preview_width) {
@@ -479,6 +486,15 @@ int tx_output_begin(TxWorld* w, const MapMarkerEntry* markers, uint32_t count, i
     for (uint32_t x = 0; x < p->width; x++) memcpy(p->rgb + (y * p->width + x) * 3u, bg, 3u);
   }
   prepare_scaled_background(w, p->list_rgba, pw, ph);
+  /* Allocate the optional acceleration only after all required image storage.
+   * Memory pressure leaves the original arithmetic path fully usable. */
+  if (row_count && (p->list_rows = (uint32_t*)tx_persistent_alloc(row_count * 2u * sizeof(uint32_t)))) {
+    p->preview_rows = p->list_rows + row_count;
+    for (uint32_t y = 0; y < row_count; y++) {
+      p->list_rows[y] = (uint32_t)((uint64_t)y * p->list_height / p->height);
+      p->preview_rows[y] = (uint32_t)((uint64_t)y * p->preview_height / p->height);
+    }
+  }
   return 1;
 oom:
   tx_output_clear(w);
@@ -489,10 +505,11 @@ oom:
 typedef struct OutputScanContext { TxTileRule* rules; uint32_t count; TxBuf* tiles; } OutputScanContext;
 
 static void prepare_scaled_run(TxPreparedOutput* p, uint8_t* rgba, uint32_t pw, uint32_t ph,
-                               uint32_t x, uint32_t y, uint32_t run, const uint8_t* c) {
-  uint32_t px = (uint32_t)((uint64_t)x * pw / p->width);
-  uint32_t py0 = (uint32_t)((uint64_t)y * ph / p->height);
-  uint32_t py1 = (uint32_t)((uint64_t)(y + run) * ph / p->height);
+                               uint32_t px, const uint32_t* rows,
+                               uint32_t y, uint32_t run, const uint8_t* c) {
+  int indexed = rows && y <= p->height && run <= p->height - y;
+  uint32_t py0 = indexed ? rows[y] : (uint32_t)((uint64_t)y * ph / p->height);
+  uint32_t py1 = indexed ? rows[y + run] : (uint32_t)((uint64_t)(y + run) * ph / p->height);
   if (py1 <= py0) py1 = py0 + 1u;
   if (py1 > ph) py1 = ph;
   for (uint32_t py = py0; py < py1; py++) {
@@ -531,18 +548,30 @@ static int prepare_output_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* t,
   p->source_runs++;
   if (p->map && !tx_map_base_run(w, p->map, x, y, t, run)) return 0;
   if (!tile_is_non_empty(t)) return 1;
+  if (p->projected_x != x) {
+    p->projected_x = x;
+    p->list_x = (uint32_t)((uint64_t)x * p->list_width / p->width);
+    p->preview_x = (uint32_t)((uint64_t)x * p->preview_width / p->width);
+  }
   uint8_t c[4];
   color_for_tile(t, y, p->height, w->worldSurface, w->rockLayer, c);
   if (p->rgb) for (uint32_t yy = y; yy < y + run; yy++) memcpy(p->rgb + (yy * p->width + x) * 3u, c, 3u);
-  if (p->preview_rgba) prepare_scaled_run(p, p->preview_rgba, p->preview_width, p->preview_height, x, y, run, c);
-  prepare_scaled_run(p, p->list_rgba, p->list_width, p->list_height, x, y, run, c);
+  if (p->preview_rgba) prepare_scaled_run(p, p->preview_rgba, p->preview_width, p->preview_height,
+      p->preview_x, p->preview_rows, y, run, c);
+  prepare_scaled_run(p, p->list_rgba, p->list_width, p->list_height,
+      p->list_x, p->list_rows, y, run, c);
   return 1;
 }
 
 int tx_output_stream_run(TxWorld* w, uint32_t x, uint32_t y, TxTile* tile, uint32_t run) {
   OutputScanContext scan = {0};
-  tx_render_refresh_color_tables();
   return prepare_output_run(w, x, y, tile, run, &scan);
+}
+
+void tx_output_stream_begin_slice(void) {
+  /* Stream steps are synchronous: refresh once here, while retaining palette
+   * changes made by callers between steps. No per-record getter calls. */
+  tx_render_refresh_color_tables();
 }
 
 void tx_output_stream_finish(TxWorld* w) {
