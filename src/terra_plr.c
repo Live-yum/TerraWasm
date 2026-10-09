@@ -3686,7 +3686,7 @@ static terrax_world_status plr_open_from_encrypted(
     uint32_t plain_length = 0u;
     uint8_t *plain = plr_decrypt(buffer, buffer_length, &plain_length);
     if (!plain && !g_plr_oom && (buffer_length & 15u) == 0u) {
-        /* Some xindong saves contain unused zero-filled capacity after the
+        /* Some saves contain unused zero-filled capacity after the
          * encrypted payload. Never trim partial blocks or nonzero data, and
          * require the regional signature plus the full parser below. */
         static const uint8_t zero_block[16] = {0};
@@ -3697,7 +3697,8 @@ static terrax_world_status plr_open_from_encrypted(
         if (payload_length < buffer_length) {
             plain = plr_decrypt(buffer, payload_length, &plain_length);
             if (plain && (plain_length < 12u ||
-                !plr_memory_equal(plain + 4u, "xindong", 7u) || plain[11] != PLR_PLAYER_FILE_TYPE)) {
+                (!plr_memory_equal(plain + 4u, "xindong", 7u) &&
+                 !plr_memory_equal(plain + 4u, "relogic", 7u)) || plain[11] != PLR_PLAYER_FILE_TYPE)) {
                 free(plain);
                 plain = NULL;
             }

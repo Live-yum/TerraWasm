@@ -424,8 +424,53 @@ test("regional PLR preserves real xindong metadata, supports switching, and reje
       wrong.write('xindong', 4); wrong[11] = 2;
       assert.throws(() => openBuffer(module, encryptPlr(wrong)));
       wrong[11] = 3; wrong.write('relogic', 4);
-      assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(16)])), 'padding exception is regional only');
+      assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(16)])), 'changing a regional header must not hide a mismatched binary layout');
     } finally { module._terra_player_close(handle); }
+  }
+});
+
+test("relogic PLR accepts unused zero capacity while preserving full validation and original bytes", async () => {
+  for (const factory of [TerraWorldWasm, TerraWorldWasmWeb]) {
+    const module = await factory(factory === TerraWorldWasmWeb ? {
+      wasmBinary: fs.readFileSync(path.join(__dirname, '..', 'build', 'terrax_world_wasm_web.wasm')),
+    } : {});
+    const heap = module._tx_heap_used();
+    for (const version of [135, 279, 315, 326]) {
+      const model = historicalModel(version);
+      model.name = 'zero-capacity-contract';
+      model.inventory[0] = { itemType: 8, stack: 42, prefix: 0, favorited: false };
+      const seed = openJson(module, model);
+      let payload;
+      try { payload = encode(module, seed); } finally { module._terra_player_close(seed); }
+      const bytes = Buffer.concat([payload, Buffer.alloc(272)]);
+      const handle = openBuffer(module, bytes);
+      try {
+        assert.equal(getField(module, handle, '/version'), version);
+        assert.equal(getField(module, handle, '/inventory/0/stack'), 42);
+        assert.deepEqual(encode(module, handle), bytes, 'clean export retains every original byte');
+        assert.equal(setField(module, handle, '/name', 'edited-capacity-contract'), 0);
+        const reopened = openBuffer(module, encode(module, handle));
+        try {
+          assert.equal(getField(module, reopened, '/name'), 'edited-capacity-contract');
+          assert.equal(getField(module, reopened, '/inventory/0/stack'), 42);
+        } finally { module._terra_player_close(reopened); }
+      } finally { module._terra_player_close(handle); }
+      const damaged = Buffer.from(bytes); damaged[damaged.length - 1] = 1;
+      assert.throws(() => openBuffer(module, damaged), 'nonzero trailing data remains invalid');
+      assert.throws(() => openBuffer(module, Buffer.concat([payload, Buffer.alloc(1)])), 'partial blocks remain invalid');
+      const plain = decryptPlr(payload);
+      for (const altered of [
+        Buffer.from(plain.subarray(0, 24)),
+        Buffer.concat([plain, Buffer.from([1])]),
+      ]) assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(altered), Buffer.alloc(272)])), 'complete fields and EOF remain required');
+      const badPadding = Buffer.from(payload); badPadding[badPadding.length - 1] ^= 1;
+      assert.throws(() => openBuffer(module, Buffer.concat([badPadding, Buffer.alloc(272)])), 'PKCS padding remains checked');
+      const wrong = Buffer.from(plain); wrong.write('invalid', 4);
+      assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(272)])), 'unknown metadata remains invalid');
+      wrong.write('relogic', 4); wrong[11] = 2;
+      assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(272)])), 'wrong file type remains invalid');
+    }
+    assert.equal(module._tx_heap_used(), heap, 'capacity fallback must not leak rejected or accepted documents');
   }
 });
 
