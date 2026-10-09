@@ -7,6 +7,10 @@ struct TxPreparedOutput {
     uint8_t *rgb, *list_rgba, *preview_rgba;
     uint32_t width, height, list_width, list_height;
     uint32_t preview_width, preview_height;
+    /* Integer coordinate projection is identical for every run in a column.
+     * Both optional row tables share the allocation owned by list_rows. */
+    uint32_t *list_rows, *preview_rows;
+    uint32_t projected_x, list_x, preview_x;
     MapMarkerEntry markers[256];
     uint32_t marker_count;
     TxBuf points;
@@ -26,6 +30,7 @@ int tx_scan_tile_markers(TxWorld*, const MapMarkerEntry*, uint32_t, TxBuf*, TxTi
 int tx_output_begin(TxWorld*, const MapMarkerEntry*, uint32_t, int, uint32_t);
 int tx_output_scan(TxWorld*, TxTileRule*, uint32_t, TxBuf*);
 int tx_output_stream_run(TxWorld*, uint32_t, uint32_t, TxTile*, uint32_t);
+void tx_output_stream_begin_slice(void);
 void tx_output_stream_finish(TxWorld*);
 void tx_output_free(TxPreparedOutput*);
 void tx_output_clear(TxWorld*);
