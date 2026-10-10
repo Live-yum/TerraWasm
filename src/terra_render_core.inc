@@ -1438,13 +1438,16 @@ static void draw_entity_points_rgb(TxWorld* w, uint8_t* rgb, uint32_t pw, uint32
   }
 }
 
-static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rgba,
-                                                         uint32_t preview_w, uint32_t preview_h,
-                                                         uint32_t row_start, uint32_t row_count,
-                                                         const MapMarkerEntry* chest_markers,
-                                                         uint32_t chest_marker_count,
-                                                         uint32_t count_matches) {
-  if (!w || !rgba || chest_marker_count == 0u ||
+typedef void (*TxChestMarkerVisitor)(TxWorld*, int32_t, int32_t, int32_t,
+                                     const MapMarkerEntry*, void*);
+
+/* Visit exactly the first matching occupied slot in each chest. Both the
+ * buffered renderer and the optional streaming cache share this decoder. */
+static uint32_t visit_matching_chest_markers(TxWorld* w,
+                                            const MapMarkerEntry* chest_markers,
+                                            uint32_t chest_marker_count,
+                                            TxChestMarkerVisitor visit, void* context) {
+  if (!w || chest_marker_count == 0u ||
       w->pointer_count <= 2u || w->starts[2] >= w->ends[2]) {
     return 0u;
   }
@@ -1493,15 +1496,8 @@ static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rg
         }
 
         if (matched_marker) {
-          draw_marker_ring_rows(
-              rgba, preview_w, preview_h, row_start, row_count,
-              (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
-              chest_x, chest_y, matched_marker);
-          draw_marker_icon_rows(
-              w, rgba, preview_w, preview_h, row_start, row_count,
-              (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY,
-              chest_x, chest_y, matched_item_id, matched_marker);
-          if (count_matches) matched++;
+          visit(w, chest_x, chest_y, matched_item_id, matched_marker, context);
+          matched++;
         }
       }
     }
@@ -1510,6 +1506,33 @@ static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rg
     w->file_len = saved_len;
     return matched;
   }
+}
+
+typedef struct TxChestMarkerRows {
+  uint8_t* rgba;
+  uint32_t width, height, start, count;
+} TxChestMarkerRows;
+
+static void draw_chest_marker_rows(TxWorld* w, int32_t x, int32_t y, int32_t item_id,
+                                    const MapMarkerEntry* marker, void* context) {
+  TxChestMarkerRows* rows = (TxChestMarkerRows*)context;
+  draw_marker_ring_rows(rows->rgba, rows->width, rows->height, rows->start, rows->count,
+      (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY, x, y, marker);
+  draw_marker_icon_rows(w, rows->rgba, rows->width, rows->height, rows->start, rows->count,
+      (uint32_t)w->maxTilesX, (uint32_t)w->maxTilesY, x, y, item_id, marker);
+}
+
+static uint32_t draw_matching_chest_markers_preview_rows(TxWorld* w, uint8_t* rgba,
+                                                         uint32_t preview_w, uint32_t preview_h,
+                                                         uint32_t row_start, uint32_t row_count,
+                                                         const MapMarkerEntry* chest_markers,
+                                                         uint32_t chest_marker_count,
+                                                         uint32_t count_matches) {
+  if (!rgba) return 0u;
+  TxChestMarkerRows rows = {rgba, preview_w, preview_h, row_start, row_count};
+  uint32_t matched = visit_matching_chest_markers(
+      w, chest_markers, chest_marker_count, draw_chest_marker_rows, &rows);
+  return count_matches ? matched : 0u;
 }
 
 static uint32_t draw_matching_chest_markers_preview(TxWorld* w, uint8_t* rgba,

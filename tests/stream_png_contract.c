@@ -38,6 +38,14 @@ void tx_render_stream_color(TxWorld* w, const TxTile* t, uint32_t y, uint8_t* c)
 void tx_render_stream_fixed_block(TxBuf* b, uint32_t* bits, uint32_t* count,
     const uint8_t* data, uint32_t n, uint32_t last) { write_fixed_block(b,bits,count,data,n,last); }
 void tx_render_stream_finish_bits(TxBuf* b, uint32_t* bits, uint32_t* count) { bw_finish(b,bits,count); }
+TxPngChestCache* tx_render_stream_chest_cache(TxWorld* w, const MapMarkerEntry* markers, uint32_t count) {
+    (void)w; (void)markers; (void)count; return NULL;
+}
+void tx_render_stream_chest_cache_rows(TxWorld* w, const TxPngChestCache* cache,
+    uint8_t* rgba, uint32_t width, uint32_t height, uint32_t start, uint32_t rows, const MapMarkerEntry* markers) {
+    (void)w; (void)cache; (void)rgba; (void)width; (void)height; (void)start; (void)rows; (void)markers;
+}
+void tx_render_stream_chest_cache_free(TxPngChestCache* cache) { (void)cache; }
 void tx_render_stream_markers(TxWorld* w, uint8_t* rgba, uint32_t width, uint32_t height,
     uint32_t y, uint32_t rows, const MapMarkerEntry* chests, uint32_t nc,
     const MapMarkerEntry* tiles, uint32_t nt, uint32_t phase) {
