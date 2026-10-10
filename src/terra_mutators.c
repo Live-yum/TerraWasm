@@ -36,7 +36,11 @@ extern int parse_header(TxWorld *w);
 #define TX_MUTATOR_MAX_JSON_BYTES (1024u * 1024u)
 #define TX_MUTATOR_MAX_STRING_BYTES 255u
 #define TX_MAX_HEADER_PATCH_FIELDS 256u
-#define TX_MUTATOR_MAX_CHESTS 1000u
+/* WorldFile's counted chest section uses Main.chest's 8000 entries. The
+ * pre-88 format instead writes exactly 1000 Boolean presence slots. Do not
+ * reuse the counted capacity when padding that historical representation. */
+#define TX_MUTATOR_MAX_COUNTED_CHESTS 8000u
+#define TX_MUTATOR_LEGACY_CHEST_SLOTS 1000u
 #define TX_MUTATOR_MAX_CHEST_ITEMS 504u
 #define TX_MUTATOR_MAX_BESTIARY_ENTRIES 4096u
 /* Terraria NPCKillsTracker.POSITIVE_KILL_COUNT_CAP; fits its signed Int32 field. */
@@ -1113,6 +1117,7 @@ static TX_COLD_MUTATOR int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section
 
 static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32_t *chest_count,uint32_t shared_slots){
     int first=1,done=0,seen_chests=0;
+    const uint32_t max_chests=w->legacy_wld?TX_MUTATOR_LEGACY_CHEST_SLOTS:TX_MUTATOR_MAX_COUNTED_CHESTS;
     if (!jp_take(p,'{'))return 0;
     while (!done){
         char key[32];uint32_t key_len=0u;
@@ -1128,7 +1133,7 @@ static int parse_chests_request(TxWorld *w,TxJsonParser *p,TxBuf *section,uint32
         while (!array_done){
             if (!jp_array_next(p,&array_first,&array_done))return 0;
             if (array_done)break;
-            if (*chest_count>=TX_MUTATOR_MAX_CHESTS)
+            if (*chest_count>=max_chests)
                 return mut_fail("TERRAX_VALIDATION_ERROR","world has too many chests");
             if (!parse_chest(w,p,section,shared_slots))return 0;
             (*chest_count)++;
@@ -1172,7 +1177,7 @@ TX_COLD_MUTATOR int tx_mutate_replace_chests(TxWorld *w,const char *request,uint
         if (!encoded.ok)mut_fail("TERRAX_WASM_OOM","failed to encode chest section");
         return -1;
         }
-    if(w->legacy_wld){for(uint32_t i=chest_count;i<TX_MUTATOR_MAX_CHESTS;i++)buf_u8(&encoded,0u);}
+    if(w->legacy_wld){for(uint32_t i=chest_count;i<TX_MUTATOR_LEGACY_CHEST_SLOTS;i++)buf_u8(&encoded,0u);}
     else{encoded.data[0]=(uint8_t)chest_count;encoded.data[1]=(uint8_t)(chest_count>>8u);}
     if(!encoded.ok){tx_internal_free(encoded.data);return mut_error("TERRAX_WASM_OOM","failed to encode chest presence flags");}
     uint32_t override_mark=tx_mark();

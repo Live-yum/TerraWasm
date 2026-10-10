@@ -991,6 +991,11 @@ static uint32_t scale_marker_measure(uint8_t source_value,
 
 static void blend_marker_pixel(uint8_t* dst, const uint8_t rgba[4]) {
   uint32_t alpha = rgba[3];
+  if (alpha == 255u) {
+    dst[0] = rgba[0]; dst[1] = rgba[1]; dst[2] = rgba[2]; dst[3] = 255u;
+    return;
+  }
+  if (alpha == 0u) { dst[3] = 255u; return; }
   uint32_t inv = 255u - alpha;
   dst[0] = (uint8_t)((rgba[0] * alpha + dst[0] * inv + 127u) / 255u);
   dst[1] = (uint8_t)((rgba[1] * alpha + dst[1] * inv + 127u) / 255u);
@@ -1168,10 +1173,6 @@ static void draw_marker_icon_rows(TxWorld* w, uint8_t* rgba,
 
   if (!w || !rgba || !marker || !world_w || !world_h ||
       !preview_w || !preview_h || row_start >= preview_h || !row_count) return;
-  atlas = &w->icon_atlas;
-  icon_index = terra_icon_index_for_item(atlas, item_id);
-  if (icon_index < 0) return;
-
   center_x = clamp_preview_coord(world_x, world_w, preview_w);
   center_y = clamp_preview_coord(world_y, world_h, preview_h);
   radius = scale_marker_measure(marker->radius, world_w, world_h, preview_w, preview_h);
@@ -1180,23 +1181,34 @@ static void draw_marker_icon_rows(TxWorld* w, uint8_t* rgba,
   side = terra_icon_side_for_radius(inner_radius);
   if (!side) return;
 
-  icon_size = atlas->icon_size;
-  source_x0 = atlas->x_offsets[icon_index];
-  source_y0 = atlas->y_offsets[icon_index];
   start_x = (int32_t)center_x - (int32_t)(side / 2u);
   start_y = (int32_t)center_y - (int32_t)(side / 2u);
   row_end = row_start + row_count;
   if (row_end < row_start || row_end > preview_h) row_end = preview_h;
+  int32_t first_y = (int32_t)row_start - start_y;
+  int32_t last_y = (int32_t)row_end - start_y;
+  int32_t first_x = -start_x;
+  int32_t last_x = (int32_t)preview_w - start_x;
+  if (first_y < 0) first_y = 0;
+  if (last_y > (int32_t)side) last_y = (int32_t)side;
+  if (first_x < 0) first_x = 0;
+  if (last_x > (int32_t)side) last_x = (int32_t)side;
+  if (first_y >= last_y || first_x >= last_x) return;
+  // Most entity icons are outside this streaming strip. Reject them before
+  // walking the atlas ID table or testing every off-strip source row.
+  atlas = &w->icon_atlas;
+  icon_index = terra_icon_index_for_item(atlas, item_id);
+  if (icon_index < 0) return;
+  icon_size = atlas->icon_size;
+  source_x0 = atlas->x_offsets[icon_index];
+  source_y0 = atlas->y_offsets[icon_index];
 
-  for (uint32_t local_y = 0u; local_y < side; local_y++) {
+  for (uint32_t local_y = (uint32_t)first_y; local_y < (uint32_t)last_y; local_y++) {
     int32_t py = start_y + (int32_t)local_y;
-    if (py < (int32_t)row_start || py >= (int32_t)row_end ||
-        py < 0 || py >= (int32_t)preview_h) continue;
     {
       uint32_t source_y = (local_y * icon_size) / side;
-      for (uint32_t local_x = 0u; local_x < side; local_x++) {
+      for (uint32_t local_x = (uint32_t)first_x; local_x < (uint32_t)last_x; local_x++) {
         int32_t px = start_x + (int32_t)local_x;
-        if (px < 0 || px >= (int32_t)preview_w) continue;
         {
           uint32_t source_x = (local_x * icon_size) / side;
           const uint8_t* source = (const uint8_t*)(uintptr_t)atlas->rgba +
@@ -1213,6 +1225,11 @@ static void draw_marker_icon_rows(TxWorld* w, uint8_t* rgba,
 
 static void blend_marker_pixel_rgb(uint8_t* dst, const uint8_t rgba[4]) {
   uint32_t alpha = rgba[3];
+  if (alpha == 255u) {
+    dst[0] = rgba[0]; dst[1] = rgba[1]; dst[2] = rgba[2];
+    return;
+  }
+  if (alpha == 0u) return;
   uint32_t inv = 255u - alpha;
   dst[0] = (uint8_t)((rgba[0] * alpha + dst[0] * inv + 127u) / 255u);
   dst[1] = (uint8_t)((rgba[1] * alpha + dst[1] * inv + 127u) / 255u);
@@ -1371,10 +1388,23 @@ static const MapMarkerEntry* find_marker_by_id(const MapMarkerEntry* markers,
 static void draw_entity_points_rows(TxWorld* w, uint8_t* rgba, uint32_t pw, uint32_t ph,
                                     uint32_t row_start, uint32_t row_count,
                                     const MapMarkerEntry* markers, const TxBuf* points) {
-  if (!points) return;
+  if (!points || !row_count || row_start >= ph) return;
+  uint32_t row_end = row_start + row_count;
+  if (row_end < row_start || row_end > ph) row_end = ph;
+  int full_size = pw == (uint32_t)w->maxTilesX && ph == (uint32_t)w->maxTilesY;
   const TxMarkerPoint* entries = (const TxMarkerPoint*)points->data;
   for (uint32_t i = 0; i < points->len / sizeof(TxMarkerPoint); i++) {
     const TxMarkerPoint* point = &entries[i];
+    const MapMarkerEntry* marker = &markers[point->marker_index];
+    uint32_t center_y = full_size
+        ? (point->y <= 0 ? 0u : (uint32_t)point->y >= ph ? ph - 1u : (uint32_t)point->y)
+        : clamp_preview_coord(point->y, w->maxTilesY, ph);
+    uint32_t radius = full_size ? marker->radius
+        : scale_marker_measure(marker->radius, w->maxTilesX, w->maxTilesY, pw, ph);
+    if (!radius) radius = 1u;
+    // Ring and centered square icon both fit inside this vertical bound. Keep
+    // the original point order for overlaps and partially transparent colors.
+    if ((uint64_t)center_y + radius < row_start || (int64_t)center_y - radius >= row_end) continue;
     draw_marker_ring_rows(rgba, pw, ph, row_start, row_count,
         w->maxTilesX, w->maxTilesY, point->x, point->y, &markers[point->marker_index]);
     draw_marker_icon_rows(w, rgba, pw, ph, row_start, row_count,
@@ -1382,6 +1412,14 @@ static void draw_entity_points_rows(TxWorld* w, uint8_t* rgba, uint32_t pw, uint
         markers[point->marker_index].icon_id, &markers[point->marker_index]);
   }
 }
+
+#ifdef TERRAX_TESTING
+void txw_test_render_entity_rows(TxWorld* w, uint8_t* rgba, uint32_t width, uint32_t height,
+                                 uint32_t start, uint32_t count,
+                                 const MapMarkerEntry* markers, const TxBuf* points) {
+  draw_entity_points_rows(w, rgba, width, height, start, count, markers, points);
+}
+#endif
 
 static void draw_entity_points_rgb(TxWorld* w, uint8_t* rgb, uint32_t pw, uint32_t ph,
                                    const MapMarkerEntry* markers, const TxBuf* points) {

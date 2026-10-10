@@ -604,7 +604,9 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 #### `replace_chests`
 
-适用于 WLD 294+。宝箱上限 1000，每箱卡槽上限 504，名称上限 255 UTF-8 字节。`x/y` 必须位于世界边界内；`items` 长度必须严格等于 `maxItems`，空卡槽必须写为 `null`。物品限制：`stack` 1..32767、`itemType` 1..1000000、`prefix` 0..255。
+宝箱数量按文件布局限制：WLD 88+ 的计数节支持 **8000** 个宝箱；WLD 1..87 的旧布局仍然写入恰好 **1000** 个存在标记（空位置补 `false`），因此最多 1000 个宝箱。这与 [指定 Terraria 源码的 `SaveChests` / `LoadChests` 和旧版加载器](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.IO/WorldFile.cs) 一致。超过该布局上限时整次修改被拒绝，保留先前的世界和 section override。
+
+WLD 294+ 每箱卡槽上限 504；WLD 88..293 必须保持源文件的共享卡槽数；更早版本固定为 20（版本 <58）或 40。`x/y` 必须位于世界边界内；`items` 长度必须严格等于 `maxItems`，空卡槽必须写为 `null`。名称最多 255 UTF-8 字节，版本 <85 必须为空。下面是现代版本的请求格式：物品限制为 `stack` 1..32767、`itemType` 1..1000000、`prefix` 0..255；历史版本继续使用其原有名称、堆叠数和前缀规则。每次请求的 JSON 上限仍为 1 MiB。
 
 ```json
 {
