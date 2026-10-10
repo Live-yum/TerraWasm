@@ -2,6 +2,7 @@
 /* * terra_wld.c -- WLD binary parser for TerraWasm. * * Pure C implementation that parses raw .wld bytes int o TxWorld metadata, * streams tiles on-demand, and provides JSON serializers/deserializers * for all 11 world sections matching the TerraX V2 API. * * Uses bump allocator from terra_mem.c (tx_malloc, tx_alloc, TxBuf). * Uses json_string, json_u32, etc. from terra_json.c for JSON output. */
 
 #include "terra_types.h"
+#include "terra_header.h"
 #include "terra_reader.h"
 #include "terra_legacy.h"
 #if defined(__clang__) && defined(__EMSCRIPTEN__)
@@ -124,6 +125,30 @@ uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok){
             }
         shift+=7u;
         }
+    return 0;
+    }
+int tx_header_string_view(const TxWorld *w,uint32_t offset,TxHeaderString *view){
+    const uint8_t *source=NULL;
+    uint32_t end=0u;
+    if(!w||!view)goto invalid;
+    if(w->section_overrides[0].active){
+        source=w->section_overrides[0].data;
+        end=w->section_overrides[0].len;
+        }
+    else if(w->file&&w->pointer_count&&w->starts[0]<=w->ends[0]&&w->ends[0]<=w->file_len){
+        source=w->file+w->starts[0];
+        end=w->ends[0]-w->starts[0];
+        }
+    if(source&&offset<end){
+        uint32_t start=offset;int ok=0;
+        uint32_t length=rd_7bit(source,end,&offset,&ok);
+        if(ok&&terra_reader_has(offset,length,end)){
+            view->encoded=source+start;view->prefix_len=offset-start;view->len=length;
+            return 1;
+            }
+        }
+invalid:
+    tx_set_error("TERRAX_STATE_ERROR","string is outside the active header");
     return 0;
     }
 void rd_string_copy(const uint8_t *p,uint32_t len,uint32_t *off,char *out,uint32_t cap){
@@ -340,6 +365,7 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
             uint32_t n=tmp.len<TX_MAX_NAME-1u?tmp.len:TX_MAX_NAME-1u;
             memcpy(w->seed,tmp.data,n);
             w->seed[n]=0;
+            tx_internal_free(tmp.data);
             }
         else{
             rd_string_copy(p,len,&off,w->seed,TX_MAX_NAME);
@@ -625,6 +651,12 @@ static void tx_record_header_bool(TxWorld *w,const char *json_name,uint32_t abso
     /* Seeds (>=288/296) */if (w->version>=288u)TX_RD_HEADER_BOOL(vampireSeed,"vampireSeed");
     if (w->version>=296u)TX_RD_HEADER_BOOL(infectedSeed,"infectedSeed");
     /* meteorShowerCount, coinRain (>=291) */if (w->version>=291u){
+        /* These are the final fields before v297. A short speculative
+         * banner layout must fail instead of clamping its reader to end. */
+        if(!terra_reader_has(off,8u,len)){
+            tx_set_error("TERRAX_TRUNCATED_HEADER","event counters exceed header bounds");
+            return 0;
+            }
         w->tempmeteorShowerCount=rd_u32le(p,len,&off);
         w->tempcoinRain=rd_u32le(p,len,&off);
         }
@@ -1153,6 +1185,30 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     buf_u8(b, (uint8_t)('0' + sec % 10));
     buf_u8(b, '"');
 }
+/* Source strings need not be NUL terminated, and may exceed the fixed-size
+ * summaries in TxWorld. Emit escaped runs without another retained copy. */
+static void json_bounded_string(TxBuf *b,const uint8_t *source,uint32_t length){
+    buf_u8(b,'"');
+    uint32_t run=0u;
+    for(uint32_t i=0u;i<length&&b->ok;i++){
+        uint8_t c=source[i];
+        if(c=='"'||c=='\\'||c<32u){
+            buf_bytes(b,source+run,i-run);
+            if(c=='"'||c=='\\'){buf_u8(b,'\\');buf_u8(b,c);}
+            else if(c=='\n')buf_cstr(b,"\\n");
+            else if(c=='\r')buf_cstr(b,"\\r");
+            else if(c=='\t')buf_cstr(b,"\\t");
+            else{
+                static const char hex[]="0123456789abcdef";
+                buf_cstr(b,"\\u00");buf_u8(b,hex[c>>4]);buf_u8(b,hex[c&15u]);
+                }
+            run=i+1u;
+            }
+        }
+    if(length>run)buf_bytes(b,source+run,length-run);
+    buf_u8(b,'"');
+    }
+
 /* --- header section (all fields, matching buildHeaderJson order) --- */TX_COLD_PARSER void serialize_header_json(TxWorld *w,TxBuf *b){
     uint8_t *p=w->file;
     uint32_t flen=w->file_len;
@@ -1162,10 +1218,14 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
         flen=w->section_overrides[0].len;
         header_base=w->starts[0];
         }
+    TxHeaderString name,seed;
+    if(!tx_header_string_view(w,0u,&name)||
+       (w->version>179u&&!tx_header_string_view(w,name.prefix_len+name.len,&seed))){b->ok=0;return;}
     buf_cstr(b," { \"worldName\":");
-    json_string(b,w->worldName);
+    json_bounded_string(b,name.encoded+name.prefix_len,name.len);
     buf_cstr(b,",\"seed\":");
-    json_string(b,w->seed);
+    if(w->version>179u)json_bounded_string(b,seed.encoded+seed.prefix_len,seed.len);
+    else json_string(b,w->seed);
     buf_cstr(b,",\"worldGeneratorVersion\":");
     json_u64(b,w->worldGeneratorVersion);
     buf_cstr(b,",\"uniqueId\":");
@@ -1370,14 +1430,15 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->anglerFinishedSize);
     buf_cstr(b,",\"anglerWhoFinishedToday\":[");
     {
-        uint32_t aoff=w->anglersOff-header_base;
+        uint32_t aoff=w->anglersOff-w->starts[0];
         for (uint32_t i=0;
         i<w->anglerFinishedSize;
         i++){
             if (i)buf_u8(b,',');
-            char aname[256];
-            rd_string_copy(p,flen,&aoff,aname,256);
-            json_string(b,aname);
+            TxHeaderString angler;
+            if(!tx_header_string_view(w,aoff,&angler)){b->ok=0;return;}
+            json_bounded_string(b,angler.encoded+angler.prefix_len,angler.len);
+            aoff+=angler.prefix_len+angler.len;
             }
         }
     buf_cstr(b,"],\"savedAngler\":");
@@ -1629,41 +1690,15 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
     json_u32(b,w->legacySkip);
     /* manifestJson */buf_cstr(b,",\"manifestJson\":");
     {
-        uint32_t moff=0u,mlen=0u;
+        TxHeaderString manifest={0};
         if (w->version>=299u){
-            uint32_t end=w->section_overrides[0].active?flen:w->starts[1];
-            int ok=0;
-            if (w->maniFestOff>=header_base&&end<=flen){
-                moff=w->maniFestOff-header_base;
-                mlen=rd_7bit(p,end,&moff,&ok);
-                }
-            if (!ok||mlen!=w->maniFestLen||!terra_reader_has(moff,mlen,end)){
+            if (!tx_header_string_view(w,w->maniFestOff-w->starts[0],&manifest)||manifest.len!=w->maniFestLen){
                 tx_set_error("TERRAX_STATE_ERROR","manifest is outside the active header");
                 b->ok=0;
                 return;
                 }
             }
-        /* Copy source spans directly: manifests exceed 4 KiB, and a bounded
-         * string need not have a NUL terminator. Only JSON escapes add bytes. */
-        buf_u8(b,'"');
-        uint32_t run=0u;
-        for (uint32_t i=0u;i<mlen&&b->ok;i++){
-            uint8_t c=p[moff+i];
-            if (c=='"'||c=='\\'||c<32u){
-                buf_bytes(b,p+moff+run,i-run);
-                if (c=='"'||c=='\\'){buf_u8(b,'\\');buf_u8(b,c);}
-                else if (c=='\n')buf_cstr(b,"\\n");
-                else if (c=='\r')buf_cstr(b,"\\r");
-                else if (c=='\t')buf_cstr(b,"\\t");
-                else{
-                    static const char hex[]="0123456789abcdef";
-                    buf_cstr(b,"\\u00");buf_u8(b,hex[c>>4]);buf_u8(b,hex[c&15u]);
-                    }
-                run=i+1u;
-                }
-            }
-        if (mlen>run)buf_bytes(b,p+moff+run,mlen-run);
-        buf_u8(b,'"');
+        json_bounded_string(b,manifest.encoded?manifest.encoded+manifest.prefix_len:NULL,manifest.len);
         }
     buf_cstr(b,"\n}\n");
     }
@@ -2252,21 +2287,21 @@ truncated:
     uint32_t end=overridden?w->section_overrides[section].len:(section<0?0u:w->ends[section]);
     uint8_t *p=overridden?w->section_overrides[section].data:w->file;
     uint32_t len=overridden?end:w->file_len;
-    uint8_t valid=0; char name[TX_MAX_NAME]={0}; int32_t id=0;
+    uint8_t valid=0;const uint8_t *name=NULL;uint32_t name_len=0u;int32_t id=0;
     if (p && end<=len && terra_reader_has(off,1u,end) && rd_u8(p,end,&off)) {
-        int ok=0; uint32_t name_start=off;
+        int ok=0;
         uint32_t size=rd_7bit(p,end,&off,&ok);
         if (ok && terra_reader_has(off,size,end)) {
+            name=p+off;name_len=size;
             off+=size;
             if (terra_reader_has(off,4u,end)) {
                 id=rd_i32le(p,end,&off);
-                rd_string_copy(p,end,&name_start,name,TX_MAX_NAME);
                 valid=1;
             }
         }
     }
     buf_cstr(b," { \"valid\":"); json_bool(b,valid);
-    buf_cstr(b,",\"worldName\":"); json_string(b,valid?name:"");
+    buf_cstr(b,",\"worldName\":"); json_bounded_string(b,name,valid?name_len:0u);
     buf_cstr(b,",\"worldId\":"); json_i32(b,valid?id:0);
     buf_cstr(b,"\n}\n");
     }

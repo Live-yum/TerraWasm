@@ -585,6 +585,8 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 `magic` 只能是 `relogic` 或 `xindong`，`uniqueId` 必须是标准 UUID，64 位整数可传 JSON 整数或十进制字符串，动态数组的 count 必须与数组长度一致，出生点必须位于目标世界边界内。未知字段、当前版本不存在的字段、重复字段和空 patch 都会原子拒绝。调用方可以只提交所需字段；页面层是否开放尺寸、种子和版本编辑不影响 WASM 接口能力。
 
+未修改的 `worldName`、字符串 `seed`、钓鱼任务完成者名称和 `manifestJson` 从当前 header 的有界原始范围复制，保留完整 UTF-8 内容及原长度前缀；不会经过内部 159 字节的名称/种子摘要。header JSON 和 footer 世界名也返回完整字符串。显式修改世界名、字符串种子或 manifest 时按实际 JSON 字段长度分配，仍受整份请求 1 MiB 上限约束。WLD 179 的数字种子继续使用原 UInt32 格式；修改世界名或世界 ID 时，footer 同步使用完整世界名。普通保存、重复 header override 和流式 `edit_plan` 遵循相同规则。
+
 ```json
 {
   "patch": {

@@ -91,6 +91,8 @@ static void chest_version_contract(uint32_t version) {
 
 static void header_208_modes_contract(void) {
     TxWorld w={0};w.maxTilesX=w.maxTilesY=100;
+    uint8_t names[]={0,0};w.file=names;w.file_len=sizeof names;
+    w.pointer_count=1;w.ends[0]=sizeof names;
     strcpy(w.uuid,"00000000-0000-0000-0000-000000000000");
     w.creationTime=UINT64_C(0x0807060504030201);w.moonType=9;
     TxJsonParser request={"",0u,0u};

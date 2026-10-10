@@ -1,5 +1,6 @@
 /* Verified WLD section encoders used by explicit mutating operations. */
 #include "terra_types.h"
+#include "terra_header.h"
 #include <float.h>
 #include <limits.h>
 
@@ -27,6 +28,7 @@ extern int set_result_buf(TxBuf *b);
 extern int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t len);
 extern void *memcpy(void *dst,const void *src,unsigned long n);
 extern void *memset(void *dst,int value,unsigned long n);
+extern int memcmp(const void *a,const void *b,unsigned long n);
 extern uint32_t tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok);
@@ -641,6 +643,28 @@ static int patch_expected_count(TxJsonParser *request,TxPatchField *fields,uint3
     return 1;
     }
 
+static int encode_header_string(TxBuf *header,TxWorld *w,TxJsonParser *request,
+                                TxPatchField *fields,uint32_t count,const char *name,
+                                uint32_t source_offset){
+    TxPatchField *field=patch_find(fields,count,name);
+    if(field){
+        /* The request is already bounded to 1 MiB. Decode at most its own
+         * lexical length, rather than a fixed-size metadata summary. */
+        uint32_t cap=field->value_end-field->value_start+1u,length=0u;
+        char *text=(char*)tx_alloc(cap);
+        if(!text)return mut_fail("TERRAX_WASM_OOM","failed to allocate header string");
+        TxJsonParser value;patch_parser(request,field,&value);
+        int ok=jp_string(&value,text,cap,&length)&&jp_end(&value);
+        if(ok){buf_7bit(header,length);buf_bytes(header,text,length);}
+        tx_internal_free(text);return ok&&header->ok;
+        }
+    TxHeaderString source;
+    if(!tx_header_string_view(w,source_offset,&source))return 0;
+    /* Preserve the original prefix too; no C-string/NUL or summary limit. */
+    buf_bytes(header,source.encoded,source.prefix_len+source.len);
+    return header->ok;
+    }
+
 static int encode_string_array(TxBuf *header,TxWorld *w,TxJsonParser *request,
                                TxPatchField *fields,uint32_t count){
     TxPatchField *field=patch_find(fields,count,"anglerWhoFinishedToday");
@@ -660,13 +684,13 @@ static int encode_string_array(TxBuf *header,TxWorld *w,TxJsonParser *request,
             }
         if(!jp_end(&value)||!values.ok){tx_internal_free(values.data);return 0;}
         }else{
-        const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
-        uint32_t offset=w->anglersOff-base;actual=w->anglerFinishedSize;
+        uint32_t offset=w->anglersOff-w->starts[0];actual=w->anglerFinishedSize;
         for(uint32_t i=0;i<actual;i++){
-            int ok=0;uint32_t length=rd_7bit(source,source_len,&offset,&ok);
-            if(!ok||offset>source_len||length>source_len-offset){tx_internal_free(values.data);return mut_fail("TERRAX_STATE_ERROR","angler data is outside the active header");}
-            if(!values.data)buf_init(&values,length+16u);
-            buf_7bit(&values,length);buf_bytes(&values,source+offset,length);offset+=length;
+            TxHeaderString source;
+            if(!tx_header_string_view(w,offset,&source)){tx_internal_free(values.data);return 0;}
+            uint32_t bytes=source.prefix_len+source.len;
+            if(!values.data)buf_init(&values,bytes);
+            buf_bytes(&values,source.encoded,bytes);offset+=bytes;
             }
         }
     if(!patch_expected_count(request,fields,count,"anglerWhoFinishedTodayCount",actual,UINT32_MAX)){tx_internal_free(values.data);return 0;}
@@ -750,17 +774,7 @@ static int encode_spawn_points(TxBuf *header,TxWorld *w,TxJsonParser *request,
 
 static int encode_manifest(TxBuf *header,TxWorld *w,TxJsonParser *request,
                            TxPatchField *fields,uint32_t count){
-    TxPatchField *field=patch_find(fields,count,"manifestJson");
-    if(field){
-        uint32_t cap=field->value_end-field->value_start+1u;char *text=(char*)tx_alloc(cap);uint32_t length=0u;
-        if(!text)return mut_fail("TERRAX_WASM_OOM","failed to allocate manifest string");
-        TxJsonParser value;patch_parser(request,field,&value);int ok=jp_string(&value,text,cap,&length)&&jp_end(&value);
-        if(ok){buf_7bit(header,length);buf_bytes(header,text,length);}tx_internal_free(text);return ok&&header->ok;
-        }
-    const uint8_t *source;uint32_t source_len,base;header_source_view(w,&source,&source_len,&base);
-    uint32_t offset=w->maniFestOff-base;int ok=0;uint32_t length=rd_7bit(source,source_len,&offset,&ok);
-    if(!ok||offset>source_len||length>source_len-offset)return mut_fail("TERRAX_STATE_ERROR","manifest is outside the active header");
-    buf_7bit(header,length);buf_bytes(header,source+offset,length);return header->ok;
+    return encode_header_string(header,w,request,fields,count,"manifestJson",w->maniFestOff-w->starts[0]);
     }
 
 static int header_versions_compatible(uint32_t current,uint32_t next){
@@ -784,12 +798,15 @@ static int encode_header_model(TxWorld *w,TxJsonParser *request,TxPatchField *fi
 #define WF32(name,member) do{if(!write_f32_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
 #define WF64(name,member) do{if(!write_f64_field(header,request,fields,field_count,name,w->member))return 0;}while(0)
     char text[TX_MAX_NAME];uint32_t length=0u;
-    if(!patch_string(request,fields,field_count,"worldName",w->worldName,text,sizeof(text),&length))return 0;
-    buf_7bit(header,length);buf_bytes(header,text,length);
+    TxHeaderString name;
+    if(!tx_header_string_view(w,0u,&name)||
+       !encode_header_string(header,w,request,fields,field_count,"worldName",0u))return 0;
     if(version>=179u){
-        if(!patch_string(request,fields,field_count,"seed",w->seed,text,sizeof(text),&length))return 0;
-        if(version==179u){uint64_t seed=0u;if(!decimal_u64(text,length,UINT32_MAX,&seed))return 0;buf_u32le(header,(uint32_t)seed);}
-        else{buf_7bit(header,length);buf_bytes(header,text,length);}
+        if(version==179u){
+            if(!patch_string(request,fields,field_count,"seed",w->seed,text,sizeof(text),&length))return 0;
+            uint64_t seed=0u;if(!decimal_u64(text,length,UINT32_MAX,&seed))return 0;buf_u32le(header,(uint32_t)seed);
+            }
+        else if(!encode_header_string(header,w,request,fields,field_count,"seed",name.prefix_len+name.len))return 0;
         WU64("worldGeneratorVersion",worldGeneratorVersion);
         }
     if(version>=181u){
@@ -989,14 +1006,19 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     if(!parse_header(&candidate)){tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;}
     TxBuf footer={0};
     uint32_t footer_index=next_version>=220u?10u:next_version>=210u?9u:next_version>=189u?8u:next_version>=170u?7u:next_version>=116u?6u:5u;
-    if(next_version>=7u&&(candidate.worldId!=w->worldId||!tx_streq_c(candidate.worldName,w->worldName))){
+    TxHeaderString old_name,new_name;
+    if(!tx_header_string_view(w,0u,&old_name)||!tx_header_string_view(&candidate,0u,&new_name)){
+        tx_internal_free(encoded.data);tx_internal_free(bitmap.data);return -1;
+        }
+    int name_changed=old_name.len!=new_name.len||memcmp(old_name.encoded+old_name.prefix_len,new_name.encoded+new_name.prefix_len,new_name.len);
+    if(next_version>=7u&&(candidate.worldId!=w->worldId||name_changed)){
         if(footer_index>=w->pointer_count){
             tx_internal_free(encoded.data);tx_internal_free(bitmap.data);
             return mut_error("TERRAX_NOT_SUPPORTED","world identity patch requires a footer section");
             }
-        uint32_t name_len=tx_strlen(candidate.worldName);
-        buf_init(&footer,name_len+10u);buf_u8(&footer,1u);buf_7bit(&footer,name_len);
-        buf_bytes(&footer,candidate.worldName,name_len);buf_u32le(&footer,(uint32_t)candidate.worldId);
+        uint32_t name_bytes=new_name.prefix_len+new_name.len;
+        buf_init(&footer,name_bytes+5u);buf_u8(&footer,1u);
+        buf_bytes(&footer,new_name.encoded,name_bytes);buf_u32le(&footer,(uint32_t)candidate.worldId);
         if(!footer.ok){
             tx_internal_free(footer.data);tx_internal_free(encoded.data);tx_internal_free(bitmap.data);
             return mut_error("TERRAX_WASM_OOM","failed to allocate matching world footer");
