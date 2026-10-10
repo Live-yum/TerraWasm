@@ -1949,7 +1949,7 @@ struct TxStreamMap {
     MapChestPoint* points;
     uint32_t point_count,width,height,cpr,cpc,chunks,strip_bytes,cx,cy,pass,active,pending,total;
     uint32_t emit_index,emit_offset,fallback;
-    uint32_t *strip,*sizes,*offsets,*staged_offsets;
+    uint32_t *strip,*sizes,*offsets,*staged_offsets,*icon_values;
     TxMapColorCacheEntry colors[512];
     uint32_t color_count;
     TxBuf header,output,staged;
@@ -1959,6 +1959,7 @@ void tx_stream_map_free(TxStreamMap* p){
     if(p->points)tx_internal_free(p->points);if(p->strip)tx_internal_free(p->strip);
     if(p->sizes)tx_internal_free(p->sizes);if(p->offsets)tx_internal_free(p->offsets);
     if(p->staged_offsets)tx_internal_free(p->staged_offsets);
+    if(p->icon_values)tx_internal_free(p->icon_values);
     if(p->header.data)tx_internal_free(p->header.data);if(p->output.data)tx_internal_free(p->output.data);
     if(p->staged.data)tx_internal_free(p->staged.data);tx_internal_free(p);
 }
@@ -1986,6 +1987,16 @@ TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_
         }
     }
     buf_init(&p->header,4096);write_map_header(&p->header,w);if(!p->header.ok)goto failed;
+    /* The same atlas pixels recur in every matching container/entity. Resolve
+     * each pixel with the existing nearest-colour path once per task, as the
+     * buffered encoder already does. Allocate it after required storage;
+     * allocation failure retains the exact slow path. Task ownership prevents
+     * stale values when a later task uses another atlas or palette. */
+    uint64_t icon_bytes=(uint64_t)w->icon_atlas.atlas_width*w->icon_atlas.atlas_height*4u;
+    if(p->point_count&&w->icon_atlas.rgba&&icon_bytes&&icon_bytes<=4u*1024u*1024u){
+        p->icon_values=(uint32_t*)tx_alloc((uint32_t)icon_bytes);
+        if(p->icon_values)memset(p->icon_values,0,(uint32_t)icon_bytes);
+    }
     return p;
 failed:tx_stream_map_free(p);return NULL;
 }
@@ -2019,7 +2030,7 @@ int tx_stream_map_run(TxStreamMap* p,uint32_t x,uint32_t y,const TxTile* t,uint3
 }
 int tx_stream_map_finish_strip(TxStreamMap* p){
     if(!p->active)return 0;p->active=0;
-    for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,NULL);
+    for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,p->icon_values);
     if(!p->pass){
         for(uint32_t cy=0;cy<p->cpc;cy++){
             TxBuf bytes={0};if(!compress_chunk_exact(p->strip+cy*4096,&bytes))return 0;
