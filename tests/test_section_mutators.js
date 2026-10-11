@@ -560,9 +560,10 @@ test("empty and maximum bounded section replacements round-trip", async () => {
     assert.deepEqual(roundTripChest.items[503], maxItems[503]);
     assert.deepEqual(getSection(M, reopened.handle, "bestiary"), largeBestiary);
 
-    const maximumChests = Array.from({ length: 1000 }, (_, index) => ({
-      x: index,
-      y: 0,
+    const worldWidth = getSection(M, reopened.handle, "header").maxTilesX;
+    const maximumChests = Array.from({ length: 8000 }, (_, index) => ({
+      x: index % worldWidth,
+      y: Math.floor(index / worldWidth),
       name: `chest-${index}`,
       maxItems: 0,
       items: [],
@@ -583,13 +584,14 @@ test("malformed, unknown, duplicate, oversized, and out-of-range fields fail ato
   let opened;
   try {
     opened = openBytes(M, TEST_BYTES);
+    const worldWidth = getSection(M, opened.handle, "header").maxTilesX;
     const cases = [
       ["header_patch", { patch: { notAHeaderField: true } }],
       ["header_patch", { patch: { hardMode: 1 } }],
       ["replace_chests", { chests: [], unknown: true }],
       ["replace_chests", { chests: [{ x: 1, y: 2, name: "x".repeat(256), maxItems: 1, items: [null] }] }],
       ["replace_chests", { chests: [{ x: 1, y: 2, name: "", maxItems: 1, items: [{ stack: 32768, itemType: 1, prefix: 0 }] }] }],
-      ["replace_chests", { chests: Array.from({ length: 1001 }, (_, index) => ({ x: index, y: 0, name: "", maxItems: 0, items: [] })) }],
+      ["replace_chests", { chests: Array.from({ length: 8001 }, (_, index) => ({ x: index % worldWidth, y: Math.floor(index / worldWidth), name: "", maxItems: 0, items: [] })) }],
       ["replace_bestiary", { kills: [{ persistentNpcId: "x".repeat(256), killCount: 1 }], sightings: [], chats: [] }],
       ...[1_000_000_000, 2_147_483_647, 2_147_483_648, 4_294_967_296, -1, 0.5, "12", null].map(killCount =>
         ["replace_bestiary", { kills: [{ persistentNpcId: "Terraria.Guide", killCount: 7 }, { persistentNpcId: "Terraria.Zombie", killCount }], sightings: [], chats: [] }]),

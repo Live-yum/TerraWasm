@@ -17,6 +17,7 @@
 #include "terra_output.h"
 #include "terra_regions.h"
 #include "terra_render_task.h"
+#include "terra_stream_png.h"
 
 extern const uint8_t* tx_get_tile_colors(void);
 extern uint32_t tx_get_tile_color_count(void);
@@ -627,6 +628,64 @@ void tx_render_stream_color(TxWorld* w, const TxTile* tile, uint32_t y, uint8_t*
   if (tile) color_for_tile(tile,y,(uint32_t)w->maxTilesY,w->worldSurface,w->rockLayer,out);
   else background_color(y,(uint32_t)w->maxTilesY,w->worldSurface,w->rockLayer,out);
 }
+
+typedef struct TxPngChestMatch {
+  int32_t x, y, item_id;
+  uint32_t marker_index;
+} TxPngChestMatch;
+struct TxPngChestCache {
+  uint32_t count;
+  TxPngChestMatch matches[];
+};
+typedef struct TxPngChestCacheBuilder {
+  TxPngChestCache* cache;
+  const MapMarkerEntry* markers;
+} TxPngChestCacheBuilder;
+
+static void cache_chest_marker(TxWorld* w, int32_t x, int32_t y, int32_t item_id,
+                                const MapMarkerEntry* marker, void* context) {
+  (void)w;
+  TxPngChestCacheBuilder* builder = (TxPngChestCacheBuilder*)context;
+  builder->cache->matches[builder->cache->count++] =
+      (TxPngChestMatch){x, y, item_id, (uint32_t)(marker - builder->markers)};
+}
+
+TxPngChestCache* tx_render_stream_chest_cache(TxWorld* w,
+    const MapMarkerEntry* markers, uint32_t count) {
+  if (!w || !markers || !count || w->pointer_count <= 2u || w->starts[2] >= w->ends[2]) return NULL;
+  const uint8_t* bytes = w->file;
+  uint32_t length = w->file_len, offset = w->starts[2];
+  if (w->section_overrides[2].active) {
+    bytes = w->section_overrides[2].data; length = w->section_overrides[2].len; offset = 0u;
+  }
+  int32_t chests = (int16_t)rd_u16le(bytes, length, &offset);
+  if (chests < 0) chests = 0;
+  uint32_t capacity = sizeof(TxPngChestCache) + (uint32_t)chests * sizeof(TxPngChestMatch);
+  if (capacity > 128u * 1024u) return NULL;
+  TxPngChestCache* cache = (TxPngChestCache*)tx_persistent_alloc(capacity);
+  if (!cache) return NULL; /* Optional acceleration must never fail an export. */
+  cache->count = 0u;
+  TxPngChestCacheBuilder builder = {cache, markers};
+  visit_matching_chest_markers(w, markers, count, cache_chest_marker, &builder);
+  return cache;
+}
+
+void tx_render_stream_chest_cache_rows(TxWorld* w, const TxPngChestCache* cache,
+    uint8_t* rgba, uint32_t width, uint32_t height, uint32_t start, uint32_t count,
+    const MapMarkerEntry* markers) {
+  if (!w || !cache || !rgba || !markers || !width || !height || !count || start >= height) return;
+  TxChestMarkerRows rows = {rgba, width, height, start, count};
+  for (uint32_t i = 0u; i < cache->count; i++) {
+    const TxPngChestMatch* match = &cache->matches[i];
+    draw_chest_marker_rows(w, match->x, match->y, match->item_id,
+        &markers[match->marker_index], &rows);
+  }
+}
+
+void tx_render_stream_chest_cache_free(TxPngChestCache* cache) {
+  tx_persistent_free(cache);
+}
+
 void tx_render_stream_markers(TxWorld* w,uint8_t* rgba,uint32_t width,uint32_t height,
     uint32_t start,uint32_t rows,const MapMarkerEntry* chests,uint32_t chest_count,
     const MapMarkerEntry* tiles,uint32_t tile_count,uint32_t phase) {

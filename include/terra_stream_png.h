@@ -2,6 +2,14 @@
 #define TERRA_STREAM_PNG_H
 #include "terra_map.h"
 typedef struct TxStreamPng TxStreamPng;
+typedef struct TxPngChestCache TxPngChestCache;
+/* Internal renderer bridge. At most 128 KiB, owned by one immutable PNG
+ * request; NULL means the caller must retain the uncached rendering path.
+ * Cache only first matches, never atlas pixels or scaled drawing geometry. */
+TxPngChestCache* tx_render_stream_chest_cache(TxWorld*, const MapMarkerEntry*, uint32_t);
+void tx_render_stream_chest_cache_rows(TxWorld*, const TxPngChestCache*,
+    uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t, const MapMarkerEntry*);
+void tx_render_stream_chest_cache_free(TxPngChestCache*);
 /* Full-resolution only. Marker arrays/world remain borrowed until free.
  * range may repeat a strip for legacy marker painting. Drain/ack output before
  * requesting the next strip; returned bytes are immutable until ack. */

@@ -27,6 +27,8 @@ struct TxStreamPng {
     const MapMarkerEntry *chests, *tiles;
     uint32_t chest_count, tile_count, width, height, start, rows, max_rows;
     uint32_t offset, bitbuf, bitcnt, adler, phase, legacy, active, done;
+    TxPngChestCache* chest_cache;
+    uint32_t chest_cache_attempted;
     uint8_t *rgba, *raw;
     TxBuf output;
 };
@@ -42,6 +44,7 @@ static void chunk(TxBuf* b, const char* type, const uint8_t* bytes, uint32_t n) 
 }
 void tx_stream_png_free(TxStreamPng* p) {
     if (!p) return;
+    tx_render_stream_chest_cache_free(p->chest_cache);
     tx_persistent_free(p->rgba); tx_persistent_free(p->raw);
     tx_persistent_free(p->output.data); tx_persistent_free(p);
 }
@@ -120,8 +123,15 @@ int tx_stream_png_rgb(TxStreamPng* p, const uint8_t* rgb) {
 int tx_stream_png_finish_strip(TxStreamPng* p) {
     if (!p || !p->active || p->output.len) return fail();
     if (!p->phase) {
-        tx_render_stream_markers(p->world, p->rgba, p->width, p->height,
-            p->start, p->rows, p->chests, p->chest_count, p->tiles, p->tile_count, 0u);
+        if (!p->chest_cache_attempted) {
+            p->chest_cache_attempted = 1u;
+            p->chest_cache = tx_render_stream_chest_cache(p->world, p->chests, p->chest_count);
+        }
+        if (p->chest_cache)
+            tx_render_stream_chest_cache_rows(p->world, p->chest_cache, p->rgba,
+                p->width, p->height, p->start, p->rows, p->chests);
+        else tx_render_stream_markers(p->world, p->rgba, p->width, p->height,
+                p->start, p->rows, p->chests, p->chest_count, p->tiles, p->tile_count, 0u);
         if (p->legacy) { p->phase = 1; return 1; }
     }
     tx_render_stream_markers(p->world, p->rgba, p->width, p->height,

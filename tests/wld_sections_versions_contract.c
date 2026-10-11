@@ -1,6 +1,7 @@
 #include "terra_types.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 extern int json_validate_document(const char*,int);
@@ -52,6 +53,46 @@ static void run_footer_truncation_and_override(void) {
     assert(serialize_section_json(&w,10,&b)); out[b.len < sizeof out ? b.len : sizeof out-1]=0;
     assert(strstr((char*)out,"\"worldName\":\"New\""));
     assert(strstr((char*)out,"\"worldId\":9"));
+}
+
+static void run_legacy_footer_full_span(void) {
+    /* Independent bytes/JSON: a Chinese code point crosses byte 159, followed
+     * by embedded NUL, another control byte, quote, slash and newline. */
+    static const uint8_t tail[]="界\0\1\"\\\n";
+    const uint32_t name_length=158u+sizeof(tail)-1u;
+    uint8_t data[512]={0xa5,0x80,0xff,1},out[1024];char expected[1024];
+    data[4]=(uint8_t)((name_length&127u)|128u);data[5]=(uint8_t)(name_length>>7u);
+    memset(data+6,'a',158);memcpy(data+164,tail,sizeof tail-1u);
+    uint32_t length=6u+name_length;data[length++]=17;data[length++]=0;data[length++]=0;data[length++]=0;
+    TxWorld w={0};w.legacy_wld=1;w.pointer_count=6;w.file=data;w.file_len=length;w.legacy_footer_start=3;
+    strcpy(w.worldName,"Not the physical footer");w.worldId=99;
+    for(uint32_t version=7;version<=87;version+=80){
+        w.version=version;
+        for(int overridden=0;overridden<2;overridden++){
+            w.section_overrides[5].active=(uint8_t)overridden;w.section_overrides[5].data=data+3;w.section_overrides[5].len=length-3;
+            for(int flag=0;flag<=1;flag++){
+                data[3]=(uint8_t)flag;TxBuf b={out,0,sizeof out-1,1};
+                int n=snprintf(expected,sizeof expected,"{\"valid\":%s,\"worldName\":\"",flag?"true":"false");
+                memset(expected+n,'a',158);strcpy(expected+n+158,"界\\u0000\\u0001\\\"\\\\\\n\",\"worldId\":17}");
+                assert(serialize_section_json(&w,10,&b)&&b.ok);out[b.len]=0;
+                assert(json_validate_document((char*)out,(int)b.len)&&!strcmp((char*)out,expected));
+            }
+        }
+        /* The backing array remains complete; only the active range is short. */
+        const uint32_t truncated[]={0,1,2,3,name_length+2u,name_length+6u};
+        for(unsigned i=0;i<sizeof truncated/sizeof truncated[0];i++){
+            TxBuf b={out,0,sizeof out,1};w.section_overrides[5].len=truncated[i];
+            assert(!serialize_section_json(&w,10,&b)&&b.ok);
+        }
+        uint8_t bad[]={1,0x80,0x80,0x80,0x80,0x10};
+        w.section_overrides[5].data=bad;w.section_overrides[5].len=sizeof bad;
+        TxBuf b={out,0,sizeof out,1};assert(!serialize_section_json(&w,10,&b)&&b.ok);
+        w.section_overrides[5].data=NULL;b.len=0;assert(!serialize_section_json(&w,10,&b)&&b.ok);
+    }
+    /* Versions 1..6 have no footer, even if arbitrary trailing bytes resemble one. */
+    w.version=6;w.section_overrides[5].active=0;TxBuf b={out,0,sizeof out-1,1};
+    assert(serialize_section_json(&w,10,&b));out[b.len]=0;
+    assert(!strcmp((char*)out,"{\"valid\":false,\"worldName\":\"\",\"worldId\":0,\"present\":false}"));
 }
 
 static void run_display_doll_version_gates(void) {
@@ -111,6 +152,7 @@ int main(void) {
     run_int32_tile_entity_count();
     run_footer_uses_versioned_pointer();
     run_footer_truncation_and_override();
+    run_legacy_footer_full_span();
     run_display_doll_version_gates();
     run_creative_power_sequence();
     run_creative_rejects_unknown_and_truncated_payloads();

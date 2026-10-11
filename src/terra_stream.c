@@ -767,9 +767,10 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
                 tx_marker_stream_free(t->marker_scan);t->marker_scan=NULL;
                 tx_output_stream_finish(w);
                 if(t->result_kind==2||t->full_png){
+                    tx_clear_error();
                     if(t->result_kind==2)t->map_encoder=tx_stream_map_begin(w,t->chest_markers,t->chest_count,w->prepared_output->markers,w->prepared_output->marker_count);
                     else t->png_encoder=tx_stream_png_begin(w,0,0,t->chest_markers,t->chest_count,w->prepared_output->markers,w->prepared_output->marker_count);
-                    if(!t->map_encoder&&!t->png_encoder)return fail("TERRAX_WASM_OOM","bounded media encoder allocation failed");
+                    if(!t->map_encoder&&!t->png_encoder)return tx_last_error[0]?-1:fail("TERRAX_WASM_OOM","bounded media encoder allocation failed");
                     if(t->png_columns)for(uint32_t x=0;x<(uint32_t)w->maxTilesX;x++){
                         t->png_columns[x].offset=w->stream_columns[x];
                         if(t->png_marker_columns)t->png_marker_columns[x].offset=w->stream_columns[x];

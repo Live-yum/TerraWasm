@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #include "terra_types.h"
+#include "terra_header.h"
 #include "terra_output.h"
 #include "terra_stream_map.h"
 #include <string.h>
@@ -37,6 +38,7 @@ extern void     buf_init(TxBuf* b, uint32_t cap);
 extern int      buf_reserve(TxBuf* b, uint32_t extra);
 extern void     buf_u8(TxBuf* b, uint8_t v);
 extern void     buf_bytes(TxBuf* b, const void* p, uint32_t n);
+extern void     buf_net_string(TxBuf* b, const void* text, uint32_t length);
 extern void     buf_u16le(TxBuf* b, uint32_t v);
 extern void     buf_u32le(TxBuf* b, uint32_t v);
 extern void     buf_u64le(TxBuf* b, uint64_t v);
@@ -97,19 +99,6 @@ static uint32_t crc32_bytes(const uint8_t* data, uint32_t len) {
 static uint32_t tx_adler32(const uint8_t* data, uint32_t length) {
     extern unsigned long adler32(unsigned long, const uint8_t*, unsigned int);
     return (uint32_t)adler32(1u, data, length);
-}
-
-/* ================================================================ */
-/*  Network string helper                                            */
-/* ================================================================ */
-
-static void buf_net_string(TxBuf* b, const char* s) {
-    uint32_t len = tx_strlen(s);
-    /* 7-bit encoded length */
-    uint32_t v = len;
-    while (v >= 0x80u) { buf_u8(b, (uint8_t)(v | 0x80u)); v >>= 7; }
-    buf_u8(b, (uint8_t)v);
-    buf_bytes(b, s, len);
 }
 
 /* ================================================================ */
@@ -1142,14 +1131,26 @@ static const MapMarkerEntry* find_tile_marker(const MapMarkerEntry* markers, uin
 /*  Map header writing                                               */
 /* ================================================================ */
 
-static void write_map_header(TxBuf* out, TxWorld* w) {
+static int write_map_header(TxBuf* out, TxWorld* w) {
+    TxHeaderString name;
+    if (w->pointer_count || w->section_overrides[0].active) {
+        if (!tx_header_string_view(w, 0u, &name)) { out->ok = 0; return 0; }
+    } else {
+        /* Internal synthetic worlds have no WLD header backing. Opened worlds
+         * always have sections and must never fall back after a read failure. */
+        name.encoded = (const uint8_t*)(w->worldName[0] ? w->worldName : "World");
+        name.prefix_len = 0u;
+        name.len = tx_strlen((const char*)name.encoded);
+    }
     const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
     buf_u32le(out, TX_MAP_VERSION);
     buf_bytes(out, w->magic[0] ? w->magic : "relogic", 7);
     buf_u8(out, 1u);
     buf_u32le(out, 0u /* revision: match TerraX C++ highlight_from_world */);
     buf_u64le(out, w->favorite);
-    buf_net_string(out, w->worldName[0] ? w->worldName : "World");
+    /* MAP's BinaryWriter length stays canonical, including when the WLD uses
+     * a padded prefix. The payload includes every byte of the active name. */
+    buf_net_string(out, name.encoded + name.prefix_len, name.len);
     buf_u32le(out, (uint32_t)w->worldId);
     buf_u32le(out, (uint32_t)w->maxTilesY);
     buf_u32le(out, (uint32_t)w->maxTilesX);
@@ -1182,7 +1183,7 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
                 if (options != 1u) buf_u8(out, options);
             }
         }
-        return;
+        goto finished;
     }
     buf_u16le(out, TX_MAP_TILE_COUNT);
     buf_u16le(out, TX_MAP_WALL_COUNT);
@@ -1196,6 +1197,9 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
         if (TX_MAP_TILE_EXISTS[i]) buf_u8(out, TX_MAP_TILE_TYPE_COUNTS[i]);
     for (uint32_t i = 0; i < TX_MAP_WALL_COUNT; i++)
         if (TX_MAP_WALL_EXISTS[i]) buf_u8(out, TX_MAP_WALL_TYPE_COUNTS[i]);
+finished:
+    if (!out->ok) tx_set_error("TERRAX_WASM_OOM", "failed to allocate header encoder");
+    return out->ok;
 }
 
 #ifdef TERRAX_TESTING
@@ -1330,6 +1334,23 @@ static int compress_chunk_exact(const uint32_t* raw_chunk, TxBuf* compressed) {
     return 1;
 }
 
+static int release_map_icon_values(uint32_t** values) {
+    if (!values || !*values) return 0;
+    tx_internal_free(*values);
+    *values = NULL;
+    return 1;
+}
+
+/* The optional atlas cache must not prevent a mandatory chunk allocation.
+ * Compression owns no output on failure, so retry the same rendered pixels
+ * once without the cache; never replay an already advanced strip or sink. */
+static int compress_map_chunk(const uint32_t* raw, TxBuf* compressed, uint32_t** icon_values) {
+    if (compress_chunk_exact(raw, compressed)) return 1;
+    if (!release_map_icon_values(icon_values)) return 0;
+    tx_clear_error();
+    return compress_chunk_exact(raw, compressed);
+}
+
 typedef int (*MapChunkSink)(uint32_t chunk_index, const uint8_t* data, uint32_t size, void* context);
 
 struct TxPreparedMap {
@@ -1407,17 +1428,30 @@ int tx_map_base_run(TxWorld* w, TxPreparedMap* p, uint32_t x, uint32_t y,
     return 1;
 }
 
-int tx_map_base_strip(TxPreparedMap* p, uint32_t cx, uint32_t* strip) {
+static int map_base_strip_with_cache(TxPreparedMap* p, uint32_t cx, uint32_t* strip,
+                                     uint32_t** icon_values) {
     extern int uncompress(unsigned char*, unsigned long*, const unsigned char*, unsigned long);
     for (uint32_t cy = 0; cy < p->cpc; cy++) {
         uint32_t i = cx * p->cpc + cy;
-        unsigned long size = 4096u * 4u;
-        if (uncompress((unsigned char*)(strip + cy * 4096u), &size,
-                       p->bytes + p->offsets[i], p->sizes[i]) != 0 || size != 4096u * 4u) {
+        unsigned long size;
+        int status;
+        do {
+            size = 4096u * 4u;
+            status = uncompress((unsigned char*)(strip + cy * 4096u), &size,
+                                p->bytes + p->offsets[i], p->sizes[i]);
+        } while (status == -4 /* Z_MEM_ERROR */ && release_map_icon_values(icon_values));
+        if (status == -4) {
+            tx_set_error("TERRAX_WASM_OOM", "prepared MAP decompression allocation failed"); return 0;
+        }
+        if (status != 0 || size != 4096u * 4u) {
             tx_set_error("TERRAX_STATE_ERROR", "prepared MAP chunk is invalid"); return 0;
         }
     }
     return 1;
+}
+
+int tx_map_base_strip(TxPreparedMap* p, uint32_t cx, uint32_t* strip) {
+    return map_base_strip_with_cache(p, cx, strip, NULL);
 }
 
 typedef struct MapChunkMeasureContext {
@@ -1476,6 +1510,28 @@ static int write_map_chunk(uint32_t chunk_index, const uint8_t* data, uint32_t s
     return 1;
 }
 
+/* Only points that can reach the icon loop need an atlas-sized colour cache.
+ * Keep this gate shared by buffered and cooperative MAP encoders. Chest points
+ * carry the matched inventory item, while entity points carry icon_id. */
+static uint32_t* allocate_map_icon_values(TxWorld* w,const MapChestPoint* points,uint32_t count) {
+    uint64_t bytes=(uint64_t)w->icon_atlas.atlas_width*w->icon_atlas.atlas_height*4u;
+    if(!points||!count||!w->icon_atlas.rgba||!w->icon_atlas.icon_size||
+       !bytes||bytes>4u*1024u*1024u)return NULL;
+    for(uint32_t i=0;i<count;i++){
+        const MapChestPoint* point=&points[i];
+        if(point->item_id<0||!point->radius)continue;
+        uint32_t radius=point->radius,thickness=point->line_width;
+        if(thickness>radius)thickness=radius;
+        /* Equal thickness uses the full radius in draw_map_marker_on_strip. */
+        if(!terra_icon_side_for_radius(radius>thickness?radius-thickness:radius)||
+           terra_icon_index_for_item(&w->icon_atlas,point->item_id)<0)continue;
+        uint32_t* values=(uint32_t*)tx_alloc((uint32_t)bytes);
+        if(values)memset(values,0,(uint32_t)bytes);
+        return values; /* Optional allocation failure keeps the slow path. */
+    }
+    return NULL;
+}
+
 static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
                            MapChestPoint* chest_points, uint32_t chest_point_count,
                            uint32_t width, uint32_t height, uint32_t cpr, uint32_t cpc,
@@ -1515,11 +1571,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
     }
     /* Resolve each used atlas pixel once, regardless of how many chests/veins
      * share that icon. Oversized custom atlases retain the bounded slow path. */
-    uint64_t icon_bytes = (uint64_t)w->icon_atlas.atlas_width * w->icon_atlas.atlas_height * 4u;
-    if (w->icon_atlas.rgba && icon_bytes && icon_bytes <= 4u * 1024u * 1024u) {
-        icon_values = (uint32_t*)tx_alloc((uint32_t)icon_bytes);
-        if (icon_values) memset(icon_values, 0, (uint32_t)icon_bytes);
-    }
+    icon_values = allocate_map_icon_values(w, chest_points, chest_point_count);
 
     if (w->section_overrides[1].active) {
         tile_src = w->section_overrides[1].data;
@@ -1538,7 +1590,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
         uint32_t column_count = width > world_x_base ? width - world_x_base : 0u;
         if (column_count > 64u) column_count = 64u;
         if (prepared) {
-            if (chest_point_count) ok = tx_map_base_strip(prepared, chunk_x, strip);
+            if (chest_point_count) ok = map_base_strip_with_cache(prepared, chunk_x, strip, &icon_values);
             if (base_strip && ok) memcpy(base_strip, strip, strip_bytes);
         }
         else prefill_chunk_strip_background(strip, cpc, chunk_x, width, height,
@@ -1588,7 +1640,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
                 ok = sink(chunk_index, prepared->bytes + prepared->offsets[i], prepared->sizes[i], sink_context);
                 continue;
             }
-            if (!compress_chunk_exact(strip + chunk_y * 4096u, &compressed)) {
+            if (!compress_map_chunk(strip + chunk_y * 4096u, &compressed, &icon_values)) {
                 ok = 0;
                 break;
             }
@@ -1670,6 +1722,20 @@ static int stage_map_chunk(uint32_t chunk_index, const uint8_t* data, uint32_t s
     return 1;
 }
 
+/* Append located entities in scan order after the matching chest points. */
+static void copy_map_entity_points(MapChestPoint* destination, const TxMarkerPoint* points,
+                                   uint32_t count, const MapMarkerEntry* markers) {
+    for (uint32_t i = 0; i < count; i++) {
+        const MapMarkerEntry* marker = &markers[points[i].marker_index];
+        destination[i] = (MapChestPoint){
+            .x = points[i].x, .y = points[i].y, .item_id = marker->icon_id,
+            .radius = marker->radius, .line_width = marker->line_width,
+            .reserved = {1u, 0u},
+            .rgba = {marker->rgba[0], marker->rgba[1], marker->rgba[2], marker->rgba[3]}
+        };
+    }
+}
+
 static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request,
                                       uint32_t* matched_chest_count,
                                       uint32_t* matched_tile_count) {
@@ -1716,16 +1782,10 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
         if (chest_point_count) memcpy(combined, chest_points, chest_point_count * sizeof(MapChestPoint));
         if (chest_points) tx_internal_free(chest_points);
         chest_points = combined;
-        const TxMarkerPoint* points = (const TxMarkerPoint*)entity_points.data;
-        for (uint32_t i = 0; i < entity_count; i++) {
-            const MapMarkerEntry* marker = &request->tile_markers[points[i].marker_index];
-            MapChestPoint* point = &chest_points[chest_point_count++];
-            memset(point, 0, sizeof(*point));
-            point->x = points[i].x; point->y = points[i].y; point->item_id = marker->icon_id;
-            point->radius = marker->radius; point->line_width = marker->line_width;
-            point->reserved[0] = 1u;
-            memcpy(point->rgba, marker->rgba, 4u);
-        }
+        copy_map_entity_points(chest_points + chest_point_count,
+                               (const TxMarkerPoint*)entity_points.data,
+                               entity_count, request->tile_markers);
+        chest_point_count += entity_count;
         tx_internal_free(entity_points.data);
         entity_points.data = NULL;
     }
@@ -1745,15 +1805,7 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     memset(chunk_offsets, 0, chunk_count * sizeof(uint32_t));
 
     buf_init(&header, 4096u);
-    if (!header.ok) {
-        tx_set_error("TERRAX_WASM_OOM", "map header allocation failed");
-        goto cleanup;
-    }
-    write_map_header(&header, w);
-    if (!header.ok) {
-        tx_set_error("TERRAX_WASM_OOM", "map header generation failed");
-        goto cleanup;
-    }
+    if (!write_map_header(&header, w)) goto cleanup;
 
     /* Fast path: retain only the bytes that compression actually produced.
      * chunk_offsets maps the x-major WLD scan back to the row-major MAP file.
@@ -1949,7 +2001,7 @@ struct TxStreamMap {
     MapChestPoint* points;
     uint32_t point_count,width,height,cpr,cpc,chunks,strip_bytes,cx,cy,pass,active,pending,total;
     uint32_t emit_index,emit_offset,fallback;
-    uint32_t *strip,*sizes,*offsets,*staged_offsets;
+    uint32_t *strip,*sizes,*offsets,*staged_offsets,*icon_values;
     TxMapColorCacheEntry colors[512];
     uint32_t color_count;
     TxBuf header,output,staged;
@@ -1959,6 +2011,7 @@ void tx_stream_map_free(TxStreamMap* p){
     if(p->points)tx_internal_free(p->points);if(p->strip)tx_internal_free(p->strip);
     if(p->sizes)tx_internal_free(p->sizes);if(p->offsets)tx_internal_free(p->offsets);
     if(p->staged_offsets)tx_internal_free(p->staged_offsets);
+    if(p->icon_values)tx_internal_free(p->icon_values);
     if(p->header.data)tx_internal_free(p->header.data);if(p->output.data)tx_internal_free(p->output.data);
     if(p->staged.data)tx_internal_free(p->staged.data);tx_internal_free(p);
 }
@@ -1979,13 +2032,16 @@ TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_
         uint64_t bytes=((uint64_t)p->point_count+count)*sizeof(MapChestPoint);if(bytes>UINT32_MAX)goto failed;
         MapChestPoint* all=(MapChestPoint*)tx_alloc((uint32_t)bytes);if(!all)goto failed;
         if(p->point_count)memcpy(all,p->points,p->point_count*sizeof(MapChestPoint));if(p->points)tx_internal_free(p->points);p->points=all;
-        const TxMarkerPoint* entries=(const TxMarkerPoint*)entity->data;
-        for(uint32_t i=0;i<count;i++){
-            const MapMarkerEntry* m=&tiles[entries[i].marker_index];MapChestPoint* point=&all[p->point_count++];memset(point,0,sizeof(*point));
-            point->x=entries[i].x;point->y=entries[i].y;point->item_id=m->icon_id;point->radius=m->radius;point->line_width=m->line_width;point->reserved[0]=1;memcpy(point->rgba,m->rgba,4);
-        }
+        copy_map_entity_points(all+p->point_count,(const TxMarkerPoint*)entity->data,count,tiles);
+        p->point_count+=count;
     }
-    buf_init(&p->header,4096);write_map_header(&p->header,w);if(!p->header.ok)goto failed;
+    buf_init(&p->header,4096);if(!write_map_header(&p->header,w))goto failed;
+    /* The same atlas pixels recur in every matching container/entity. Resolve
+     * each pixel with the existing nearest-colour path once per task, as the
+     * buffered encoder already does. Allocate it after required storage;
+     * allocation failure retains the exact slow path. Task ownership prevents
+     * stale values when a later task uses another atlas or palette. */
+    p->icon_values=allocate_map_icon_values(w,p->points,p->point_count);
     return p;
 failed:tx_stream_map_free(p);return NULL;
 }
@@ -1998,6 +2054,9 @@ int tx_stream_map_range(TxStreamMap* p,uint32_t* first,uint32_t* count){
         for(uint32_t i=0;i<p->chunks;i++){if(total+4+p->sizes[i]>UINT32_MAX)return -1;p->offsets[i]=(uint32_t)total;total+=4+p->sizes[i];}
         p->total=(uint32_t)total;
         if(!p->fallback){
+            /* All marked strips are staged: direct output never draws again.
+             * Keep the cache for an existing two-pass fallback, which does. */
+            release_map_icon_values(&p->icon_values);
             buf_init(&p->output,1048576u);
             if(!p->output.ok)p->fallback=1;
         }
@@ -2019,10 +2078,10 @@ int tx_stream_map_run(TxStreamMap* p,uint32_t x,uint32_t y,const TxTile* t,uint3
 }
 int tx_stream_map_finish_strip(TxStreamMap* p){
     if(!p->active)return 0;p->active=0;
-    for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,NULL);
+    for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,p->icon_values);
     if(!p->pass){
         for(uint32_t cy=0;cy<p->cpc;cy++){
-            TxBuf bytes={0};if(!compress_chunk_exact(p->strip+cy*4096,&bytes))return 0;
+            TxBuf bytes={0};if(!compress_map_chunk(p->strip+cy*4096,&bytes,&p->icon_values))return 0;
             uint32_t index=cy*p->cpr+p->cx;p->sizes[index]=bytes.len;
             if(!p->fallback){
                 MapChunkStagingContext stage={&p->staged,p->staged_offsets,p->sizes,p->chunks,TX_MAP_SINGLE_PASS_STAGING_LIMIT_BYTES,0};
@@ -2055,9 +2114,14 @@ int tx_stream_map_pull(TxStreamMap* p,uint32_t* offset,const uint8_t** bytes,uin
         *offset=p->emit_offset;*bytes=p->output.data;*length=p->output.len;return p->output.ok&&p->output.len?1:-1;
     }
     uint32_t index=p->cy*p->cpr+p->cx;
-    if(!p->output.data){TxBuf compressed={0};if(!compress_chunk_exact(p->strip+p->cy*4096,&compressed))return -1;
+    if(!p->output.data){TxBuf compressed={0};if(!compress_map_chunk(p->strip+p->cy*4096,&compressed,&p->icon_values))return -1;
         if(compressed.len!=p->sizes[index]){tx_internal_free(compressed.data);return -1;}
-        buf_init(&p->output,compressed.len+4);buf_u32le(&p->output,compressed.len);buf_bytes(&p->output,compressed.data,compressed.len);tx_internal_free(compressed.data);if(!p->output.ok)return -1;
+        buf_init(&p->output,compressed.len+4);
+        if(!p->output.ok&&release_map_icon_values(&p->icon_values)){
+            tx_clear_error();buf_init(&p->output,compressed.len+4);
+        }
+        buf_u32le(&p->output,compressed.len);buf_bytes(&p->output,compressed.data,compressed.len);tx_internal_free(compressed.data);
+        if(!p->output.ok){tx_set_error("TERRAX_WASM_OOM","map chunk output allocation failed");return -1;}
     }
     *offset=p->offsets[index];*bytes=p->output.data;*length=p->output.len;return 1;
 }
