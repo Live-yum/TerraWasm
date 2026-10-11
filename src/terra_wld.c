@@ -1187,7 +1187,7 @@ static void json_dotnet_binary_date(TxBuf *b, uint64_t raw) {
 }
 /* Source strings need not be NUL terminated, and may exceed the fixed-size
  * summaries in TxWorld. Emit escaped runs without another retained copy. */
-static void json_bounded_string(TxBuf *b,const uint8_t *source,uint32_t length){
+void json_bounded_string(TxBuf *b,const uint8_t *source,uint32_t length){
     buf_u8(b,'"');
     uint32_t run=0u;
     for(uint32_t i=0u;i<length&&b->ok;i++){

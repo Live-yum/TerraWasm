@@ -96,9 +96,13 @@ static TxTile column(uint32_t x) {
 }
 
 static void make_world(void) {
+    /* Later chest cases advertise sections: provide a real bounded header
+     * string while keeping tile offsets and the allocation budget unchanged. */
+    static uint8_t header[]="\23Icon cache contract";
     world.version=world.original_version=326;world.maxTilesX=193;world.maxTilesY=128;
     world.worldSurface=42;world.rockLayer=86;world.worldId=7;
     strcpy(world.worldName,"Icon cache contract");strcpy(world.magic,"relogic");
+    world.section_overrides[0].active=1;world.section_overrides[0].data=header;world.section_overrides[0].len=sizeof header-1u;
     world.tile_type_count=2;world.important=important;world.important_len=1;
     buf_init(&tiles,4096);
     for(uint32_t x=0;x<(uint32_t)world.maxTilesX;x++){TxTile tile=column(x);write_tile(&world,&tiles,&tile,127);}

@@ -401,7 +401,7 @@ else()
                 add_custom_command(
                     OUTPUT "${HEADER_STRING_FIXTURES}/padded-original.wld"
                     COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-header-string-fixtures.js" "${HEADER_STRING_FIXTURES}"
-                    DEPENDS tests/generate-header-string-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js
+                    DEPENDS tests/generate-header-string-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/legacy-world.js
                     VERBATIM)
                 add_custom_target(terra_header_string_fixtures DEPENDS "${HEADER_STRING_FIXTURES}/padded-original.wld")
                 add_terra_contract(terra_header_string_contract tests/header_string_contract.c ZLIB::ZLIB)

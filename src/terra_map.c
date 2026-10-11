@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #include "terra_types.h"
+#include "terra_header.h"
 #include "terra_output.h"
 #include "terra_stream_map.h"
 #include <string.h>
@@ -37,6 +38,7 @@ extern void     buf_init(TxBuf* b, uint32_t cap);
 extern int      buf_reserve(TxBuf* b, uint32_t extra);
 extern void     buf_u8(TxBuf* b, uint8_t v);
 extern void     buf_bytes(TxBuf* b, const void* p, uint32_t n);
+extern void     buf_net_string(TxBuf* b, const void* text, uint32_t length);
 extern void     buf_u16le(TxBuf* b, uint32_t v);
 extern void     buf_u32le(TxBuf* b, uint32_t v);
 extern void     buf_u64le(TxBuf* b, uint64_t v);
@@ -97,19 +99,6 @@ static uint32_t crc32_bytes(const uint8_t* data, uint32_t len) {
 static uint32_t tx_adler32(const uint8_t* data, uint32_t length) {
     extern unsigned long adler32(unsigned long, const uint8_t*, unsigned int);
     return (uint32_t)adler32(1u, data, length);
-}
-
-/* ================================================================ */
-/*  Network string helper                                            */
-/* ================================================================ */
-
-static void buf_net_string(TxBuf* b, const char* s) {
-    uint32_t len = tx_strlen(s);
-    /* 7-bit encoded length */
-    uint32_t v = len;
-    while (v >= 0x80u) { buf_u8(b, (uint8_t)(v | 0x80u)); v >>= 7; }
-    buf_u8(b, (uint8_t)v);
-    buf_bytes(b, s, len);
 }
 
 /* ================================================================ */
@@ -1142,14 +1131,26 @@ static const MapMarkerEntry* find_tile_marker(const MapMarkerEntry* markers, uin
 /*  Map header writing                                               */
 /* ================================================================ */
 
-static void write_map_header(TxBuf* out, TxWorld* w) {
+static int write_map_header(TxBuf* out, TxWorld* w) {
+    TxHeaderString name;
+    if (w->pointer_count || w->section_overrides[0].active) {
+        if (!tx_header_string_view(w, 0u, &name)) { out->ok = 0; return 0; }
+    } else {
+        /* Internal synthetic worlds have no WLD header backing. Opened worlds
+         * always have sections and must never fall back after a read failure. */
+        name.encoded = (const uint8_t*)(w->worldName[0] ? w->worldName : "World");
+        name.prefix_len = 0u;
+        name.len = tx_strlen((const char*)name.encoded);
+    }
     const TxMapRuntimeLayout* layout = tx_map_runtime_layout();
     buf_u32le(out, TX_MAP_VERSION);
     buf_bytes(out, w->magic[0] ? w->magic : "relogic", 7);
     buf_u8(out, 1u);
     buf_u32le(out, 0u /* revision: match TerraX C++ highlight_from_world */);
     buf_u64le(out, w->favorite);
-    buf_net_string(out, w->worldName[0] ? w->worldName : "World");
+    /* MAP's BinaryWriter length stays canonical, including when the WLD uses
+     * a padded prefix. The payload includes every byte of the active name. */
+    buf_net_string(out, name.encoded + name.prefix_len, name.len);
     buf_u32le(out, (uint32_t)w->worldId);
     buf_u32le(out, (uint32_t)w->maxTilesY);
     buf_u32le(out, (uint32_t)w->maxTilesX);
@@ -1182,7 +1183,7 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
                 if (options != 1u) buf_u8(out, options);
             }
         }
-        return;
+        goto finished;
     }
     buf_u16le(out, TX_MAP_TILE_COUNT);
     buf_u16le(out, TX_MAP_WALL_COUNT);
@@ -1196,6 +1197,9 @@ static void write_map_header(TxBuf* out, TxWorld* w) {
         if (TX_MAP_TILE_EXISTS[i]) buf_u8(out, TX_MAP_TILE_TYPE_COUNTS[i]);
     for (uint32_t i = 0; i < TX_MAP_WALL_COUNT; i++)
         if (TX_MAP_WALL_EXISTS[i]) buf_u8(out, TX_MAP_WALL_TYPE_COUNTS[i]);
+finished:
+    if (!out->ok) tx_set_error("TERRAX_WASM_OOM", "failed to allocate header encoder");
+    return out->ok;
 }
 
 #ifdef TERRAX_TESTING
@@ -1801,15 +1805,7 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
     memset(chunk_offsets, 0, chunk_count * sizeof(uint32_t));
 
     buf_init(&header, 4096u);
-    if (!header.ok) {
-        tx_set_error("TERRAX_WASM_OOM", "map header allocation failed");
-        goto cleanup;
-    }
-    write_map_header(&header, w);
-    if (!header.ok) {
-        tx_set_error("TERRAX_WASM_OOM", "map header generation failed");
-        goto cleanup;
-    }
+    if (!write_map_header(&header, w)) goto cleanup;
 
     /* Fast path: retain only the bytes that compression actually produced.
      * chunk_offsets maps the x-major WLD scan back to the row-major MAP file.
@@ -2039,7 +2035,7 @@ TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_
         copy_map_entity_points(all+p->point_count,(const TxMarkerPoint*)entity->data,count,tiles);
         p->point_count+=count;
     }
-    buf_init(&p->header,4096);write_map_header(&p->header,w);if(!p->header.ok)goto failed;
+    buf_init(&p->header,4096);if(!write_map_header(&p->header,w))goto failed;
     /* The same atlas pixels recur in every matching container/entity. Resolve
      * each pixel with the existing nearest-colour path once per task, as the
      * buffered encoder already does. Allocate it after required storage;

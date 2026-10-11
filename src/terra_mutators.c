@@ -335,14 +335,7 @@ static int jp_end(TxJsonParser *p){
     return 1;
     }
 
-static void buf_7bit(TxBuf *b,uint32_t value){
-    do{
-        uint8_t byte=(uint8_t)(value&0x7fu);
-        value>>=7u;
-        if (value)byte|=0x80u;
-        buf_u8(b,byte);
-        }while(value);
-    }
+extern void buf_net_string(TxBuf *b,const void *text,uint32_t length);
 
 static int jp_skip_string_token(TxJsonParser *p){
     if (!jp_take(p,'"'))return 0;
@@ -655,7 +648,7 @@ static int encode_header_string(TxBuf *header,TxWorld *w,TxJsonParser *request,
         if(!text)return mut_fail("TERRAX_WASM_OOM","failed to allocate header string");
         TxJsonParser value;patch_parser(request,field,&value);
         int ok=jp_string(&value,text,cap,&length)&&jp_end(&value);
-        if(ok){buf_7bit(header,length);buf_bytes(header,text,length);}
+        if(ok)buf_net_string(header,text,length);
         tx_internal_free(text);return ok&&header->ok;
         }
     TxHeaderString source;
@@ -679,7 +672,7 @@ static int encode_string_array(TxBuf *header,TxWorld *w,TxJsonParser *request,
             if(done)break;
             char item[TX_MUTATOR_MAX_STRING_BYTES+1u];uint32_t length=0u;
             if(!jp_string(&value,item,sizeof(item),&length)){tx_internal_free(values.data);return 0;}
-            buf_7bit(&values,length);buf_bytes(&values,item,length);actual++;
+            buf_net_string(&values,item,length);actual++;
             if(actual>65535u){tx_internal_free(values.data);return mut_fail("TERRAX_VALIDATION_ERROR","angler array is too large");}
             }
         if(!jp_end(&value)||!values.ok){tx_internal_free(values.data);return 0;}
@@ -1075,7 +1068,7 @@ static int parse_item(TxWorld *w,TxJsonParser *p,TxBuf *items){
         return mut_fail("TERRAX_VALIDATION_ERROR","chest item requires stack, itemType, and prefix");
     if(w->version<36u&&prefix)return mut_fail("TERRAX_VALIDATION_ERROR","this chest version has no item prefixes");
     if(w->version<59u)buf_u8(items,(uint8_t)stack);else buf_u16le(items,(uint32_t)stack);
-    if(w->version<38u){buf_7bit(items,legacy_len);buf_bytes(items,legacy_name,legacy_len);}
+    if(w->version<38u)buf_net_string(items,legacy_name,legacy_len);
     else buf_u32le(items,(uint32_t)item_type);
     if(w->version>=36u)buf_u8(items,(uint8_t)prefix);
     return items->ok||mut_fail("TERRAX_WASM_OOM","failed to encode chest item");
@@ -1130,7 +1123,7 @@ static TX_COLD_MUTATOR int parse_chest(TxWorld *w,TxJsonParser *p,TxBuf *section
     if(w->legacy_wld)buf_u8(section,1u);
     buf_u32le(section,(uint32_t)x);
     buf_u32le(section,(uint32_t)y);
-    if(w->version>=85u){buf_7bit(section,name_len);buf_bytes(section,name,name_len);}
+    if(w->version>=85u)buf_net_string(section,name,name_len);
     if (w->version>=294u)buf_u32le(section,(uint32_t)max_items);
     buf_bytes(section,items.data,items.len);
     tx_internal_free(items.data);
@@ -1234,7 +1227,7 @@ static int parse_bestiary_entry(TxJsonParser *p,TxBuf *out,int with_count){
         }
     if (seen!=(with_count?3u:1u))
         return mut_fail("TERRAX_VALIDATION_ERROR",with_count?"kill entry requires persistentNpcId and killCount":"bestiary entry requires persistentNpcId");
-    buf_7bit(out,name_len);buf_bytes(out,name,name_len);
+    buf_net_string(out,name,name_len);
     if (with_count)buf_u32le(out,(uint32_t)count);
     return out->ok||mut_fail("TERRAX_WASM_OOM","failed to encode bestiary entry");
     }

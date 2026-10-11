@@ -589,6 +589,8 @@ TerraWasm 使用 bridge/native 双域跟踪分配器。bridge 指针归 JS 调�
 
 未修改的 `worldName`、字符串 `seed`、钓鱼任务完成者名称和 `manifestJson` 从当前 header 的有界原始范围复制，保留完整 UTF-8 内容及原长度前缀；不会经过内部 159 字节的名称/种子摘要。header JSON 和 footer 世界名也返回完整字符串。显式修改世界名、字符串种子或 manifest 时按实际 JSON 字段长度分配，仍受整份请求 1 MiB 上限约束。WLD 179 的数字种子继续使用原 UInt32 格式；修改世界名或世界 ID 时，footer 同步使用完整世界名。普通保存、重复 header override 和流式 `edit_plan` 遵循相同规则。
 
+MAP 导出的世界名同样取当前 header 的完整有界内容，使用标准最短 7-bit 长度前缀；原始和已修改的长名称均适用于普通与流式导出。旧版 WLD 7–87 的 footer JSON 从实际 footer/override 读取完整名称，不用 header 名称替代；`valid: false` 时仍返回该 footer 的名称与 ID，损坏范围仍报错。WLD 1–6 保持 `present: false`。
+
 ```json
 {
   "patch": {

@@ -13,6 +13,8 @@ extern void buf_init(TxBuf*,uint32_t);
 extern void buf_u8(TxBuf*,uint8_t);
 extern void buf_cstr(TxBuf*,const char*);
 extern void json_string(TxBuf*,const char*);
+extern void json_bounded_string(TxBuf*,const uint8_t*,uint32_t);
+extern void json_bool(TxBuf*,int);
 extern void json_i32(TxBuf*,int32_t);
 extern void json_u32(TxBuf*,uint32_t);
 extern void json_float(TxBuf*,double);
@@ -70,6 +72,17 @@ int serialize_legacy_section_json(TxWorld *w,int logical,TxBuf *b) {
         buf_cstr(b,logical==8?"{\"kills\":[],\"sightings\":[],\"chats\":[]}":"[]"); return 1;
     }
     if (logical==10 && w->version<7u) { buf_cstr(b,"{\"valid\":false,\"worldName\":\"\",\"worldId\":0,\"present\":false}"); return 1; }
-    if(logical==10){char footer_name[160]={0};o=w->section_overrides[5].active?0:w->legacy_footer_start;present=boolv(p,n,&o);if(present<0||!str(p,n,&o,footer_name,sizeof(footer_name))||!terra_reader_has(o,4,n))return 0;int32_t footer_id=rd_i32le(p,n,&o);buf_cstr(b,"{\"valid\":");if(present)buf_cstr(b,"true");else buf_cstr(b,"false");buf_cstr(b,",\"worldName\":");json_string(b,footer_name);buf_cstr(b,",\"worldId\":");json_i32(b,footer_id);buf_u8(b,'}');return 1;}
+    if(logical==10){
+        o=w->section_overrides[5].active?0:w->legacy_footer_start;
+        if(!p||o>=n)return 0;present=p[o++]!=0;
+        int ok=0;uint32_t size=rd_7bit(p,n,&o,&ok);
+        if(!ok||!terra_reader_has(o,size,n))return 0;
+        const uint8_t *name=p+o;o+=size;
+        if(!terra_reader_has(o,4u,n))return 0;
+        int32_t footer_id=rd_i32le(p,n,&o);
+        buf_cstr(b,"{\"valid\":");json_bool(b,present);
+        buf_cstr(b,",\"worldName\":");json_bounded_string(b,name,size);
+        buf_cstr(b,",\"worldId\":");json_i32(b,footer_id);buf_u8(b,'}');return 1;
+    }
     return 0;
 }

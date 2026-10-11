@@ -14,7 +14,7 @@ function makeSectionedWorld(version, options = {}) {
   const bool = n => u8(n ? 1 : 0);
   const str = value => { const b = Buffer.from(String(value || ""), "utf8"); let n = b.length; while (n >= 128) { u8((n & 127) | 128); n >>>= 7; } if (options.paddedStringPrefixes) { u8(n | 128); u8(0); } else u8(n); h.push(...b); };
   const zero = n => { for (let i = 0; i < n; i++) u8(0); };
-  str(options.worldName || `header-v${version}`);
+  str(options.worldName ?? `header-v${version}`);
   if (version >= 179) { if (version === 179) i32(Number(options.seed ?? 123)); else str(options.seed ?? "seed"); zero(8); }
   if (version >= 181) zero(16);
   i32(options.worldId ?? 1); i32(0); i32(1000); i32(0); i32(500); i32(500); i32(1000);

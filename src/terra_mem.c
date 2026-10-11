@@ -540,6 +540,18 @@ void buf_bytes(TxBuf* b, const void* p, uint32_t n) {
     }
 }
 
+/* Canonical BinaryWriter strings shared by WLD and MAP writers. */
+void buf_net_string(TxBuf* b, const void* text, uint32_t length) {
+    uint32_t value = length;
+    do {
+        uint8_t byte = (uint8_t)(value & 0x7fu);
+        value >>= 7u;
+        if (value) byte |= 0x80u;
+        buf_u8(b, byte);
+    } while (value);
+    buf_bytes(b, text, length);
+}
+
 void buf_u16le(TxBuf* b, uint32_t v) {
     buf_u8(b, (uint8_t)v);
     buf_u8(b, (uint8_t)(v >> 8));

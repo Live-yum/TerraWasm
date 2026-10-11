@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeSectionedWorld } = require('./helpers/sectioned-world');
 const { makeCircuitWorld } = require('./helpers/circuit-world');
+const { makeLegacyWorld } = require('./helpers/legacy-world');
 
 const original = {
   worldName: 'identical-prefix-'.repeat(40) + '世界"\\\n尾',
@@ -11,6 +12,18 @@ const original = {
   anglerWhoFinishedToday: ['angler'.repeat(130) + '钓鱼者', 'second"\\\n\0tail'],
   manifestJson: JSON.stringify({ unknown: 'manifest"\\\n'.repeat(800), tail: '完整' }),
 };
+
+// MAP writes a canonical BinaryWriter prefix even for padded WLD strings.
+function encodedName(value) {
+  const bytes = Buffer.from(value), prefix = [];
+  let length = bytes.length;
+  while (length >= 128) { prefix.push((length & 127) | 128); length >>>= 7; }
+  return Buffer.concat([Buffer.from([...prefix, length]), bytes]);
+}
+
+function writeName(dir, stem, value) {
+  fs.writeFileSync(path.join(dir, `${stem}.map-name`), encodedName(value));
+}
 
 function strings(version, values) {
   return {
@@ -63,6 +76,7 @@ function generate(dir) {
     for (const [label, values] of Object.entries({ original: initial, moved, twice, identity, changed })) {
       fs.writeFileSync(path.join(dir, `v${version}-${label}.wld`), fixture(version, values));
       fs.writeFileSync(path.join(dir, `v${version}-${label}.json`), JSON.stringify(strings(version, values)));
+      writeName(dir, `v${version}-${label}`, values.worldName);
     }
     fs.writeFileSync(path.join(dir, `v${version}-patch.json`), JSON.stringify({ patch }));
   }
@@ -70,6 +84,44 @@ function generate(dir) {
   fs.writeFileSync(path.join(dir, 'padded-original.wld'), fixture(326, padded));
   fs.writeFileSync(path.join(dir, 'padded-moved.wld'), fixture(326, { ...padded, spawnTileX: 1 }));
   fs.writeFileSync(path.join(dir, 'padded-original.json'), JSON.stringify(strings(326, padded)));
+  writeName(dir, 'padded-original', padded.worldName);
+
+  const names = {
+    'ascii-160': ['a'.repeat(160), 'a'.repeat(159) + 'b'],
+    'utf8-boundary': ['a'.repeat(158) + '界\0\u0001"\\\n尾', 'a'.repeat(158) + '中\u0001"\\\n改'],
+    short: ['World', '世界'],
+    empty: ['', 'Named'],
+    growth: ['g'.repeat(5000), 'g'.repeat(5000) + '-changed'],
+  };
+  for (const [label, [before, after]] of Object.entries(names)) {
+    for (const [stage, worldName] of Object.entries({ original: before, changed: after, twice: after + '-again' })) {
+      const stem = `map-${label}-${stage}`;
+      fs.writeFileSync(path.join(dir, `${stem}.wld`), fixture(326, { ...original, worldName }));
+      writeName(dir, stem, worldName);
+      fs.writeFileSync(path.join(dir, `${stem}.patch.json`), JSON.stringify({ patch: { worldName } }));
+    }
+  }
+
+  for (const version of [6, 7, 37, 58, 87]) {
+    const before = names['utf8-boundary'][0], after = names['utf8-boundary'][1];
+    for (const [stage, worldName, worldId] of [['original', before, 87], ['changed', after, 123], ['twice', after + '-again', 456]]) {
+      const stem = `legacy-v${version}-${stage}`;
+      let bytes = makeLegacyWorld(version, { worldName, worldId });
+      const footer = version < 7 ? { valid: false, worldName: '', worldId: 0, present: false }
+        : { valid: true, worldName: stage === 'original' ? 'Actual footer: ' + before : worldName, worldId: stage === 'original' ? 4321 : worldId };
+      if (version >= 7) {
+        // Deliberately different from the original header: the JSON getter
+        // must read the physical footer tuple rather than reuse header data.
+        const id = Buffer.alloc(4); id.writeInt32LE(footer.worldId);
+        bytes = Buffer.concat([bytes.subarray(0, bytes.length - encodedName(worldName).length - 5),
+          Buffer.from([1]), encodedName(footer.worldName), id]);
+      }
+      fs.writeFileSync(path.join(dir, `${stem}.wld`), bytes);
+      fs.writeFileSync(path.join(dir, `${stem}.json`), JSON.stringify({ worldName, worldId }));
+      fs.writeFileSync(path.join(dir, `${stem}.footer.json`), JSON.stringify(footer));
+      fs.writeFileSync(path.join(dir, `${stem}.patch.json`), JSON.stringify({ patch: { worldName, worldId } }));
+    }
+  }
 }
 
 if (require.main === module) generate(process.argv[2]);
