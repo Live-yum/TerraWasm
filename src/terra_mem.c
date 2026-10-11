@@ -69,6 +69,10 @@ union TxAllocHeader {
 #ifdef TERRAX_TESTING
 static uint32_t tx_test_allocation_limit=UINT32_MAX;
 void txw_test_allocation_limit(uint32_t n){tx_test_allocation_limit=n;}
+/* Test-only aggregate payload budget, held across an entire operation. This
+ * models optional allocations succeeding before mandatory later work runs. */
+static uint64_t tx_test_live_allocation_limit=UINT64_MAX;
+void txw_test_live_allocation_limit(uint64_t n){tx_test_live_allocation_limit=n;}
 #endif
 typedef struct TxCheckpointEntry {
     TxAllocHeader* root;
@@ -152,6 +156,13 @@ static uint64_t tx_total_live_bytes(void) {
     return tx_bridge_live_bytes + tx_native_live_bytes + tx_persistent_live_bytes;
 }
 
+#ifdef TERRAX_TESTING
+static int tx_test_has_headroom(uint64_t extra) {
+    uint64_t live=tx_total_live_bytes();
+    return extra<=tx_test_live_allocation_limit&&live<=tx_test_live_allocation_limit-extra;
+}
+#endif
+
 /* Bridge pointers originate in JavaScript and must be treated as untrusted, so
  * bridge validation keeps the existing list walk. Native/persistent pointers
  * never cross the public ABI: their payload is immediately after the aligned
@@ -220,7 +231,7 @@ static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
 
 static void* tx_new_root(uint32_t size, uint32_t domain) {
 #ifdef TERRAX_TESTING
-    if(size>tx_test_allocation_limit)return NULL;
+    if(size>tx_test_allocation_limit||!tx_test_has_headroom(size))return NULL;
 #endif
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
@@ -311,6 +322,9 @@ static void* tx_internal_realloc_domain(
         ((TxCheckpointEntry*)old->root.reserved)->freed = 1u;
         return replacement;
     }
+#ifdef TERRAX_TESTING
+    if(size>old_size&&!tx_test_has_headroom((uint64_t)size-old_size))return NULL;
+#endif
     TxAllocHeader* prev = old->root.prev;
     TxAllocHeader* next = old->root.next;
     TxAllocHeader* resized = (TxAllocHeader*)realloc(old, total);

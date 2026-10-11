@@ -12,12 +12,12 @@ function makeSectionedWorld(version, options = {}) {
   const f32 = n => { const b = Buffer.alloc(4); b.writeFloatLE(n); h.push(...b); };
   const f64 = n => { const b = Buffer.alloc(8); b.writeDoubleLE(n); h.push(...b); };
   const bool = n => u8(n ? 1 : 0);
-  const str = value => { const b = Buffer.from(String(value || ""), "utf8"); let n = b.length; while (n >= 128) { u8((n & 127) | 128); n >>>= 7; } u8(n); h.push(...b); };
+  const str = value => { const b = Buffer.from(String(value || ""), "utf8"); let n = b.length; while (n >= 128) { u8((n & 127) | 128); n >>>= 7; } if (options.paddedStringPrefixes) { u8(n | 128); u8(0); } else u8(n); h.push(...b); };
   const zero = n => { for (let i = 0; i < n; i++) u8(0); };
   str(options.worldName || `header-v${version}`);
-  if (version >= 179) { if (version === 179) i32(123); else str("seed"); zero(8); }
+  if (version >= 179) { if (version === 179) i32(Number(options.seed ?? 123)); else str(options.seed ?? "seed"); zero(8); }
   if (version >= 181) zero(16);
-  i32(1); i32(0); i32(1000); i32(0); i32(500); i32(500); i32(1000);
+  i32(options.worldId ?? 1); i32(0); i32(1000); i32(0); i32(500); i32(500); i32(1000);
   if (version >= 209) {
     i32(options.gameMode || 0);
     for (const gate of [222, 227, 238, 239, 241, 249, 266, 267, 302]) if (version >= gate) bool(false);
@@ -28,14 +28,14 @@ function makeSectionedWorld(version, options = {}) {
   if (version >= 141) { const b = Buffer.alloc(8); b.writeBigInt64LE(11n); h.push(...b); }
   if (version >= 284) zero(8);
   u8(options.moonType || 0); zero(3 * 4 + 4 * 4 + 3 * 4 + 4 * 4 + 3 * 4);
-  i32(0); i32(0); f64(0); f64(0); f64(0); bool(true); i32(0); bool(false); bool(false);
+  i32(options.spawnTileX ?? 0); i32(options.spawnTileY ?? 0); f64(0); f64(0); f64(0); bool(true); i32(0); bool(false); bool(false);
   i32(0); i32(0); bool(false); zero(10); if (version >= 118) bool(false); zero(7);
   bool(false); bool(false); u8(0); i32(0); bool(false); if (version >= 257) bool(false);
   i32(0); i32(0); i32(0); f64(0);
   if (version >= 118) f64(0);
   if (version >= 113) u8(0);
   bool(false); u32(0); f32(0); i32(0); i32(0); i32(0); zero(8); i32(0); i16(0); f32(0);
-  if (version >= 95) i32(0);
+  if (version >= 95) { const names = options.anglerWhoFinishedToday || []; i32(names.length); for (const name of names) str(name); }
   if (version >= 99) bool(false);
   if (version >= 101) i32(0);
   if (version >= 104) bool(false);
@@ -75,7 +75,7 @@ function makeSectionedWorld(version, options = {}) {
   if (version >= 304) bool(false);
   if (version >= 323) zero(2);
   if (version >= 299 && version < 313) i32(0);
-  if (version >= 299) str('{}');
+  if (version >= 299) str(options.manifestJson ?? '{}');
   const metadata = version >= 135 ? Buffer.concat([Buffer.from("relogic"), Buffer.from([2]), Buffer.alloc(12)]) : Buffer.alloc(0);
   const pointerCount = version >= 220 ? 11 : version >= 210 ? 10 : version >= 189 ? 9 : version >= 170 ? 8 : version >= 116 ? 7 : 6;
   const formatLength = 4 + metadata.length + 2 + pointerCount * 4 + 2 + 1;

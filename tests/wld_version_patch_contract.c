@@ -4,6 +4,7 @@
 #include "../src/terra_mutators.c"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern void serialize_chests_json(TxWorld*,TxBuf*);
@@ -90,6 +91,8 @@ static void chest_version_contract(uint32_t version) {
 
 static void header_208_modes_contract(void) {
     TxWorld w={0};w.maxTilesX=w.maxTilesY=100;
+    uint8_t names[]={0,0};w.file=names;w.file_len=sizeof names;
+    w.pointer_count=1;w.ends[0]=sizeof names;
     strcpy(w.uuid,"00000000-0000-0000-0000-000000000000");
     w.creationTime=UINT64_C(0x0807060504030201);w.moonType=9;
     TxJsonParser request={"",0u,0u};
@@ -125,6 +128,68 @@ static void legacy_chest_source_contract(void) {
     tx_reset_heap();
 }
 
+static char *empty_chests_request(uint32_t count,uint32_t slots) {
+    size_t capacity=32u+(size_t)count*(80u+5u*slots);
+    char *request=malloc(capacity);assert(request);
+    size_t used=(size_t)snprintf(request,capacity,"{\"chests\":[");
+    for(uint32_t i=0;i<count;i++){
+        used+=(size_t)snprintf(request+used,capacity-used,
+            "%s{\"x\":%u,\"y\":0,\"name\":\"\",\"maxItems\":%u,\"items\":[",i?",":"",i,slots);
+        for(uint32_t item=0;item<slots;item++)used+=(size_t)snprintf(request+used,capacity-used,"%snull",item?",":"");
+        used+=(size_t)snprintf(request+used,capacity-used,"]}");
+    }
+    used+=(size_t)snprintf(request+used,capacity-used,"]}");
+    assert(used<capacity&&used<1024u*1024u);
+    return request;
+}
+
+/* Independent file-layout checks: current WorldFile supports 8000 counted
+ * entries; LoadWorld_Version1_Old_BeforeRelease88 reads 1000 presence slots.
+ * Exercise source capacity, not a copy of the mutator's constants. */
+static void chest_capacity_contract(uint32_t version,int legacy) {
+    uint8_t original[]={0xaa,0xbb,0,0,2,0,0xcc,0xdd};
+    uint8_t snapshot[sizeof original];memcpy(snapshot,original,sizeof original);
+    TxWorld w={0};w.version=w.original_version=version;w.legacy_wld=(uint8_t)legacy;
+    w.pointer_count=4u;w.maxTilesX=8400;w.maxTilesY=2400;w.file=original;w.file_len=sizeof original;
+    w.starts[2]=2;w.ends[2]=6;
+    uint32_t slots=legacy?(version<58u?20u:40u):(version<294u?2u:0u);
+    const uint32_t counted_counts[]={0,1,1000,1001,1467,8000};
+    const uint32_t legacy_counts[]={0,1,999,1000};
+    const uint32_t *counts=legacy?legacy_counts:counted_counts;
+    uint32_t cases=legacy?4u:6u;
+    TxSectionOverride *section=&w.section_overrides[2];
+    for(uint32_t c=0;c<cases;c++){
+        uint32_t count=counts[c];char *request=empty_chests_request(count,slots);
+        assert(replace_chests(&w,request)>=0);free(request);
+        uint32_t offset=0u;
+        if(!legacy){
+            assert(section->data[offset++]==(uint8_t)count);
+            assert(section->data[offset++]==(uint8_t)(count>>8u));
+            if(version<294u){assert(section->data[offset++]==slots);assert(section->data[offset++]==0);}
+        }
+        for(uint32_t i=0;i<count;i++){
+            if(legacy)assert(section->data[offset++]==1);
+            for(uint32_t byte=0;byte<4;byte++)assert(section->data[offset++]==(uint8_t)(i>>(byte*8u)));
+            for(uint32_t byte=0;byte<4;byte++)assert(section->data[offset++]==0); /* y */
+            if(version>=85u)assert(section->data[offset++]==0); /* empty name */
+            if(version>=294u){assert(slots==0);for(uint32_t byte=0;byte<4;byte++)assert(section->data[offset++]==0);}
+            for(uint32_t byte=0;byte<slots*(version<59u?1u:2u);byte++)assert(section->data[offset++]==0);
+        }
+        if(legacy)for(uint32_t i=count;i<1000u;i++)assert(section->data[offset++]==0);
+        assert(section->active&&section->len==offset);
+        assert(w.version==version&&w.original_version==version);
+        assert(w.starts[2]==2&&w.ends[2]==6&&!memcmp(original,snapshot,sizeof original));
+    }
+    uint8_t *previous=section->data;uint32_t previous_len=section->len;
+    uint8_t *previous_bytes=malloc(previous_len);assert(previous_bytes);memcpy(previous_bytes,previous,previous_len);
+    char *over_limit=empty_chests_request(legacy?1001u:8001u,slots);
+    assert(replace_chests(&w,over_limit)<0);free(over_limit);
+    assert(section->data==previous&&section->len==previous_len);
+    assert(!memcmp(section->data,previous_bytes,previous_len));
+    assert(!memcmp(original,snapshot,sizeof original));
+    free(previous_bytes);tx_internal_free(section->data);tx_reset_heap();
+}
+
 int main(void) {
     const uint32_t boundaries[][2]={{194,195},{195,196},{267,268},{288,289},{311,312},{322,323}};
     for (uint32_t i=0;i<sizeof(boundaries)/sizeof(boundaries[0]);i++) {
@@ -136,9 +201,13 @@ int main(void) {
     assert(header_versions_compatible(323,326));
     assert(!header_versions_compatible(326,327));
     const uint32_t chest_versions[]={88,269,293,294,326};
-    for(size_t i=0;i<sizeof chest_versions/sizeof chest_versions[0];i++)chest_version_contract(chest_versions[i]);
+    for(size_t i=0;i<sizeof chest_versions/sizeof chest_versions[0];i++){
+        chest_version_contract(chest_versions[i]);chest_capacity_contract(chest_versions[i],0);
+    }
+    const uint32_t legacy_versions[]={1,35,37,38,57,58,59,84,85,87};
+    for(size_t i=0;i<sizeof legacy_versions/sizeof legacy_versions[0];i++)chest_capacity_contract(legacy_versions[i],1);
     header_208_modes_contract();
     legacy_chest_source_contract();
-    puts("versioned chest encoding, validation atomicity and v208 mode bytes: ok");
+    puts("versioned chest encoding, 8000 counted / 1000 legacy capacity, validation atomicity and v208 mode bytes: ok");
     return 0;
 }
