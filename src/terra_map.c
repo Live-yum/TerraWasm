@@ -1429,14 +1429,13 @@ static int map_base_strip_with_cache(TxPreparedMap* p, uint32_t cx, uint32_t* st
     extern int uncompress(unsigned char*, unsigned long*, const unsigned char*, unsigned long);
     for (uint32_t cy = 0; cy < p->cpc; cy++) {
         uint32_t i = cx * p->cpc + cy;
-        unsigned long size = 4096u * 4u;
-        int status = uncompress((unsigned char*)(strip + cy * 4096u), &size,
-                                p->bytes + p->offsets[i], p->sizes[i]);
-        if (status == -4 /* Z_MEM_ERROR */ && release_map_icon_values(icon_values)) {
+        unsigned long size;
+        int status;
+        do {
             size = 4096u * 4u;
             status = uncompress((unsigned char*)(strip + cy * 4096u), &size,
                                 p->bytes + p->offsets[i], p->sizes[i]);
-        }
+        } while (status == -4 /* Z_MEM_ERROR */ && release_map_icon_values(icon_values));
         if (status == -4) {
             tx_set_error("TERRAX_WASM_OOM", "prepared MAP decompression allocation failed"); return 0;
         }
@@ -1719,6 +1718,20 @@ static int stage_map_chunk(uint32_t chunk_index, const uint8_t* data, uint32_t s
     return 1;
 }
 
+/* Append located entities in scan order after the matching chest points. */
+static void copy_map_entity_points(MapChestPoint* destination, const TxMarkerPoint* points,
+                                   uint32_t count, const MapMarkerEntry* markers) {
+    for (uint32_t i = 0; i < count; i++) {
+        const MapMarkerEntry* marker = &markers[points[i].marker_index];
+        destination[i] = (MapChestPoint){
+            .x = points[i].x, .y = points[i].y, .item_id = marker->icon_id,
+            .radius = marker->radius, .line_width = marker->line_width,
+            .reserved = {1u, 0u},
+            .rgba = {marker->rgba[0], marker->rgba[1], marker->rgba[2], marker->rgba[3]}
+        };
+    }
+}
+
 static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request,
                                       uint32_t* matched_chest_count,
                                       uint32_t* matched_tile_count) {
@@ -1765,16 +1778,10 @@ static int32_t generate_map_streaming(TxWorld* w, const MapBuildRequest* request
         if (chest_point_count) memcpy(combined, chest_points, chest_point_count * sizeof(MapChestPoint));
         if (chest_points) tx_internal_free(chest_points);
         chest_points = combined;
-        const TxMarkerPoint* points = (const TxMarkerPoint*)entity_points.data;
-        for (uint32_t i = 0; i < entity_count; i++) {
-            const MapMarkerEntry* marker = &request->tile_markers[points[i].marker_index];
-            MapChestPoint* point = &chest_points[chest_point_count++];
-            memset(point, 0, sizeof(*point));
-            point->x = points[i].x; point->y = points[i].y; point->item_id = marker->icon_id;
-            point->radius = marker->radius; point->line_width = marker->line_width;
-            point->reserved[0] = 1u;
-            memcpy(point->rgba, marker->rgba, 4u);
-        }
+        copy_map_entity_points(chest_points + chest_point_count,
+                               (const TxMarkerPoint*)entity_points.data,
+                               entity_count, request->tile_markers);
+        chest_point_count += entity_count;
         tx_internal_free(entity_points.data);
         entity_points.data = NULL;
     }
@@ -2029,11 +2036,8 @@ TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_
         uint64_t bytes=((uint64_t)p->point_count+count)*sizeof(MapChestPoint);if(bytes>UINT32_MAX)goto failed;
         MapChestPoint* all=(MapChestPoint*)tx_alloc((uint32_t)bytes);if(!all)goto failed;
         if(p->point_count)memcpy(all,p->points,p->point_count*sizeof(MapChestPoint));if(p->points)tx_internal_free(p->points);p->points=all;
-        const TxMarkerPoint* entries=(const TxMarkerPoint*)entity->data;
-        for(uint32_t i=0;i<count;i++){
-            const MapMarkerEntry* m=&tiles[entries[i].marker_index];MapChestPoint* point=&all[p->point_count++];memset(point,0,sizeof(*point));
-            point->x=entries[i].x;point->y=entries[i].y;point->item_id=m->icon_id;point->radius=m->radius;point->line_width=m->line_width;point->reserved[0]=1;memcpy(point->rgba,m->rgba,4);
-        }
+        copy_map_entity_points(all+p->point_count,(const TxMarkerPoint*)entity->data,count,tiles);
+        p->point_count+=count;
     }
     buf_init(&p->header,4096);write_map_header(&p->header,w);if(!p->header.ok)goto failed;
     /* The same atlas pixels recur in every matching container/entity. Resolve
