@@ -1476,6 +1476,28 @@ static int write_map_chunk(uint32_t chunk_index, const uint8_t* data, uint32_t s
     return 1;
 }
 
+/* Only points that can reach the icon loop need an atlas-sized colour cache.
+ * Keep this gate shared by buffered and cooperative MAP encoders. Chest points
+ * carry the matched inventory item, while entity points carry icon_id. */
+static uint32_t* allocate_map_icon_values(TxWorld* w,const MapChestPoint* points,uint32_t count) {
+    uint64_t bytes=(uint64_t)w->icon_atlas.atlas_width*w->icon_atlas.atlas_height*4u;
+    if(!points||!count||!w->icon_atlas.rgba||!w->icon_atlas.icon_size||
+       !bytes||bytes>4u*1024u*1024u)return NULL;
+    for(uint32_t i=0;i<count;i++){
+        const MapChestPoint* point=&points[i];
+        if(point->item_id<0||!point->radius)continue;
+        uint32_t radius=point->radius,thickness=point->line_width;
+        if(thickness>radius)thickness=radius;
+        /* Equal thickness uses the full radius in draw_map_marker_on_strip. */
+        if(!terra_icon_side_for_radius(radius>thickness?radius-thickness:radius)||
+           terra_icon_index_for_item(&w->icon_atlas,point->item_id)<0)continue;
+        uint32_t* values=(uint32_t*)tx_alloc((uint32_t)bytes);
+        if(values)memset(values,0,(uint32_t)bytes);
+        return values; /* Optional allocation failure keeps the slow path. */
+    }
+    return NULL;
+}
+
 static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
                            MapChestPoint* chest_points, uint32_t chest_point_count,
                            uint32_t width, uint32_t height, uint32_t cpr, uint32_t cpc,
@@ -1515,11 +1537,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
     }
     /* Resolve each used atlas pixel once, regardless of how many chests/veins
      * share that icon. Oversized custom atlases retain the bounded slow path. */
-    uint64_t icon_bytes = (uint64_t)w->icon_atlas.atlas_width * w->icon_atlas.atlas_height * 4u;
-    if (w->icon_atlas.rgba && icon_bytes && icon_bytes <= 4u * 1024u * 1024u) {
-        icon_values = (uint32_t*)tx_alloc((uint32_t)icon_bytes);
-        if (icon_values) memset(icon_values, 0, (uint32_t)icon_bytes);
-    }
+    icon_values = allocate_map_icon_values(w, chest_points, chest_point_count);
 
     if (w->section_overrides[1].active) {
         tile_src = w->section_overrides[1].data;
@@ -1992,11 +2010,7 @@ TxStreamMap* tx_stream_map_begin(TxWorld* w,const MapMarkerEntry* chests,uint32_
      * buffered encoder already does. Allocate it after required storage;
      * allocation failure retains the exact slow path. Task ownership prevents
      * stale values when a later task uses another atlas or palette. */
-    uint64_t icon_bytes=(uint64_t)w->icon_atlas.atlas_width*w->icon_atlas.atlas_height*4u;
-    if(p->point_count&&w->icon_atlas.rgba&&icon_bytes&&icon_bytes<=4u*1024u*1024u){
-        p->icon_values=(uint32_t*)tx_alloc((uint32_t)icon_bytes);
-        if(p->icon_values)memset(p->icon_values,0,(uint32_t)icon_bytes);
-    }
+    p->icon_values=allocate_map_icon_values(w,p->points,p->point_count);
     return p;
 failed:tx_stream_map_free(p);return NULL;
 }
