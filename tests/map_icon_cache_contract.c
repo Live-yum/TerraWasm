@@ -1,12 +1,24 @@
 /* Differential oracle: the existing buffered MAP strip writer and the former
  * uncached stream path must emit exactly the same complete MAP bytes. Include
  * the implementation to inspect optional-cache ownership without new ABI. */
+#include "terra_types.h"
+#include <zlib.h>
+static uint8_t* observe_map_alloc(uint32_t);
+static void observe_map_buf_init(TxBuf*,uint32_t);
+static int observe_map_uncompress(unsigned char*,unsigned long*,const unsigned char*,unsigned long);
+#define tx_alloc observe_map_alloc
+#define buf_init observe_map_buf_init
+#define uncompress observe_map_uncompress
 #include "../src/terra_map.c"
+#undef tx_alloc
+#undef buf_init
+#undef uncompress
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <zlib.h>
 
+extern uint8_t* tx_alloc(uint32_t);
+extern void buf_init(TxBuf*,uint32_t);
 extern uint32_t tx_native_heap_used(void);
 extern uint32_t tx_heap_used(void);
 extern void txw_test_allocation_limit(uint32_t);
@@ -22,6 +34,56 @@ static uint8_t important[1];
 static TxBuf tiles;
 static const MapMarkerEntry *chest_markers;
 static uint32_t chest_marker_count;
+static uint32_t observed_icon_pixels;
+static struct {
+    int enabled;
+    uint32_t cache_allocations,cache_live,compression_ok,compression_failed;
+    uint32_t window_ok,window_failed,chunk_output_ok,chunk_output_failed;
+} allocation_trace;
+static uint32_t decode_calls,decode_oom_count;
+
+/* Observe real allocations made by the included encoder. These wrappers do
+ * not change allocation results or the aggregate budget implementation. */
+static uint8_t* observe_map_alloc(uint32_t size) {
+    uint8_t *p=tx_alloc(size);
+    if(allocation_trace.enabled&&p&&size==4u*1024u*1024u){
+        allocation_trace.cache_allocations++;allocation_trace.cache_live=tx_heap_used();
+    }
+    return p;
+}
+
+static void observe_map_buf_init(TxBuf *b,uint32_t size) {
+    buf_init(b,size);
+    if(!allocation_trace.enabled)return;
+    if(size==17408u){
+        if(b->ok)allocation_trace.compression_ok++;else allocation_trace.compression_failed++;
+    }else if(size==1048576u){
+        if(b->ok)allocation_trace.window_ok++;else allocation_trace.window_failed++;
+    }else if(size!=4096u&&size!=65536u){
+        if(b->ok)allocation_trace.chunk_output_ok++;else allocation_trace.chunk_output_failed++;
+    }
+}
+
+static int observe_map_uncompress(unsigned char *out,unsigned long *size,
+                                 const unsigned char *data,unsigned long length) {
+    decode_calls++;
+    if(decode_oom_count){decode_oom_count--;*size=1;return Z_MEM_ERROR;}
+    return uncompress(out,size,data,length);
+}
+
+static void observe_icon_pixels(TxStreamMap *encoder) {
+    if(!encoder->icon_values)return;
+    uint32_t resolved=0;
+    for(uint32_t i=0;i<world.icon_atlas.atlas_width*world.icon_atlas.atlas_height;i++){
+        if(!world.icon_atlas.rgba[i*4+3])assert(!encoder->icon_values[i]);
+        resolved+=encoder->icon_values[i]!=0;
+    }
+    if(resolved>observed_icon_pixels)observed_icon_pixels=resolved;
+}
+
+static void begin_allocation_trace(void) {
+    memset(&allocation_trace,0,sizeof allocation_trace);allocation_trace.enabled=1;
+}
 
 static TxStreamMap* begin_map(void) {
     return tx_stream_map_begin(&world,chest_markers,chest_marker_count,
@@ -99,11 +161,15 @@ static TxBuf buffered_map(TxStreamMap *encoder,uint32_t *extra_peak) {
 /* The collector is allocated by the caller before imposing any memory budget.
  * A failure in the OOM contract must come from the real encoder, not this sink. */
 static int finish_stream(TxStreamMap *encoder,TxBuf *result) {
+    observed_icon_pixels=0;
     for(uint32_t iterations=0;iterations<10000;iterations++){
         uint32_t offset=0,length=0,first=0,count=0;const uint8_t *bytes=NULL;
         int pending=tx_stream_map_pull(encoder,&offset,&bytes,&length);
         if(pending<0)return 0;
         if(pending){
+            uint32_t again_offset=0,again_length=0;const uint8_t *again=NULL;
+            assert(tx_stream_map_pull(encoder,&again_offset,&again,&again_length)==1);
+            assert(offset==again_offset&&length==again_length&&bytes==again);
             assert(offset<=UINT32_MAX-length);uint32_t end=offset+length;
             /* No allocations here: complete outputs fit in the preallocated collector. */
             assert(end<=result->cap);memcpy(result->data+offset,bytes,length);
@@ -118,6 +184,7 @@ static int finish_stream(TxStreamMap *encoder,TxBuf *result) {
             TxTile tile=column(x);if(!tx_stream_map_run(encoder,x,0,&tile,128))return 0;
         }
         if(!tx_stream_map_finish_strip(encoder))return 0;
+        observe_icon_pixels(encoder);
     }
     assert(!"MAP encoder did not finish");return 0;
 }
@@ -134,14 +201,8 @@ static TxBuf stream_map(int cache,int low_memory,int buffered_oracle) {
         assert(tx_native_heap_used()==baseline+result.cap);return result;
     }
     TxBuf result={0};buf_init(&result,65536);assert(result.ok&&finish_stream(encoder,&result));
-    if(encoder->icon_values){
-        uint32_t resolved=0;
-        for(uint32_t i=0;i<world.icon_atlas.atlas_width*world.icon_atlas.atlas_height;i++){
-            if(!world.icon_atlas.rgba[i*4+3])assert(!encoder->icon_values[i]);
-            resolved+=encoder->icon_values[i]!=0;
-        }
-        assert(resolved>512); /* Exercise saturation of the older RGB cache. */
-    }
+    if(cache&&!low_memory&&world.icon_atlas.rgba)
+        assert(observed_icon_pixels>512); /* Measured before direct-output eviction. */
     /* Every compressed chunk is a valid, complete 64x64 uint32 MAP plane. */
     uint32_t at=encoder->header.len;uint8_t raw[16384];
     for(uint32_t i=0;i<encoder->chunks;i++){
@@ -161,11 +222,7 @@ static void gate_case(const char *name,int expect_cache) {
     assert((encoder->icon_values!=NULL)==expect_cache);
     uint32_t begin_bytes=tx_native_heap_used()-baseline;
     TxBuf actual={0};buf_init(&actual,65536);assert(actual.ok&&finish_stream(encoder,&actual));
-    if(expect_cache){
-        uint32_t used=0;
-        for(uint32_t i=0;i<world.icon_atlas.atlas_width*world.icon_atlas.atlas_height;i++)used+=encoder->icon_values[i]!=0;
-        assert(used); /* Positive cases must really reach and sample the icon. */
-    }
+    if(expect_cache)assert(observed_icon_pixels); /* Really sampled before output eviction. */
     TxBuf buffered=buffered_map(encoder,&buffered_peak);equal(&actual,&buffered);
     tx_stream_map_free(encoder);
 
@@ -289,12 +346,184 @@ static int later_compression_budget_contract(void) {
     assert(tx_heap_used()==baseline);return !allocated&&complete;
 }
 
+static void draw_next_strip(TxStreamMap *encoder) {
+    uint32_t first=0,count=0;assert(tx_stream_map_range(encoder,&first,&count)==1);
+    for(uint32_t x=first;x<first+count;x++){
+        TxTile tile=column(x);assert(tx_stream_map_run(encoder,x,0,&tile,128));
+    }
+    assert(tx_stream_map_finish_strip(encoder));observe_icon_pixels(encoder);
+}
+
+/* All goldens keep the same atlas and visible icons, explicitly disabling
+ * only the colour cache. Modes target distinct real encoder allocations. */
+static int stream_pressure_contract(uint32_t mode) {
+    static const char *names[]={"first-compression","later-compression","staged-output-window",
+        "fallback-compression","fallback-chunk-output","staging-growth-fallback","fallback-with-headroom"};
+    uint32_t baseline=tx_heap_used();set_atlas(0,1024,1024);
+    TxBuf golden=stream_map(0,0,0),actual={0};buf_init(&actual,65536);assert(actual.ok);
+    uint64_t budget=UINT64_MAX;
+    if(mode==0){
+        uint32_t before=tx_heap_used();TxStreamMap *probe=begin_map();assert(probe&&probe->icon_values);
+        budget=tx_heap_used();tx_stream_map_free(probe);assert(tx_heap_used()==before);
+        txw_test_live_allocation_limit(budget);
+    }
+    tx_clear_error();begin_allocation_trace();TxStreamMap *encoder=begin_map();
+    assert(encoder&&encoder->icon_values&&allocation_trace.cache_allocations==1);
+    uint32_t cache_live=allocation_trace.cache_live;
+    if(mode==1)draw_next_strip(encoder);
+    if(mode==2)while(encoder->cx<encoder->cpr)draw_next_strip(encoder);
+    if(mode==3||mode==4||mode==6)encoder->fallback=1;
+    if(mode==3||mode==4){
+        while(encoder->cx<encoder->cpr)draw_next_strip(encoder);
+        uint32_t x=0,n=0;assert(tx_stream_map_range(encoder,&x,&n)<0&&encoder->pass==1&&encoder->pending==1);
+        memcpy(actual.data,encoder->header.data,encoder->header.len);actual.len=encoder->header.len;
+        assert(tx_stream_map_ack(encoder));draw_next_strip(encoder);
+        assert(encoder->pending==2&&encoder->icon_values&&!encoder->output.data);
+    }
+    if(mode==5){
+        tx_internal_free(encoder->staged.data);buf_init(&encoder->staged,64);assert(encoder->staged.ok);
+    }
+    if(mode!=0&&mode!=6){
+        budget=(uint64_t)tx_heap_used()+((mode==4||mode==5)?17408u:0u);
+        txw_test_live_allocation_limit(budget);
+    }
+    uint32_t compression_before=allocation_trace.compression_ok;
+    int complete=finish_stream(encoder,&actual),cache_left=encoder->icon_values!=NULL;
+    if(complete){equal(&actual,&golden);assert(!tx_last_error[0]);}
+    int correct=complete;
+    if(mode==0||mode==1||mode==3)
+        correct=correct&&!cache_left&&allocation_trace.compression_failed==1&&allocation_trace.compression_ok>compression_before;
+    if(mode==2)correct=correct&&!cache_left&&encoder->pass==2&&allocation_trace.window_ok==1&&!allocation_trace.window_failed;
+    if(mode==4)correct=correct&&!cache_left&&!allocation_trace.compression_failed&&
+        allocation_trace.chunk_output_failed==1&&allocation_trace.chunk_output_ok>0;
+    if(mode==5)correct=correct&&encoder->fallback&&!cache_left;
+    if(mode==6)correct=correct&&cache_left&&observed_icon_pixels>512;
+    printf("drawable stream %s: cap=%llu cache_allocations=%u cache_live=%u cache_left=%d compression_ok=%u compression_failed=%u window_ok=%u window_failed=%u chunk_output_ok=%u chunk_output_failed=%u pass=%u complete=%d bytes=%u error=%s\n",
+        names[mode],(unsigned long long)budget,allocation_trace.cache_allocations,cache_live,cache_left,
+        allocation_trace.compression_ok,allocation_trace.compression_failed,allocation_trace.window_ok,allocation_trace.window_failed,
+        allocation_trace.chunk_output_ok,allocation_trace.chunk_output_failed,encoder->pass,complete,actual.len,
+        tx_last_error[0]?tx_last_error:"none");
+    allocation_trace.enabled=0;tx_stream_map_free(encoder);txw_test_live_allocation_limit(UINT64_MAX);tx_clear_error();
+    tx_internal_free(actual.data);tx_internal_free(golden.data);assert(tx_heap_used()==baseline);return correct;
+}
+
+static void append_buffered_chunks(TxStreamMap *encoder,TxBuf *result,TxBuf *staged,
+                                   uint32_t *sizes,uint32_t *offsets) {
+    buf_bytes(result,encoder->header.data,encoder->header.len);
+    for(uint32_t i=0;i<encoder->chunks;i++){
+        buf_u32le(result,sizes[i]);buf_bytes(result,staged->data+offsets[i],sizes[i]);
+    }
+    assert(result->ok);
+}
+
+/* Exercise the production staging, measuring and positioned-output sinks.
+ * The last mode reproduces staging growth pressure and its original two-pass
+ * fallback instead of retrying an arbitrary sink with partially written state. */
+static int buffered_pressure_contract(uint32_t mode) {
+    static const char *names[]={"staged-compression","positioned-output","measure-and-output","staging-growth-fallback"};
+    uint32_t baseline=tx_heap_used();set_atlas(0,1024,1024);
+    TxStreamMap *encoder=begin_map();assert(encoder&&encoder->icon_values);
+    tx_internal_free(encoder->icon_values);encoder->icon_values=NULL;
+    txw_test_allocation_limit(128u*1024u);TxBuf golden=buffered_map(encoder,NULL);txw_test_allocation_limit(UINT32_MAX);
+    TxBuf actual={0},staged={0};buf_init(&actual,65536);buf_init(&staged,mode==3?64:65536);assert(actual.ok&&staged.ok);
+    uint32_t *sizes=calloc(encoder->chunks,4),*offsets=calloc(encoder->chunks,4);assert(sizes&&offsets);
+    uint32_t at=encoder->header.len;
+    for(uint32_t i=0;i<encoder->chunks;i++){
+        offsets[i]=at;sizes[i]=(uint32_t)golden.data[at]|(uint32_t)golden.data[at+1]<<8|
+            (uint32_t)golden.data[at+2]<<16|(uint32_t)golden.data[at+3]<<24;at+=4+sizes[i];
+    }
+    assert(at==golden.len);
+    MapChunkStagingContext stage={&staged,offsets,sizes,encoder->chunks,32u*1024u*1024u,0};
+    MapChunkMeasureContext measure={sizes,encoder->chunks};
+    MapChunkWriteContext write={actual.data,golden.len,offsets,sizes,encoder->chunks};
+    MapChunkSink sink=mode==1?write_map_chunk:mode==2?measure_map_chunk:stage_map_chunk;
+    void *context=mode==1?(void*)&write:mode==2?(void*)&measure:(void*)&stage;
+    if(mode==1){memcpy(actual.data,encoder->header.data,encoder->header.len);actual.len=golden.len;}
+    uint64_t budget=(uint64_t)tx_heap_used()+encoder->strip_bytes+4u*1024u*1024u+(mode==3?17408u:0u);
+    txw_test_live_allocation_limit(budget);tx_clear_error();begin_allocation_trace();
+    uint8_t *original=world.file;uint32_t original_len=world.file_len;
+    int complete=walk_map_chunks(&world,&encoder->request,encoder->points,encoder->point_count,
+        encoder->width,encoder->height,encoder->cpr,encoder->cpc,encoder->strip_bytes,NULL,sink,context);
+    assert(world.file==original&&world.file_len==original_len&&allocation_trace.cache_allocations==1);
+    if(mode==3){
+        assert(!complete&&stage.fallback&&!staged.ok);tx_internal_free(staged.data);staged.data=NULL;
+        tx_clear_error();memset(sizes,0,encoder->chunks*4);memset(offsets,0,encoder->chunks*4);
+        complete=walk_map_chunks(&world,&encoder->request,encoder->points,encoder->point_count,
+            encoder->width,encoder->height,encoder->cpr,encoder->cpc,encoder->strip_bytes,NULL,measure_map_chunk,&measure);
+    }
+    if(complete&&(mode==2||mode==3)){
+        at=encoder->header.len;
+        for(uint32_t i=0;i<encoder->chunks;i++){offsets[i]=at;at+=4+sizes[i];}
+        assert(at==golden.len);memcpy(actual.data,encoder->header.data,encoder->header.len);actual.len=at;
+        complete=walk_map_chunks(&world,&encoder->request,encoder->points,encoder->point_count,
+            encoder->width,encoder->height,encoder->cpr,encoder->cpc,encoder->strip_bytes,NULL,write_map_chunk,&write);
+    }else if(complete&&mode==0)append_buffered_chunks(encoder,&actual,&staged,sizes,offsets);
+    if(complete){equal(&actual,&golden);assert(!tx_last_error[0]);}
+    printf("drawable buffered %s: cap=%llu cache_allocations=%u cache_live=%u compression_ok=%u compression_failed=%u complete=%d bytes=%u error=%s\n",
+        names[mode],(unsigned long long)budget,allocation_trace.cache_allocations,allocation_trace.cache_live,
+        allocation_trace.compression_ok,allocation_trace.compression_failed,complete,actual.len,tx_last_error[0]?tx_last_error:"none");
+    int correct=complete&&(mode==3||allocation_trace.compression_failed>0);
+    allocation_trace.enabled=0;txw_test_live_allocation_limit(UINT64_MAX);tx_clear_error();
+    free(sizes);free(offsets);tx_internal_free(actual.data);tx_internal_free(golden.data);
+    if(staged.data)tx_internal_free(staged.data);tx_stream_map_free(encoder);assert(tx_heap_used()==baseline);return correct;
+}
+
+static void prepared_decode_contract(void) {
+    uint32_t baseline=tx_heap_used();set_atlas(0,1024,1024);
+    TxPreparedMap *base=tx_map_base_begin(&world);assert(base);
+    for(uint32_t x=0;x<(uint32_t)world.maxTilesX;x++){
+        TxTile tile=column(x);assert(tx_map_base_run(&world,base,x,0,&tile,128));
+    }
+    prepared.map=base;
+    TxStreamMap *encoder=begin_map();assert(encoder&&encoder->icon_values);
+    tx_internal_free(encoder->icon_values);encoder->icon_values=NULL;
+    txw_test_allocation_limit(128u*1024u);TxBuf golden=buffered_map(encoder,NULL);txw_test_allocation_limit(UINT32_MAX);
+    for(uint32_t mode=0;mode<3;mode++){
+        TxBuf actual={0},staged={0};buf_init(&actual,65536);buf_init(&staged,65536);
+        uint32_t *sizes=calloc(encoder->chunks,4),*offsets=calloc(encoder->chunks,4);assert(sizes&&offsets);
+        MapChunkStagingContext stage={&staged,offsets,sizes,encoder->chunks,32u*1024u*1024u,0};
+        uint8_t original=base->bytes[base->offsets[0]];
+        if(mode==2)base->bytes[base->offsets[0]]=0; /* Real malformed zlib header. */
+        decode_calls=0;decode_oom_count=mode==0?1:mode==1?2:0;
+        tx_clear_error();begin_allocation_trace();uint32_t before=tx_heap_used();
+        int complete=walk_map_chunks(&world,&encoder->request,encoder->points,encoder->point_count,
+            encoder->width,encoder->height,encoder->cpr,encoder->cpc,encoder->strip_bytes,NULL,stage_map_chunk,&stage);
+        assert(tx_heap_used()==before&&allocation_trace.cache_allocations==1);
+        if(mode==0){
+            assert(complete&&decode_calls==encoder->chunks+1&&!tx_last_error[0]);
+            append_buffered_chunks(encoder,&actual,&staged,sizes,offsets);equal(&actual,&golden);
+        }else if(mode==1){
+            assert(!complete&&decode_calls==2&&strstr(tx_last_error,"TERRAX_WASM_OOM"));
+        }else{
+            assert(!complete&&decode_calls==1&&strstr(tx_last_error,"TERRAX_STATE_ERROR"));
+        }
+        printf("prepared decode mode=%u calls=%u complete=%d bytes=%u error=%s\n",mode,decode_calls,complete,actual.len,tx_last_error[0]?tx_last_error:"none");
+        allocation_trace.enabled=0;base->bytes[base->offsets[0]]=original;decode_oom_count=0;tx_clear_error();
+        free(sizes);free(offsets);tx_internal_free(actual.data);tx_internal_free(staged.data);
+    }
+    tx_internal_free(golden.data);tx_stream_map_free(encoder);prepared.map=NULL;tx_map_base_free(base);
+    assert(tx_heap_used()==baseline);
+}
+
+static void cancel_after_eviction_contract(void) {
+    uint32_t baseline=tx_heap_used();set_atlas(0,1024,1024);
+    TxStreamMap *encoder=begin_map();assert(encoder&&encoder->icon_values);
+    txw_test_live_allocation_limit(tx_heap_used());draw_next_strip(encoder);
+    assert(!encoder->icon_values&&encoder->cx==1&&!tx_last_error[0]);
+    tx_stream_map_free(encoder);txw_test_live_allocation_limit(UINT64_MAX);assert(tx_heap_used()==baseline);
+}
+
 int main(int argc,char **argv) {
     aggregate_budget_contract();
     make_world();set_atlas(0,256,256);
     if(argc==2&&!strcmp(argv[1],"--oom-only")){
         int ok=later_compression_budget_contract();free(world.icon_atlas.rgba);tx_internal_free(tiles.data);
         assert(tx_heap_used()==0);return ok?0:1;
+    }
+    if(argc==2&&(!strcmp(argv[1],"--drawable-oom")||!strcmp(argv[1],"--output-oom")||!strcmp(argv[1],"--buffered-oom"))){
+        int ok=!strcmp(argv[1],"--buffered-oom")?buffered_pressure_contract(0):
+            stream_pressure_contract(!strcmp(argv[1],"--output-oom")?4:0);
+        free(world.icon_atlas.rgba);tx_internal_free(tiles.data);assert(tx_heap_used()==0);return ok?0:1;
     }
     TxBuf first=stream_map(1,0,0),uncached=stream_map(0,0,0),buffered=stream_map(1,0,1),fallback=stream_map(1,1,0);
     equal(&first,&uncached);equal(&first,&buffered);equal(&first,&fallback);
@@ -312,6 +541,9 @@ int main(int argc,char **argv) {
     TxBuf without=stream_map(1,0,0),without_reference=stream_map(0,0,1);equal(&without,&without_reference);
     tx_internal_free(without.data);tx_internal_free(without_reference.data);
     drawable_gate_contract();assert(later_compression_budget_contract());
+    for(uint32_t mode=0;mode<7;mode++)assert(stream_pressure_contract(mode));
+    for(uint32_t mode=0;mode<4;mode++)assert(buffered_pressure_contract(mode));
+    prepared_decode_contract();cancel_after_eviction_contract();
     free(world.icon_atlas.rgba);tx_internal_free(tiles.data);
     assert(tx_native_heap_used()==0);
     puts("MAP icon cache: exact buffered/uncached bytes, drawable-point gates, aggregate-budget compression, alpha/repeated RGB, atlas replacement, 4 MiB bound, allocation fallback and cancellation release passed");

@@ -1330,6 +1330,23 @@ static int compress_chunk_exact(const uint32_t* raw_chunk, TxBuf* compressed) {
     return 1;
 }
 
+static int release_map_icon_values(uint32_t** values) {
+    if (!values || !*values) return 0;
+    tx_internal_free(*values);
+    *values = NULL;
+    return 1;
+}
+
+/* The optional atlas cache must not prevent a mandatory chunk allocation.
+ * Compression owns no output on failure, so retry the same rendered pixels
+ * once without the cache; never replay an already advanced strip or sink. */
+static int compress_map_chunk(const uint32_t* raw, TxBuf* compressed, uint32_t** icon_values) {
+    if (compress_chunk_exact(raw, compressed)) return 1;
+    if (!release_map_icon_values(icon_values)) return 0;
+    tx_clear_error();
+    return compress_chunk_exact(raw, compressed);
+}
+
 typedef int (*MapChunkSink)(uint32_t chunk_index, const uint8_t* data, uint32_t size, void* context);
 
 struct TxPreparedMap {
@@ -1407,17 +1424,31 @@ int tx_map_base_run(TxWorld* w, TxPreparedMap* p, uint32_t x, uint32_t y,
     return 1;
 }
 
-int tx_map_base_strip(TxPreparedMap* p, uint32_t cx, uint32_t* strip) {
+static int map_base_strip_with_cache(TxPreparedMap* p, uint32_t cx, uint32_t* strip,
+                                     uint32_t** icon_values) {
     extern int uncompress(unsigned char*, unsigned long*, const unsigned char*, unsigned long);
     for (uint32_t cy = 0; cy < p->cpc; cy++) {
         uint32_t i = cx * p->cpc + cy;
         unsigned long size = 4096u * 4u;
-        if (uncompress((unsigned char*)(strip + cy * 4096u), &size,
-                       p->bytes + p->offsets[i], p->sizes[i]) != 0 || size != 4096u * 4u) {
+        int status = uncompress((unsigned char*)(strip + cy * 4096u), &size,
+                                p->bytes + p->offsets[i], p->sizes[i]);
+        if (status == -4 /* Z_MEM_ERROR */ && release_map_icon_values(icon_values)) {
+            size = 4096u * 4u;
+            status = uncompress((unsigned char*)(strip + cy * 4096u), &size,
+                                p->bytes + p->offsets[i], p->sizes[i]);
+        }
+        if (status == -4) {
+            tx_set_error("TERRAX_WASM_OOM", "prepared MAP decompression allocation failed"); return 0;
+        }
+        if (status != 0 || size != 4096u * 4u) {
             tx_set_error("TERRAX_STATE_ERROR", "prepared MAP chunk is invalid"); return 0;
         }
     }
     return 1;
+}
+
+int tx_map_base_strip(TxPreparedMap* p, uint32_t cx, uint32_t* strip) {
+    return map_base_strip_with_cache(p, cx, strip, NULL);
 }
 
 typedef struct MapChunkMeasureContext {
@@ -1556,7 +1587,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
         uint32_t column_count = width > world_x_base ? width - world_x_base : 0u;
         if (column_count > 64u) column_count = 64u;
         if (prepared) {
-            if (chest_point_count) ok = tx_map_base_strip(prepared, chunk_x, strip);
+            if (chest_point_count) ok = map_base_strip_with_cache(prepared, chunk_x, strip, &icon_values);
             if (base_strip && ok) memcpy(base_strip, strip, strip_bytes);
         }
         else prefill_chunk_strip_background(strip, cpc, chunk_x, width, height,
@@ -1606,7 +1637,7 @@ static int walk_map_chunks(TxWorld* w, const MapBuildRequest* request,
                 ok = sink(chunk_index, prepared->bytes + prepared->offsets[i], prepared->sizes[i], sink_context);
                 continue;
             }
-            if (!compress_chunk_exact(strip + chunk_y * 4096u, &compressed)) {
+            if (!compress_map_chunk(strip + chunk_y * 4096u, &compressed, &icon_values)) {
                 ok = 0;
                 break;
             }
@@ -2023,6 +2054,9 @@ int tx_stream_map_range(TxStreamMap* p,uint32_t* first,uint32_t* count){
         for(uint32_t i=0;i<p->chunks;i++){if(total+4+p->sizes[i]>UINT32_MAX)return -1;p->offsets[i]=(uint32_t)total;total+=4+p->sizes[i];}
         p->total=(uint32_t)total;
         if(!p->fallback){
+            /* All marked strips are staged: direct output never draws again.
+             * Keep the cache for an existing two-pass fallback, which does. */
+            release_map_icon_values(&p->icon_values);
             buf_init(&p->output,1048576u);
             if(!p->output.ok)p->fallback=1;
         }
@@ -2047,7 +2081,7 @@ int tx_stream_map_finish_strip(TxStreamMap* p){
     for(uint32_t i=0;i<p->point_count;i++)draw_map_marker_on_strip(p->world,p->strip,p->cx*64,p->width,p->height,&p->points[i],p->colors,&p->color_count,p->icon_values);
     if(!p->pass){
         for(uint32_t cy=0;cy<p->cpc;cy++){
-            TxBuf bytes={0};if(!compress_chunk_exact(p->strip+cy*4096,&bytes))return 0;
+            TxBuf bytes={0};if(!compress_map_chunk(p->strip+cy*4096,&bytes,&p->icon_values))return 0;
             uint32_t index=cy*p->cpr+p->cx;p->sizes[index]=bytes.len;
             if(!p->fallback){
                 MapChunkStagingContext stage={&p->staged,p->staged_offsets,p->sizes,p->chunks,TX_MAP_SINGLE_PASS_STAGING_LIMIT_BYTES,0};
@@ -2080,9 +2114,14 @@ int tx_stream_map_pull(TxStreamMap* p,uint32_t* offset,const uint8_t** bytes,uin
         *offset=p->emit_offset;*bytes=p->output.data;*length=p->output.len;return p->output.ok&&p->output.len?1:-1;
     }
     uint32_t index=p->cy*p->cpr+p->cx;
-    if(!p->output.data){TxBuf compressed={0};if(!compress_chunk_exact(p->strip+p->cy*4096,&compressed))return -1;
+    if(!p->output.data){TxBuf compressed={0};if(!compress_map_chunk(p->strip+p->cy*4096,&compressed,&p->icon_values))return -1;
         if(compressed.len!=p->sizes[index]){tx_internal_free(compressed.data);return -1;}
-        buf_init(&p->output,compressed.len+4);buf_u32le(&p->output,compressed.len);buf_bytes(&p->output,compressed.data,compressed.len);tx_internal_free(compressed.data);if(!p->output.ok)return -1;
+        buf_init(&p->output,compressed.len+4);
+        if(!p->output.ok&&release_map_icon_values(&p->icon_values)){
+            tx_clear_error();buf_init(&p->output,compressed.len+4);
+        }
+        buf_u32le(&p->output,compressed.len);buf_bytes(&p->output,compressed.data,compressed.len);tx_internal_free(compressed.data);
+        if(!p->output.ok){tx_set_error("TERRAX_WASM_OOM","map chunk output allocation failed");return -1;}
     }
     *offset=p->offsets[index];*bytes=p->output.data;*length=p->output.len;return 1;
 }
