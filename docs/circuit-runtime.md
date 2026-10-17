@@ -42,7 +42,13 @@ node --test ../TerraWasm/tests/circuit/projectile-contract.cjs \
 
 47 项通过，包含真实 Node/Web WASM、电路百万格、世界保存重开、HELLO、取消恢复、601/186 与 PixelBox。`build.ps1 -Test` 也已纳入两个迁入的 JS 合约。helper C 合约需另行用 host GCC 编译，不能把上述结果当成 host C 验证。
 
-## 尚未完成的客户端统一
+## 客户端统一进展（已完成迁移）
+
+后续已完成 all Web compact 导出、角色/电路/世界共享产物、小程序独立引擎分包及 H5 去重。clean 构建 `0ffa3e8d59ee5dc10a6bad3a51c133f1bda166bd` 的 Web WASM 为 453,818 bytes，原体积门禁通过。最新交付与验证记录见 `viewer-app/docs/wasm-workspace-artifact-sync.md`。
+
+以下为第一阶段的历史状态，不再代表当前客户端：
+
+## 第一阶段记录
 
 viewer-app 仍使用原来三套已校验产物，未替换二进制、manifest 或运行实例。原电路同步脚本迁到 `viewer-app/scripts/sync-terrawasm-circuit.mjs`，行为不变。
 
