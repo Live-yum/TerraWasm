@@ -132,6 +132,7 @@ int cx_cache_flush(CxWorld* w){
 static void destroy(CxWorld* w){
     if(!w)return;terra_vm_destroy(w->vm);w->vm=NULL;terra_twld_destroy(w->twld);w->twld=NULL;
     cx_fragments_free(w);
+    cx_order_close(w);
     cx_words_free(w,&w->parents);cx_words_free(w,&w->code_ends);cx_words_free(w,&w->member_ends);cx_words_free(w,&w->previous_gate);
     cx_bytes_free(w,&w->map);cx_bytes_free(w,&w->checkpoints);cx_bytes_free(w,&w->code);cx_bytes_free(w,&w->members);
 #define RELEASE(field) cx_free(w,w->field)
@@ -140,6 +141,7 @@ static void destroy(CxWorld* w){
     RELEASE(intern_buffer);RELEASE(hashes);RELEASE(general);RELEASE(lamps);RELEASE(devices);RELEASE(pixels);RELEASE(overrides);RELEASE(bindings);
     RELEASE(points);RELEASE(result);RELEASE(output);RELEASE(general_snapshot);RELEASE(mods);RELEASE(ports);RELEASE(pixel_touched);RELEASE(pixel_snapshot);
     RELEASE(mechs);RELEASE(mechs_snapshot);RELEASE(trigger_nets);RELEASE(override_snapshot);
+    RELEASE(projectiles);RELEASE(projectile_snapshot);RELEASE(solid_spans);RELEASE(solid_columns);
     RELEASE(policies);cx_free(w,w->previous_columns[0]);cx_free(w,w->previous_columns[1]);
 #undef RELEASE
     tx_persistent_free(w);

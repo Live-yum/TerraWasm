@@ -45,6 +45,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_circuit_vm.c"
     "${SRC_DIR}/terra_circuit_world.c"
     "${SRC_DIR}/terra_circuit_compile.c"
+    "${SRC_DIR}/terra_circuit_order.c"
     "${SRC_DIR}/terra_circuit_rules.c"
     "${SRC_DIR}/terra_circuit_query.c"
     "${SRC_DIR}/terra_circuit_twld.c"
@@ -112,7 +113,7 @@ endif()
 set(TERRAX_OPTIMIZE_FLAG "${TERRAX_DEFAULT_OPTIMIZE_FLAG}" CACHE STRING "Optimization flag for release-style Wasm builds")
 set(TERRAX_NODE_INITIAL_MEMORY "134217728" CACHE STRING "Node WASM initial linear memory in bytes")
 set(TERRAX_NODE_MAXIMUM_MEMORY "536870912" CACHE STRING "Node WASM maximum linear memory in bytes")
-set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "67108864")
+set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "16777216")
 if(TERRAWASM_FEATURE_SET STREQUAL "plr")
     # Player documents allocate on demand; avoid a world-sized idle instance.
     set(TERRAX_WEB_INITIAL_MEMORY_DEFAULT "1048576")
@@ -196,7 +197,7 @@ if(EMSCRIPTEN)
 
     if(TERRAWASM_FEATURE_SET STREQUAL "all")
         set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
-        set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.web.txt")
+        set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.viewer.txt")
     elseif(TERRAWASM_FEATURE_SET STREQUAL "wld")
         set(NODE_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.wld.txt")
         set(WEB_EXPORTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/exports.wld.web.txt")
@@ -256,8 +257,8 @@ if(EMSCRIPTEN)
     endif()
 
     set(WIDE_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue','HEAPU8','HEAPU32','HEAP32','HEAPF32','HEAPF64','FS','stackAlloc','stackSave','stackRestore','wasmMemory']")
-    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
-        set(WEB_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32']")
+    if(TERRAWASM_ENABLE_WLD)
+        set(WEB_RUNTIME_METHODS "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPU32','UTF8ToString']")
     else()
         set(WEB_RUNTIME_METHODS "${WIDE_RUNTIME_METHODS}")
     endif()
@@ -266,7 +267,7 @@ if(EMSCRIPTEN)
     # all/plr Web targets unchanged so this experiment cannot alter Node or
     # the other capability sets.
     set(WEB_FILESYSTEM_FLAG "-sFILESYSTEM=1")
-    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
+    if(TERRAWASM_ENABLE_WLD)
         set(WEB_FILESYSTEM_FLAG "-sFILESYSTEM=0")
     endif()
 
@@ -324,7 +325,7 @@ if(EMSCRIPTEN)
         "${COMMON_FLAGS_TEXT}" "${WEB_FLAGS_TEXT}"
     )
     # WLD Web is already the buffer-only viewer profile; no second build switch.
-    if(TERRAWASM_FEATURE_SET STREQUAL "wld")
+    if(TERRAWASM_ENABLE_WLD)
         target_compile_definitions(terrax_world_wasm_web PRIVATE TERRAWASM_VIEWER_WEB_PROFILE=1)
     endif()
     target_compile_options(terrax_world_wasm_web PRIVATE ${COMMON_COMPILE_OPTIONS} ${WLD_WEB_COMPACT_FLAGS})

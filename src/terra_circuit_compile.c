@@ -89,7 +89,7 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
     }
     while(*work&&w->col_stage==3){uint32_t y=w->col_row++;w->gate_at_y[y]=0;
         if(w->column[y].active&&w->column[y].type==420u)w->gate_at_y[y]=++w->gate_cursor;
-        --*work;if(w->col_row==w->height){if(w->phase==CX_COUNT)cx_devices_bind_column(w);w->col_stage=4;w->emit_y=0;w->emit_colour=0;w->emit_phase=0;}
+        --*work;if(w->col_row==w->height){if(w->phase==CX_COUNT){cx_devices_bind_column(w);int s=cx_order_capture_column(w);if(s)return s;}w->col_stage=4;w->emit_y=0;w->emit_colour=0;w->emit_phase=0;}
     }
     return w->col_stage==4?2:TCW_CONTINUE;
 }

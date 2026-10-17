@@ -51,6 +51,13 @@ static uint32_t member_gate(CxWorld* w,const CxAction* a,TerraVmGateRef ref){
     gate+=cx_var_read(&w->members,&member);
     w->eval_group=ref.group;w->eval_offset=record_end(w,target)-a->code;w->eval_member=member;w->eval_gate=gate;w->eval_valid=1;return gate;
 }
+uint32_t cx_order_event_rank(CxWorld* w,TerraVmGateRef event){
+    if(event.group==CX_NONE)return UINT32_MAX;uint32_t index=cx_action_index(w,event.group);if(index==CX_NONE)return UINT32_MAX;CxAction* a=w->actions+index;
+    if(event.offset>=a->length)return UINT32_MAX;uint32_t at=a->code+event.offset;uint8_t h=cx_bytes_get(&w->code,at++);uint32_t x,y;
+    if(h&128u){uint32_t id=cx_var_read(&w->code,&at);if(id>=w->lamp_count)return UINT32_MAX;x=w->lamps[id].x;y=w->lamps[id].y;}
+    else {uint32_t gate=member_gate(w,a,event);if(!cx_order_gate_position(w,gate,&x,&y)||y<2u)return UINT32_MAX;y-=2u;}
+    return cx_order_rank(w,x,y,event.group);
+}
 static int32_t evaluate(void* context,TerraVmGateRef event,const TerraCircuitVm* vm,TerraVmGateResult* out){
     CxWorld* w=(CxWorld*)context;if(event.group==CX_NONE)return 0;uint32_t index=cx_action_index(w,event.group);if(index==CX_NONE)return -1;CxAction* a=w->actions+index;
     if(event.offset>=a->length)return -1;uint32_t at=a->code+event.offset;uint8_t h=cx_bytes_get(&w->code,at++);uint32_t gate=member_gate(w,a,event);
@@ -74,6 +81,7 @@ static int32_t evaluate(void* context,TerraVmGateRef event,const TerraCircuitVm*
     return on;
 }
 static void snapshot(CxWorld* w){
+    w->projectile_saved_limit=w->projectile_limit;if(w->projectiles)memcpy(w->projectile_snapshot,w->projectiles,1000u*sizeof(CxProjectile));
     memcpy(w->rng_saved,w->rng,sizeof(w->rng));w->rng_saved_i=w->rng_i;w->rng_saved_j=w->rng_j;w->ticks_saved=w->ticks;
     for(uint32_t i=0;i<w->general_count;i++)w->general_snapshot[i]=w->general[i].frame;
     for(uint32_t i=0;i<w->pixel_count;i++)w->pixel_snapshot[i]=w->pixels[i].state;
@@ -82,7 +90,7 @@ static void snapshot(CxWorld* w){
     if(w->override_count)memcpy(w->override_snapshot,w->overrides,w->override_count*sizeof(CxOverride));w->override_saved_count=w->override_count;
 }
 static void transaction_rollback(void* context){
-    CxWorld* w=(CxWorld*)context;memcpy(w->rng,w->rng_saved,sizeof(w->rng));w->rng_i=w->rng_saved_i;w->rng_j=w->rng_saved_j;w->ticks=w->ticks_saved;
+    CxWorld* w=(CxWorld*)context;w->projectile_limit=w->projectile_saved_limit;if(w->projectiles)memcpy(w->projectiles,w->projectile_snapshot,1000u*sizeof(CxProjectile));memcpy(w->rng,w->rng_saved,sizeof(w->rng));w->rng_i=w->rng_saved_i;w->rng_j=w->rng_saved_j;w->ticks=w->ticks_saved;
     for(uint32_t i=0;i<w->general_count;i++)w->general[i].frame=w->general_snapshot[i];
     for(uint32_t i=0;i<w->pixel_count;i++){w->pixels[i].state=w->pixel_snapshot[i];w->pixels[i].hit_h=w->pixels[i].hit_v=w->pixels[i].marked=0;}
     for(uint32_t i=0;i<w->device_count;i++){w->devices[i].tile=w->devices[i].initial;w->devices[i].cooldown=w->devices[i].saved_cooldown;}
@@ -113,7 +121,7 @@ void cx_operation_rollback(CxWorld* w){
 int cx_create_vm(CxWorld* w){
     w->general_snapshot=(uint8_t*)cx_alloc(w,w->general_count?w->general_count:1u);if(!w->general_snapshot)return TCW_MEMORY;
     random_seed(w,(int32_t)w->world->worldId);TerraVmCallbacks cb;memset(&cb,0,sizeof(cb));cb.next_candidate=next_candidate;cb.evaluate=evaluate;cb.transaction_begin=transaction_begin;cb.transaction_rollback=transaction_rollback;
-    cb.trip_begin=cx_trip_begin;cb.net_hit=cx_net_hit;cb.trip_end=cx_trip_end;cb.wave_begin=cx_wave_begin;cb.wave_end=cx_wave_end;
+    cb.order_candidates=cx_order_candidates;cb.trip_begin=cx_trip_begin;cb.net_hit=cx_net_hit;cb.trip_end=cx_trip_end;cb.wave_begin=cx_wave_begin;cb.wave_end=cx_wave_end;
     uint32_t maximum=cx_vm_available(w);if(!maximum)return TCW_MEMORY;
     int s=terra_vm_create(w->networks,maximum,&cb,w,&w->vm);return s<0?cx_fail(w,TCW_MEMORY,"native wiring VM does not fit the remaining memory budget"):TCW_OK;
 }
@@ -130,7 +138,7 @@ void cx_current_tile(CxWorld* w,uint32_t x,uint32_t y,uint32_t gate,TxTile* t,co
     if(t->active&&t->type==419u&&t->frame_x!=36){if(flip)t->frame_x=t->frame_x==18?0:18;}
     else if(t->active&&t->type==420u){uint32_t lo=0,hi=w->general_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;if(w->general[m].id<gate)lo=m+1;else hi=m;}if(lo<w->general_count&&w->general[lo].id==gate)t->frame_x=(int16_t)(18*w->general[lo].frame);}
     else if(t->active&&(t->type==445u||t->type==0xfffeu)){uint32_t i=cx_pixel_find(w,x,y);if(i!=CX_NONE){CxPixel* p=w->pixels+i;t->frame_x=(int16_t)(18u*(p->custom?p->state&3u:p->state));if(p->custom)t->frame_y=(int16_t)(18u*((p->state>>2)&3u));}}
-    else if(t->active&&(t->type==132u||t->type==136u||t->type==144u||t->type==411u)){CxDevice* d=cx_device_find(w,x,y);if(d){t->frame_x=d->tile.frame_x;t->frame_y=d->tile.frame_y;}}
+    else if(t->active&&(t->type==132u||t->type==136u||t->type==144u||t->type==411u||t->type==209u)){CxDevice* d=cx_device_find(w,x,y);if(d){t->frame_x=d->tile.frame_x;t->frame_y=d->tile.frame_y;}}
     else if(flip&&t->active){if(t->type>=255u&&t->type<=268u&&!t->actuator)t->type=(uint16_t)(t->type>=262u?t->type-7u:t->type+7u);else switch(t->type){case 33:case 49:case 174:case 372:case 646:t->frame_x=(int16_t)(t->frame_x==0?18:0);break;case 4:t->frame_x=(int16_t)(t->frame_x>=66?t->frame_x-66:t->frame_x+66);break;case 421:if(!t->actuator)t->type=422;break;case 422:if(!t->actuator)t->type=421;break;default:break;}}
     if(t->actuator||t->type==130u||t->type==131u){CxDevice* d=cx_device_find(w,x,y);if(d){t->inactive=d->tile.inactive;if(t->type==130u||t->type==131u)t->type=d->tile.type;}}
 }

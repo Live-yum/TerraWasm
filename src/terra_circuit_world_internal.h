@@ -46,6 +46,10 @@ typedef struct CxPixel { uint32_t x,y,h[4],v[4]; uint8_t state,initial,hit_h,hit
 typedef struct CxModTile { TerraTwldTile tile; TxTile vanilla; } CxModTile;
 typedef struct CxPort { uint32_t net,pixel; uint8_t axis,colour; uint16_t reserved; } CxPort;
 typedef struct CxFragments CxFragments;
+typedef struct CxOrder CxOrder;
+/* Feature-local projectile state. No entity/NPC simulation is implied. */
+typedef struct CxProjectile { float x,y,vx,vy,origin_x,origin_y; uint32_t remaining; uint16_t type; uint8_t active,returning; } CxProjectile;
+typedef struct CxSolidSpan { uint32_t first,last; uint8_t shape,dynamic; uint16_t reserved; } CxSolidSpan;
 typedef struct CxWorld {
     uint32_t id, world_handle, maximum, bytes, peak, phase, error;
     TxWorld* world;
@@ -83,6 +87,9 @@ typedef struct CxWorld {
     TxTile* previous_columns[2]; CxActuationPolicy* policies; uint32_t policy_count,policy_capacity;
     uint32_t* mechs; uint32_t* mechs_snapshot; uint32_t mech_count,mech_saved_count,mech_capacity;
     uint32_t tick_remaining,tick_cursor,tick_stage;
+    CxProjectile *projectiles,*projectile_snapshot;
+    uint32_t projectile_cursor,projectile_substep,projectile_limit,projectile_saved_limit;
+    CxSolidSpan *solid_spans; uint32_t solid_count,solid_capacity; uint32_t *solid_columns;
     uint32_t seed_x,seed_y,seed_width,seed_height;
     uint32_t operation_active,interaction_pending; uint64_t ticks_saved;
     CxPixel* pixels; uint32_t pixel_count,pixel_capacity;
@@ -110,8 +117,15 @@ typedef struct CxWorld {
     uint32_t save_new_tile_end,save_prefix_length,save_suffix_length;
     uint8_t save_patch[64];
     CxFragments* fragments;
+    CxOrder* order;
 } CxWorld;
 
+int cx_order_capture_column(CxWorld*);
+void cx_order_close(CxWorld*);
+int32_t cx_order_candidates(void*,TerraVmGateRef*,uint32_t,uint32_t);
+uint32_t cx_order_rank(CxWorld*,uint32_t,uint32_t,uint32_t);
+uint32_t cx_order_event_rank(CxWorld*,TerraVmGateRef);
+int cx_order_gate_position(CxWorld*,uint32_t,uint32_t*,uint32_t*);
 void* cx_alloc(CxWorld*,uint32_t);
 void cx_free(CxWorld*,void*);
 int cx_fail(CxWorld*,int,const char*);

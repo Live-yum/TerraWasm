@@ -1,6 +1,9 @@
 #include "terra_circuit_world_internal.h"
 #include "terra_circuit_actuation.h"
 #include <limits.h>
+#include <math.h>
+#include "terra_circuit_materials.h"
+#include "terra_circuit_support_materials.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,12 +23,17 @@ static int prepare_policy(CxWorld* w,CxDevice* d){TxTile tile=d->tile;if(tile.ty
     CxActuationPolicy* p=w->policies+w->policy_count++;memset(p,0,sizeof(*p));p->device=(uint32_t)(d-w->devices);p->x=d->x;p->y=d->y;
     for(uint32_t back=0;back<=2u&&back<=w->x;back++){uint32_t x=w->x-back;fill_policy(w,p,x,back?w->previous_columns[x&1u]:w->column);}return TCW_OK;
 }
+static int projectile_index_column(CxWorld* w);
+static int trap_wire_hit(CxWorld* w,CxDevice* d);
+static int portal_wire_hit(CxWorld* w,CxDevice* d,uint32_t colour);
+static int projectiles_step(CxWorld* w,uint32_t* work);
 int cx_devices_column(CxWorld* w){
+    int ps=projectile_index_column(w);if(ps)return ps;
     for(uint32_t i=0;i<w->policy_count;){CxActuationPolicy* p=w->policies+i;fill_policy(w,p,w->x,w->column);if(w->x>=p->x+2u||w->x+1u==w->width){finish_policy(w,p);w->policies[i]=w->policies[--w->policy_count];}else ++i;}
     w->column_device_first=w->device_count;
     for(uint32_t y=0;y<w->height;y++){TxTile* t=w->column+y;if(!t->active&&!t->actuator)continue;
         if(t->type==445u||t->type==0xfffeu){if(!grow(w,(void**)&w->pixels,&w->pixel_capacity,w->pixel_count+1u,sizeof(CxPixel)))return TCW_MEMORY;CxPixel* p=w->pixels+w->pixel_count;memset(p,0,sizeof(*p));p->x=w->x;p->y=y;p->custom=t->type==0xfffeu;p->state=p->initial=p->custom?(uint8_t)((t->frame_x/18)&3u)|((uint8_t)((t->frame_y/18)&3u)<<2):(uint8_t)(t->frame_x==18);w->pixel_at_y[y]=++w->pixel_count;}
-        if(is_switch(t->type)||t->actuator||t->type==130u||t->type==131u){if(!grow(w,(void**)&w->devices,&w->device_capacity,w->device_count+1u,sizeof(CxDevice)))return TCW_MEMORY;CxDevice* d=w->devices+w->device_count++;memset(d,0,sizeof(*d));d->x=w->x;d->y=y;d->tile=d->initial=*t;if(t->type==144u)d->tile.frame_y=0;if(t->actuator||t->type==130u||t->type==131u){int s=prepare_policy(w,d);if(s)return s;}}
+        if(t->type==137u||t->type==209u||is_switch(t->type)||t->actuator||t->type==130u||t->type==131u){if(!grow(w,(void**)&w->devices,&w->device_capacity,w->device_count+1u,sizeof(CxDevice)))return TCW_MEMORY;CxDevice* d=w->devices+w->device_count++;memset(d,0,sizeof(*d));d->x=w->x;d->y=y;d->tile=d->initial=*t;if(t->type==144u)d->tile.frame_y=0;if(t->actuator||t->type==130u||t->type==131u){int s=prepare_policy(w,d);if(s)return s;}}
     }return TCW_OK;
 }
 void cx_devices_bind_column(CxWorld* w){for(uint32_t i=w->column_device_first;i<w->device_count;i++){CxDevice* d=w->devices+i;for(uint32_t c=0;c<4;c++)d->pulse_nets[c]=d->nets[c]=w->ids[d->y*4u+c];d->gate=w->gate_at_y[d->y];}memcpy(w->previous_columns[w->x&1u],w->column,w->height*sizeof(TxTile));}
@@ -38,14 +46,14 @@ void cx_devices_end_columns(CxWorld* w){
 int cx_devices_compile(CxWorld* w){
     cx_devices_end_columns(w);
     uint64_t count=0;for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(w->twld_state&&p->custom&&p->h[c]==p->v[c])continue;count+=p->h[c]!=0;if(!w->twld_state||p->custom)count+=p->v[c]!=0;}
-    for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u)for(uint32_t c=0;c<4;c++)count+=w->devices[i].nets[c]!=0;
+    for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u||w->devices[i].tile.type==209u||w->devices[i].tile.type==137u)for(uint32_t c=0;c<4;c++)count+=w->devices[i].nets[c]!=0;
     for(uint32_t i=0;i<w->device_count;i++)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c]){count+=w->devices[i].tile.actuator!=0;count+=w->devices[i].tile.type==130u||w->devices[i].tile.type==131u;}
     if(count>UINT32_MAX/sizeof(CxPort))return TCW_MEMORY;
     w->ports=(CxPort*)cx_alloc(w,(count?count:1u)*sizeof(CxPort));w->pixel_touched=(uint32_t*)cx_alloc(w,(w->pixel_count?w->pixel_count:1u)*4u);w->pixel_snapshot=(uint8_t*)cx_alloc(w,w->pixel_count?w->pixel_count:1u);
     w->mech_capacity=w->device_count?w->device_count:1u;if(w->mech_capacity>CX_MECH_LIMIT)w->mech_capacity=CX_MECH_LIMIT;w->mechs=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);w->mechs_snapshot=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);
     if(!w->ports||!w->pixel_touched||!w->pixel_snapshot||!w->mechs||!w->mechs_snapshot)return TCW_MEMORY;
     for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(w->twld_state&&p->custom&&p->h[c]==p->v[c])continue;if(p->h[c])w->ports[w->port_count++]=(CxPort){p->h[c],i,0,(uint8_t)c,0};if((!w->twld_state||p->custom)&&p->v[c])w->ports[w->port_count++]=(CxPort){p->v[c],i,1,(uint8_t)c,0};}
-    for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c])w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,w->devices[i].tile.type==144u?2:3,(uint8_t)c,0};
+    for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u||w->devices[i].tile.type==209u||w->devices[i].tile.type==137u)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c])w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,w->devices[i].tile.type==144u?2:w->devices[i].tile.type==411u?3:6,(uint8_t)c,0};
     for(uint32_t i=0;i<w->device_count;i++)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c]){if(w->devices[i].tile.actuator)w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,4,(uint8_t)c,0};if(w->devices[i].tile.type==130u||w->devices[i].tile.type==131u)w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,5,(uint8_t)c,0};}
     qsort(w->ports,w->port_count,sizeof(CxPort),compare_ports);return TCW_OK;
 }
@@ -57,6 +65,7 @@ int cx_trip_begin(void* context){CxWorld* w=(CxWorld*)context;++w->vm_trip_index
 int cx_net_hit(void* context,uint32_t net){
     CxWorld* w=(CxWorld*)context;uint32_t group=net+1u,lo=0,hi=w->port_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;if(w->ports[m].net<group)lo=m+1;else hi=m;}
     while(lo<w->port_count&&w->ports[lo].net==group){CxPort* port=w->ports+lo++;
+        if(port->axis==6u){CxDevice* d=w->devices+port->pixel;int ps=d->tile.type==137u?trap_wire_hit(w,d):portal_wire_hit(w,d,port->colour);if(ps<0)return ps;continue;}
         if(port->axis>=4u){CxDevice* d=w->devices+port->pixel;if(cx_seed_contains(w,d->x,d->y)||(w->vm_source_gate&&d->gate==w->vm_source_gate))continue;
             if(port->axis==4u){if(d->tile.inactive)d->tile.inactive=0;else if(cx_actuatable_type(d->tile.type)){if(d->can_deactivate<0)return cx_fail(w,TCW_UNSUPPORTED,"actuator support neighborhood is not representable for this malformed tile frame");if(d->can_deactivate)d->tile.inactive=1;}}
             else if(d->tile.type==131u)d->tile.type=130u;else{if(d->can_deactivate<0)return cx_fail(w,TCW_UNSUPPORTED,"active stone support neighborhood is unavailable");/* Unlike DeActive, ActiveStone always calls CanKillTile, even with an empty cell above. */if(d->can_deactivate&&d->tile.wall!=350u)d->tile.type=131u;}continue;
@@ -107,12 +116,20 @@ int cx_seed_reserve(CxWorld* w,uint32_t count){
     if(count<=w->trigger_capacity)return TCW_OK;if((uint64_t)count*4u>UINT32_MAX)return TCW_MEMORY;
     uint32_t* p=(uint32_t*)cx_alloc(w,count*4u);if(!p)return TCW_MEMORY;cx_free(w,w->trigger_nets);w->trigger_nets=p;w->trigger_capacity=count;return TCW_OK;
 }
+
+#include "terra_circuit_projectiles.inc"
+
 static uint32_t timer_interval(const CxDevice* d){switch(d->tile.frame_x/18){case 0:return 60;case 1:return 180;case 2:return 300;case 3:return 30;case 4:return 15;default:return 60;}}
 int cx_ticks_step(CxWorld* w,uint32_t* work){
     while(*work&&w->tick_remaining){
-        if(w->tick_stage==0){++w->ticks;w->tick_cursor=w->mech_count;w->tick_stage=1;--*work;}
+        /* Main updates projectiles before WorldGen.UpdateWorld/UpdateMech.
+         * New shots created by a timer wait until the following game tick.
+         * Capture the mechanical list only after projectile-triggered circuits
+         * finish, so their new timers count down during this same tick. */
+        if(w->tick_stage==0){w->projectile_cursor=w->projectile_substep=0;++w->ticks;w->tick_stage=3;--*work;}
+        if(w->tick_stage==3u||w->tick_stage==4u){int ps=projectiles_step(w,work);if(ps<0)return ps;if(ps==TCW_CONTINUE)return ps;w->tick_cursor=w->mech_count;w->tick_stage=1;}
         if(w->tick_stage==2){int s=terra_vm_step(w->vm,*work);*work=0;if(s<0)return cx_fail(w,TCW_STATE,"timer circuit pulse failed and was rolled back");if(s==TERRA_VM_MORE)return TCW_CONTINUE;w->tick_stage=1;continue;}
-        while(*work&&w->tick_cursor){uint32_t at=--w->tick_cursor,id=w->mechs[at];CxDevice* d=w->devices+id;--*work;if(d->cooldown)d->cooldown--;
+        while(*work&&w->tick_stage==1u&&w->tick_cursor){uint32_t at=--w->tick_cursor,id=w->mechs[at];CxDevice* d=w->devices+id;--*work;if(d->cooldown)d->cooldown--;
             if(d->tile.type==144u){if(d->tile.frame_y==0)d->cooldown=0;else if(d->cooldown%timer_interval(d)==0u){d->cooldown=18000u;w->trigger_count=0;for(uint32_t c=0;c<4;c++)if(d->pulse_nets[c])w->trigger_nets[w->trigger_count++]=d->pulse_nets[c]-1u;w->seed_x=d->x;w->seed_y=d->y;w->seed_width=w->seed_height=1;
                     uint32_t avail=cx_vm_available(w);if(!avail||terra_vm_set_budget(w->vm,avail)<0||terra_vm_begin(w->vm,w->trigger_nets,w->trigger_count)<0)return TCW_MEMORY;w->tick_stage=2;return TCW_CONTINUE;}}
             if(!d->cooldown){if(d->tile.type==144u)d->tile.frame_y=0;else if(d->tile.type==411u){int shift=d->tile.frame_x>=36?-36:36;for(uint32_t x=d->x;x<d->x+2u;x++)for(uint32_t y=d->y;y<d->y+2u;y++){CxDevice* part=cx_device_find(w,x,y);if(part&&part->tile.type==411u)part->tile.frame_x=(int16_t)(part->tile.frame_x+shift);}}memmove(w->mechs+at,w->mechs+at+1u,(w->mech_count-at-1u)*4u);--w->mech_count;}

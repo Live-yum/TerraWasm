@@ -41,6 +41,8 @@ typedef struct TerraVmCallbacks {
     int32_t (*trip_begin)(void* context);
     int32_t (*net_hit)(void* context, uint32_t net);
     int32_t (*trip_end)(void* context);
+    /* Bounded optional source-order pass over only this TripWire lamp segment. */
+    int32_t (*order_candidates)(void*, TerraVmGateRef*, uint32_t, uint32_t);
     void (*smoke)(void* context, TerraVmGateRef identity);
     /* Optional transaction hooks own any state changed by callbacks (gate frame,
      * pixels, RNG, mechanics). VM always restores its own parity when cancelled
@@ -79,6 +81,9 @@ int32_t terra_vm_set_parity(TerraCircuitVm* vm, uint32_t net, uint32_t value);
  * LIMIT; subsequent begin calls remain blocked until memory is released or the
  * caller restores sufficient budget. Destroy and stats always remain available. */
 int32_t terra_vm_set_budget(TerraCircuitVm* vm, uint32_t max_bytes);
+/* Internal callback-only accounting: updates the shared budget while suspended
+ * in a callback, without changing state, allocating, or invoking another step. */
+int32_t terra_vm_set_callback_budget(TerraCircuitVm* vm, uint32_t max_bytes);
 /* Optional outer parity transaction for a command containing several complete
  * TripWires. Begin/commit require an idle VM; nesting is rejected. Cancel first
  * rolls back an active pulse, then restores the parity preceding the batch.

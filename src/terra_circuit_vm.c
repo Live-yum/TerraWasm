@@ -47,6 +47,7 @@ struct TerraCircuitVm {
     uint32_t trip_count, trip_index, net, net_cursor;
     uint32_t active, phase, after_trip, batch_active, after_wave;
     uint32_t trip_is_gate;
+    uint32_t trip_candidate_start, order_started;
     TerraVmGateRef trip_gate;
     TerraVmStats counters;
     int32_t allocation_error;
@@ -299,6 +300,7 @@ int32_t terra_vm_step(TerraCircuitVm* vm, uint32_t max_operations) {
             vm->phase = vm->after_wave;
             break;
         case VM_TRIP_BEGIN:
+            vm->trip_candidate_start=vm->candidate_count;vm->order_started=0;
             if (vm->callbacks.trip_begin && vm->callbacks.trip_begin(vm->context) < 0)
                 return vm_fail(vm, TERRA_VM_CALLBACK);
             vm->phase = VM_NET_SELECT;
@@ -337,6 +339,10 @@ int32_t terra_vm_step(TerraCircuitVm* vm, uint32_t max_operations) {
             break;
         }
         case VM_TRIP_END:
+            if(vm->callbacks.order_candidates){
+                status=vm->callbacks.order_candidates(vm->context,vm->candidates?vm->candidates+vm->trip_candidate_start:NULL,vm->candidate_count-vm->trip_candidate_start,!vm->order_started);vm->order_started=1;
+                if(status<0)return vm_fail(vm,TERRA_VM_CALLBACK);if(status>0)break;
+            }
             if (vm->callbacks.trip_end && vm->callbacks.trip_end(vm->context) < 0)
                 return vm_fail(vm, TERRA_VM_CALLBACK);
             vm->seen_clear_index = 0;
@@ -422,6 +428,9 @@ int32_t terra_vm_step(TerraCircuitVm* vm, uint32_t max_operations) {
     return vm->active ? TERRA_VM_MORE : TERRA_VM_OK;
 }
 
+int32_t terra_vm_set_callback_budget(TerraCircuitVm* vm,uint32_t max_bytes){
+    if(!vm)return TERRA_VM_INVALID;vm->maximum=max_bytes;return vm->allocated>max_bytes?TERRA_VM_LIMIT:TERRA_VM_OK;
+}
 int32_t terra_vm_set_budget(TerraCircuitVm* vm, uint32_t max_bytes) {
     if (!vm) return TERRA_VM_INVALID;
     if (vm->active) return TERRA_VM_STATE;

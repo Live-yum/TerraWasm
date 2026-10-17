@@ -1,4 +1,5 @@
 /build/
+/build-unified/
 /build-native*/
 /build-plr-*/
 /build_log.txt

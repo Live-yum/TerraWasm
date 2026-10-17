@@ -230,7 +230,7 @@ export function validateManifest(manifest) {
   }
   const viewerWebProfile = build.viewerWebProfile === undefined ? false : build.viewerWebProfile
   if (typeof viewerWebProfile !== 'boolean') fail('viewer Web profile must be a boolean')
-  if (viewerWebProfile && featureSet !== 'wld') fail('viewer Web profile feature set must be wld')
+  if (viewerWebProfile && !['wld', 'all'].includes(featureSet)) fail('viewer Web profile feature set must include wld')
   const buildFlags = normalizeBuildFlags(build.flags)
 
   const nodeTarget = validateTarget(manifest.targets?.node, 'Node target')
