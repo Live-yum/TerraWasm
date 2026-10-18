@@ -105,3 +105,26 @@ Native CTest 35/35; clean Emscripten 5.0.7 Node/Web and production-consumer test
 LeakSanitizer limitation above. Web Wasm is 456,152 bytes, wrapper 21,832 bytes;
 artifact budgets pass. Other foreign-owner families and the fixed V2 receipt
 remain separate incomplete work.
+
+## Player, graph and process-palette checkpoint isolation — de11f72
+
+Producer `de11f72ab18240979093135727207760cc39c4e9` extends foreign-owner
+admission guards to player document creation/mutation/close/filesystem save,
+circuit graph creation/load/compile/patch/traversal/cancel/close, and process
+map-palette installation/clearing. A blocked graph step is an admission rejection,
+not execution cancellation: an existing queued traversal remains unchanged.
+
+Player reads remain available. Cold full-JSON queries serialize into scoped
+scratch rather than publishing a cache. Buffer encoding uses a stack document
+copy during a foreign checkpoint, borrows existing caches/original bytes, and
+releases only newly encoded temporary bytes on every return path. The baseline
+cold-query regression retains a cache root that a later world rollback frees;
+the new regression checks zero retained query bytes and valid subsequent reads.
+
+Native CTest: 36/36; standalone PLR native profile: 4/4. Clean Emscripten 5.0.7
+Node/Web plus production-consumer tests: 220/220, zero skips. Tests cover cold
+and warm player caches, short buffers, injected allocation failure, world commit
+and rollback, and the full queued-graph state vector before resuming execution.
+The two focused ASan/UBSan contracts pass with the prior explicit LeakSanitizer
+limitation. Web wrapper is 21,832 bytes and Wasm is 456,866 bytes; budgets pass.
+Fixed V2 receipts and the broader acceptance program remain incomplete.
