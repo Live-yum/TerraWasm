@@ -120,6 +120,7 @@ if ($Test) {
         "tests/circuit/pixelbox-contract.cjs",
         "tests/test_circuit_world.js",
         "tests/test_circuit_world_lease.js",
+        "tests/test_pixel_foreign_checkpoint.js",
         "tests/test_circuit_fragments_supports.js",
         "tests/test_hello_display.js",
         "tests/test_memory_lifecycle.js",
