@@ -87,3 +87,21 @@ allocations during allocator checkpoints. The fixed V2 receipt and complete
 owner guard matrix remain open. No CI rerun, release or migration activation is
 implied by these local checks. Consumer artifact synchronization is tracked in
 the viewer implementation status linked above.
+
+## Pixel foreign-checkpoint admission — 539b322
+
+Producer `539b322981b4e7b3b7788666953dad201f6062f3` rejects pixel workspace
+creation, mutations, transaction completion, history changes and close while a
+world allocator checkpoint is active. Rejection occurs before mutation argument
+validation: an invalid foreign call must not invoke pixel rollback or free a
+pixel owner's existing transaction. Stats, palette/cell queries and bounded
+color matching remain available without retained allocations.
+
+The prior implementation fails the creation-admission regression. Native tests
+exercise both world commit and rollback with pending pixel edits, compare the
+complete pixel state vector, and prove subsequent pixel commit/undo/redo work.
+Native CTest 35/35; clean Emscripten 5.0.7 Node/Web and production-consumer tests
+218/218 with zero skips. Focused ASan/UBSan passes with the same explicit
+LeakSanitizer limitation above. Web Wasm is 456,152 bytes, wrapper 21,832 bytes;
+artifact budgets pass. Other foreign-owner families and the fixed V2 receipt
+remain separate incomplete work.
