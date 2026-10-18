@@ -36,6 +36,9 @@ terrax_world_status terra_plr_open_json(
 
 terrax_world_status terra_plr_close(uint32_t handle);
 
+/* External path: fully parse encoded bytes and verify the completed candidate
+ * before replacement. OK acknowledges replacement, not power-loss durability
+ * or a managed version/receipt transaction. */
 terrax_world_status terra_plr_save(
     uint32_t handle,
     const char* path_utf8);

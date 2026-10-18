@@ -3685,12 +3685,11 @@ static terrax_world_status plr_open_parsed(
     return TERRAX_WORLD_STATUS_OK;
 }
 
-static terrax_world_status plr_open_from_encrypted(
-    const uint8_t *buffer, uint32_t buffer_length, uint32_t *out_handle) {
-    g_plr_oom = 0;
-    uint8_t *original = (uint8_t *)plr_malloc(buffer_length);
-    if (!original) return plr_parse_error();
-    memcpy(original, buffer, buffer_length);
+/* Full decoder shared by opening and pre-publication validation. It owns only
+ * scoped parser memory, not a document slot, cache, or original byte copy. */
+static PlrJsonValue* plr_parse_encrypted_candidate(const uint8_t* buffer,uint32_t buffer_length,
+    terrax_world_status* out_status) {
+    g_plr_oom=0;
     uint32_t plain_length = 0u;
     uint8_t *plain = plr_decrypt(buffer, buffer_length, &plain_length);
     if (!plain && !g_plr_oom && (buffer_length & 15u) == 0u) {
@@ -3713,8 +3712,8 @@ static terrax_world_status plr_open_from_encrypted(
         }
     }
     if (!plain) {
-        free(original);
-        return plr_parse_error();
+        *out_status=plr_parse_error();
+        return NULL;
     }
     int32_t detected_version = 0;
     if (plain_length >= 4u) detected_version = (int32_t)(
@@ -3723,10 +3722,23 @@ static terrax_world_status plr_open_from_encrypted(
     PlrJsonValue *root = plr_parse_plain(plain, plain_length);
     free(plain);
     if (!root) {
-        free(original);
-        return plr_parse_error_for_version(detected_version);
+        *out_status=plr_parse_error_for_version(detected_version);
+        return NULL;
     }
-    return plr_open_parsed(root, original, buffer_length, out_handle);
+    *out_status=TERRAX_WORLD_STATUS_OK;
+    return root;
+}
+
+static terrax_world_status plr_open_from_encrypted(
+    const uint8_t *buffer, uint32_t buffer_length, uint32_t *out_handle) {
+    g_plr_oom=0;
+    uint8_t* original=(uint8_t*)plr_malloc(buffer_length);
+    if(!original)return plr_parse_error();
+    memcpy(original,buffer,buffer_length);
+    terrax_world_status status=TERRAX_WORLD_STATUS_OK;
+    PlrJsonValue* root=plr_parse_encrypted_candidate(buffer,buffer_length,&status);
+    if(!root){free(original);return status;}
+    return plr_open_parsed(root,original,buffer_length,out_handle);
 }
 
 static terrax_world_status plr_copy_json_result(
@@ -3912,8 +3924,25 @@ static int plr_read_file(
  * This is not a managed-history CAS or a durable publication receipt. */
 #ifdef TERRAX_TESTING
 static uint32_t plr_test_write_limit = UINT32_MAX;
+static int plr_test_corrupt_candidate;
+void terrax_test_plr_corrupt_candidate(int enabled) { plr_test_corrupt_candidate=enabled; }
 void terrax_test_plr_write_limit(uint32_t limit) { plr_test_write_limit = limit; }
 #endif
+/* Read the completed candidate, not just the source buffer or a write count.
+ * Bounded verification establishes byte identity; full parsing was completed
+ * before this file was created. No durability/managed-CAS claim is implied. */
+static int plr_candidate_matches(const char* path,const uint8_t* data,uint32_t length) {
+    FILE* file=fopen(path,"rb");if(!file)return 0;
+    uint8_t chunk[4096];uint32_t offset=0;int ok=1;
+    while(ok&&offset<length){
+        uint32_t n=length-offset;if(n>sizeof(chunk))n=sizeof(chunk);
+        if(fread(chunk,1,n,file)!=n||!plr_memory_equal(chunk,data+offset,n))ok=0;
+        offset+=n;
+    }
+    if(ok&&(fgetc(file)!=EOF||ferror(file)))ok=0;
+    if(fclose(file)!=0)ok=0;
+    return ok;
+}
 static int plr_write_file(const char *path, const uint8_t *data, uint32_t length) {
     if (!path || (!data && length)) return 0;
     uint32_t n = tx_strlen(path);
@@ -3940,6 +3969,18 @@ static int plr_write_file(const char *path, const uint8_t *data, uint32_t length
     size_t written = fwrite(data, 1u, requested, file);
     int ok = written == length && fflush(file) == 0;
     if (fclose(file) != 0) ok = 0;
+#ifdef TERRAX_TESTING
+    if(ok&&plr_test_corrupt_candidate){
+        FILE* corrupt=fopen(candidate,plr_test_corrupt_candidate==3?"wb":"r+b");
+        if(!corrupt)ok=0;
+        else {
+            if(plr_test_corrupt_candidate==1){int first=fgetc(corrupt);if(first==EOF||fseek(corrupt,0,SEEK_SET)||fputc(first^0xff,corrupt)==EOF)ok=0;}
+            if(plr_test_corrupt_candidate==2&&(fseek(corrupt,0,SEEK_END)||fputc(0,corrupt)==EOF))ok=0;
+            if(fclose(corrupt))ok=0;
+        }
+    }
+#endif
+    if(ok)ok=plr_candidate_matches(candidate,data,length);
 #ifdef _WIN32
     if (ok) ok = MoveFileExA(candidate, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
@@ -4344,6 +4385,9 @@ terrax_world_status terra_plr_save(
     uint32_t length = 0u;
     const uint8_t *encoded = plr_encoded_document(document, &length, &status);
     if (!encoded) return status;
+    PlrJsonValue* validated=plr_parse_encrypted_candidate(encoded,length,&status);
+    if(!validated)return status;
+    plr_json_free(validated);
     int ok = plr_write_file(path_utf8, encoded, length);
     if (!ok) return plr_status_error(
         TERRAX_WORLD_STATUS_IO_ERROR,

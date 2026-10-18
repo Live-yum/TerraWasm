@@ -22,7 +22,41 @@ int main(void) {
     terrax_test_plr_write_limit(UINT32_MAX);
     original=fopen(save_path,"rb");CHECK(original,"original preserved");
     char sentinel[9]={0};CHECK(fread(sentinel,1,9,original)==8 && !strcmp(sentinel,"original"),"short write preserves bytes");
-    fclose(original);CHECK(terra_plr_save(h,save_path)==0,"candidate publication succeeds");
+    fclose(original);
+    extern void terrax_test_plr_corrupt_candidate(int);
+    for(int corruption=1;corruption<=3;corruption++) {
+        terrax_test_plr_corrupt_candidate(corruption);
+        CHECK(terra_plr_save(h,save_path)==TERRAX_WORLD_STATUS_IO_ERROR,"corrupted candidate rejected before publication");
+        terrax_test_plr_corrupt_candidate(0);
+        original=fopen(save_path,"rb");CHECK(original,"original survives candidate corruption");
+        memset(sentinel,0,sizeof(sentinel));CHECK(fread(sentinel,1,9,original)==8&&!strcmp(sentinel,"original"),"candidate corruption preserves original bytes");fclose(original);
+    }
+    uint32_t encoded_size=0;CHECK(terra_plr_save_to_buffer(h,NULL,0,&encoded_size)==0,"candidate expected size");
+    uint8_t* expected=malloc(encoded_size);uint8_t* actual=malloc(encoded_size+1);
+    CHECK(expected&&actual&&terra_plr_save_to_buffer(h,expected,encoded_size,&encoded_size)==0,"candidate expected bytes");
+    const int32_t faults[]={0,1,2,5,16,64,256,1024,4096,8192,16384,INT32_MAX};
+    uint32_t retained_save=tx_heap_used(),rejected=0,published=0;
+    for(unsigned fault=0;fault<sizeof(faults)/sizeof(faults[0]);fault++) {
+        original=fopen(save_path,"wb");CHECK(original&&fwrite("original",1,8,original)==8&&fclose(original)==0,"reset original sentinel");
+        terrax_test_plr_fail_alloc_after(faults[fault]);
+        int result=terra_plr_save(h,save_path);
+        terrax_test_plr_fail_alloc_after(-1);
+        CHECK(tx_heap_used()==retained_save,"candidate parser releases every temporary root");
+        original=fopen(save_path,"rb");CHECK(original,"read candidate publication result");
+        size_t count=fread(actual,1,encoded_size+1,original);CHECK(fclose(original)==0,"close publication result");
+        if(result){rejected++;CHECK(count==8&&!memcmp(actual,"original",8),"validation OOM preserves original file");}
+        else{published++;CHECK(count==encoded_size&&!memcmp(actual,expected,encoded_size),"published candidate is complete and byte exact");}
+    }
+    CHECK(rejected&&published,"candidate fault matrix covers rejection and success");
+    printf("PLR candidate validation: %u allocation rejections, %u complete publications; corrupt/trailing/truncated candidates rejected\n",rejected,published);
+    free(expected);free(actual);
+    /* Validation must not consume a public document slot. */
+    fixture=read_json_fixture();CHECK(fixture,"slot-pressure fixture");uint32_t extra[15]={0};
+    for(unsigned i=0;i<15;i++)CHECK(terra_plr_open_json(fixture,&extra[i])==0,"fill every remaining document slot");
+    free(fixture);CHECK(terra_plr_save(h,save_path)==0,"validation works with every public slot occupied");
+    for(unsigned i=0;i<15;i++)CHECK(terra_plr_close(extra[i])==0,"release slot-pressure documents");
+    CHECK(tx_heap_used()==retained_save,"slot-free validation leaves no document owner");
+    CHECK(terra_plr_save(h,save_path)==0,"candidate publication succeeds");
     uint32_t reopened=0;CHECK(terra_plr_open(save_path,&reopened)==0,"published candidate reopens");
     CHECK(terra_plr_close(reopened)==0,"close candidate");remove(save_path);
 
