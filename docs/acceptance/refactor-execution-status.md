@@ -1,7 +1,7 @@
 # Refactor implementation checkpoint — 2026-10-18
 
 Implementation is ongoing on `refactor`. No PR, merge, release or deployment is
-implied. `master` is unchanged. This is not completion of all 28 work packages
+implied. This task does not write to `master`. This is not completion of all 28 work packages
 or all 52 target acceptance gates.
 
 ## Current native implementation
@@ -24,7 +24,7 @@ or all 52 target acceptance gates.
 - Debug native builds link libm. The generated-world checkpoint contract is an
   explicit CTest entry rather than depending only on a private optional fixture.
 
-## Verified producer and consumer
+## Earlier verified producer and consumer
 
 The clean native producer is `f05ae2547060ac0a4cd85df833465b278aa21cf2`, built with
 pinned Emscripten 5.0.7 and the all feature set. Native CTest: **33/33** passed.
@@ -59,3 +59,31 @@ not raised to hide it.
   this repository.
 - Storage migration and release rehearsals are consumer prerequisites. No release
   or migration activation is authorized by these results.
+
+
+## Circuit-world source lease — aadba3f
+
+Producer `aadba3fe833b194ec6e349cdaf69eeabc8d0922e` pins the native source
+world until every circuit-world session has confirmed close. Cancellation alone
+does not release the lease. World retirement, in-place legacy pixel writes,
+checkpoint admission and ordinary save materialization reject while pinned.
+Circuit begin also rejects an active workspace checkpoint before allocation.
+
+Detached stream output remains supported. Adoption preflights the current owner
+before modifying the READY candidate and propagates activation failure instead
+of ignoring close errors. After circuit close, the same candidate can be adopted.
+The native regression failed against the prior implementation, which closed the
+source world while a circuit still held its pointer.
+
+Verification: native CTest 34/34; clean Emscripten 5.0.7 all-feature Node/Web
+regression plus production-consumer contract 216/216, zero skips. Web wrapper
+21,832 bytes; Wasm 455,930 bytes; artifact budget passes. The focused ASan/UBSan
+contract passes with leak detection disabled: LeakSanitizer cannot initialize
+in this executor's ptrace environment, so no LeakSanitizer pass is claimed.
+The contracts independently assert final native and bridge payloads are zero.
+
+This closes the circuit-world source lifetime boundary, not all foreign-owner
+allocations during allocator checkpoints. The fixed V2 receipt and complete
+owner guard matrix remain open. No CI rerun, release or migration activation is
+implied by these local checks. Consumer artifact synchronization is tracked in
+the viewer implementation status linked above.
