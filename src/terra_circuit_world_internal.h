@@ -58,6 +58,7 @@ typedef struct CxWorld {
     TerraTwld* twld; uint32_t twld_cursor,twld_mode,twld_output_offset,twld_saved_size;
     CxModTile* mods; uint32_t mod_count,mod_capacity,mod_cursor;
     TerraCircuitWorldEvent event;
+    const uint8_t* event_data;
     TerraCircuitWorldCommand command;
     uint8_t* input; uint32_t input_offset,input_length;
     uint32_t read_target,read_slot;
@@ -197,7 +198,7 @@ int cx_seed_contains(const CxWorld*,uint32_t,uint32_t);
 int cx_inside_wiring(const CxWorld*,uint32_t,uint32_t);
 int cx_devices_prepare(CxWorld*);
 void cx_devices_end_columns(CxWorld*);
-int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*);
+int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*,const uint8_t*);
 int cx_fragments_step(CxWorld*,uint32_t*);
 void cx_fragments_free(CxWorld*);
 void cx_fragments_cancel(CxWorld*);

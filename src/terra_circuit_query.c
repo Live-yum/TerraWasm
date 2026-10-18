@@ -132,28 +132,41 @@ int cx_command_complete(CxWorld* w){
     if(w->command.kind==TCW_TICKS){int s=cx_seed_reserve(w,4u);if(s)return s;s=cx_operation_begin(w);if(s)return s;w->tick_remaining=w->command.count;w->tick_stage=0;w->phase=CX_TICKS;return TCW_OK;}
     w->phase=CX_IDLE;return TCW_OK;
 }
-int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
+static int32_t circuit_world_command_impl(uint32_t handle,const TerraCircuitWorldCommand* input,const uint8_t* command_data){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(!input)return TCW_INVALID;if(w->phase!=CX_IDLE||w->event.kind)return TCW_STATE;
-    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
+    TerraCircuitWorldCommand cmd=*input;cmd.data_ptr=0;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
     /* A rejected bounded query must not poison SAVE's earlier dispatch path. */
     w->error=0;
-    if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd);
+    if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd,command_data);
     if(cmd.kind==TCW_TRIGGER&&(cmd.flags&1u)){int s=cx_interaction_rect(w,&cmd);if(s<0)return TCW_INVALID;if(!s){w->command=cmd;return TCW_OK;}}
     if((cmd.kind==TCW_VIEWPORT||cmd.kind==TCW_TRIGGER)&&(!cmd.width||!cmd.height||cmd.x>=w->width||cmd.y>=w->height||cmd.width>w->width-cmd.x||cmd.height>w->height-cmd.y))return TCW_INVALID;
     if(cmd.kind==TCW_TRIGGER&&(cmd.mask>15u||!cmd.mask))return TCW_INVALID;
     if(cmd.kind==TCW_SAVE){if(!cmd.source_id||cmd.source_id==w->world_source||cmd.source_id==w->scratch_source||cmd.source_id==w->twld_source)return TCW_INVALID;if(w->twld&&(!cmd.aux_source_id||cmd.aux_source_id==cmd.source_id||cmd.aux_source_id==w->world_source||cmd.aux_source_id==w->scratch_source||cmd.aux_source_id==w->twld_source))return TCW_INVALID;w->command=cmd;w->output_source=cmd.source_id;w->output_offset=0;w->output_length=0;w->save_cursor=0;w->twld_saved_size=0;w->phase=CX_SAVE_PREFIX;w->input_length=0;return TCW_OK;}
     uint32_t count=0,allocated_count=0;
-    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){if(cmd.data_count>65536u||(!cmd.data_ptr&&cmd.data_count))return TCW_INVALID;count=cmd.data_count;
+    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){if(cmd.data_count>65536u||(!command_data&&cmd.data_count))return TCW_INVALID;count=cmd.data_count;
 #ifdef __wasm__
-        if(count&&!tx_bridge_range_is_valid(cmd.data_ptr,count*16u))return TCW_INVALID;
+        if(count&&!tx_bridge_contains_native(command_data,count*16u))return TCW_INVALID;
 #endif
     }else if(cmd.kind==TCW_TRIGGER){uint64_t n=(uint64_t)cmd.width*cmd.height;if(n>UINT32_MAX/(2u*sizeof(CxInputPoint)))return TCW_MEMORY;count=(uint32_t)n;allocated_count=count*2u;}
     if(!allocated_count)allocated_count=count;CxInputPoint* points=NULL;if(allocated_count){points=(CxInputPoint*)cx_alloc(w,allocated_count*sizeof(CxInputPoint));if(!points)return TCW_MEMORY;}
-    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){const uint32_t* data=(const uint32_t*)(uintptr_t)cmd.data_ptr;for(uint32_t i=0;i<count;i++){uint32_t x=data[i*4u],y=data[i*4u+1u],value=data[i*4u+2u];if(x>=w->width||y>=w->height||(cmd.kind==TCW_WRITE_LAMPS&&value>1u)||data[i*4u+3u]){cx_free(w,points);return TCW_INVALID;}points[i]=(CxInputPoint){x,y,value,i};}}
+    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){const uint32_t* data=(const uint32_t*)command_data;for(uint32_t i=0;i<count;i++){uint32_t x=data[i*4u],y=data[i*4u+1u],value=data[i*4u+2u];if(x>=w->width||y>=w->height||(cmd.kind==TCW_WRITE_LAMPS&&value>1u)||data[i*4u+3u]){cx_free(w,points);return TCW_INVALID;}points[i]=(CxInputPoint){x,y,value,i};}}
     else if(cmd.kind==TCW_TRIGGER){uint32_t i=0;for(uint32_t x=cmd.x;x<cmd.x+cmd.width;x++)for(uint32_t y=cmd.y;y<cmd.y+cmd.height;y++){points[i]=(CxInputPoint){x,y,0,i};++i;if(!cx_inside_wiring(w,x,y)){const int dx[4]={0,0,1,-1},dy[4]={1,-1,0,0};for(uint32_t d=0;d<4;d++){int64_t a=(int64_t)x+dx[d],b=(int64_t)y+dy[d];if(a>=0&&b>=0&&cx_inside_wiring(w,(uint32_t)a,(uint32_t)b)){if(i>=allocated_count){cx_free(w,points);return TCW_MEMORY;}points[i]=(CxInputPoint){(uint32_t)a,(uint32_t)b,1,i};++i;}}}}count=i;}
     if(count)qsort(points,count,sizeof(CxInputPoint),compare_points);
     cx_free(w,w->points);w->points=points;w->point_count=count;w->command=cmd;w->error=0;
     int status=cmd.kind==TCW_TICKS?cx_command_complete(w):cx_query_begin(w);if(status<0){cx_operation_rollback(w);w->phase=CX_IDLE;}return status;
+}
+int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
+    CxWorld* w=cx_lookup(handle);
+    if(w&&input&&w->phase==CX_IDLE&&!w->event.kind&&input->data_count&&
+       (input->kind==TCW_FRAGMENTS||input->kind==TCW_READ_LAMPS||input->kind==TCW_WRITE_LAMPS)) {
+        if(input->data_count>65536u||!tx_bridge_range_is_valid(input->data_ptr,input->data_count*16u))return TCW_INVALID;
+    }
+    return circuit_world_command_impl(handle,input,input?(const uint8_t*)(uintptr_t)input->data_ptr:NULL);
+}
+int32_t terra_circuit_world_command_native(uint32_t handle,const TerraCircuitWorldCommand* input,TerraConstSpan data){
+    if(!input||input->data_ptr||input->data_count>65536u||data.length!=(size_t)input->data_count*16u||
+       (data.length&&(!data.data||((uintptr_t)data.data%_Alignof(uint32_t)))))return TCW_INVALID;
+    return circuit_world_command_impl(handle,input,data.data);
 }
 static int copy_source(CxWorld* w,uint32_t offset,uint32_t count){
     if(!w->world_source)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->world->file+offset);

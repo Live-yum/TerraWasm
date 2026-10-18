@@ -208,12 +208,12 @@ static int cf_objects_build(CxWorld* w) {
 }
 uint32_t cx_fragments_result_count(CxWorld* w){return w->fragments?(w->command.kind==TCW_FRAGMENTS?w->fragments->total:w->fragments->result_count):0;}
 static int cf_emit_page(CxWorld* w){CxFragments* f=w->fragments;uint32_t n=w->command.x<f->total?f->total-w->command.x:0;if(n>w->command.count)n=w->command.count;int s=reserve_result(w,n*2);if(s)return s;if(n)memcpy(w->result,f->descriptors+w->command.x*8,n*32u);cx_emit(w,TCW_RESULT,0,0,n*32u,w->result);w->event.result_kind=TCW_FRAGMENTS;w->event.result_count=n;return TCW_CONTINUE;}
-int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd){
-    if(!cmd->count||cmd->count>32768u||cmd->data_count>65536u||(!cmd->data_ptr&&cmd->data_count))return TCW_INVALID;
+int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd,const uint8_t* command_data){
+    if(!cmd->count||cmd->count>32768u||cmd->data_count>65536u||(!command_data&&cmd->data_count))return TCW_INVALID;
     if(cmd->kind==TCW_EXTRACT&&(!w->fragments||!w->fragments->ready||cmd->data_count))return TCW_STATE;
     if(cmd->kind==TCW_EXTRACT&&(cmd->flags&1)&&(!cmd->aux_source_id||cmd->aux_source_id==w->world_source||cmd->aux_source_id==w->scratch_source||cmd->aux_source_id==w->twld_source||cmd->width<32||cmd->width>CO_LIMIT||!cmd->height||cmd->height>CO_COUNT))return TCW_INVALID;
 #ifdef __wasm__
-    if(cmd->data_count&&!tx_bridge_range_is_valid(cmd->data_ptr,cmd->data_count*16u))return TCW_INVALID;
+    if(cmd->data_count&&!tx_bridge_contains_native(command_data,cmd->data_count*16u))return TCW_INVALID;
 #endif
     w->error=0;
     if(cmd->kind==TCW_FRAGMENTS&&w->fragments&&w->fragments->ready){if(cmd->data_count)return TCW_STATE;w->command=*cmd;return cf_emit_page(w);}
@@ -225,7 +225,7 @@ int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd){
     if(w->networks>UINT32_MAX/32u-1u)goto memory;
     f->parents=cx_alloc(w,(w->networks+1)*4u);f->descriptors=cx_alloc(w,(w->networks+1)*32u);f->owner=cx_alloc(w,w->height*4u);
     if(!f->parents||!f->descriptors||!f->owner)goto memory;memset(f->descriptors,0,(w->networks+1)*32u);for(uint32_t i=0;i<=w->networks;i++)f->parents[i]=i;
-    if(cmd->data_count){f->geometry=cx_alloc(w,cmd->data_count*16u);if(!f->geometry)goto memory;memcpy(f->geometry,(const void*)(uintptr_t)cmd->data_ptr,cmd->data_count*16u);f->geometry_count=cmd->data_count;
+    if(cmd->data_count){f->geometry=cx_alloc(w,cmd->data_count*16u);if(!f->geometry)goto memory;memcpy(f->geometry,command_data,cmd->data_count*16u);f->geometry_count=cmd->data_count;
         for(uint32_t i=0;i<f->geometry_count;i++){CxGeometry* g=f->geometry+i;uint32_t width=(g->shape>>16)&255u,height=g->shape>>24;if(g->type>65535u||g->anchor>17u||!width||!height||(g->shape&255u)>=width||((g->shape>>8)&255u)>=height){cx_fragments_free(w);return TCW_INVALID;}}
         qsort(f->geometry,f->geometry_count,sizeof(*f->geometry),cf_geometry_compare);
         uint32_t n=0;for(uint32_t i=0;i<f->geometry_count;i++)if(!n||memcmp(f->geometry+n-1,f->geometry+i,sizeof(*f->geometry)))f->geometry[n++]=f->geometry[i];f->geometry_count=n;

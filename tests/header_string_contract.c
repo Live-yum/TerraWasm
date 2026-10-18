@@ -10,9 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(__GLIBC__) && defined(TERRAX_HEADER_STRING_STREAM_TESTS)
-#include <malloc.h>
-#endif
 
 #ifndef TERRAX_HEADER_STRING_FIXTURE_DIR
 #define TERRAX_HEADER_STRING_FIXTURE_DIR "build-native-stream/header-string-fixtures"
@@ -212,31 +209,55 @@ static void legacy_name_contract(uint32_t version){
 }
 
 #ifdef TERRAX_HEADER_STRING_STREAM_TESTS
-extern uint32_t tx_malloc(uint32_t);
-extern void tx_free(uint32_t);
+static TerraConstSpan output_span;
+static TerraMutableSpan input_span;
+static int native_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+    int status=terra_world_stream_step_native(id,units,out,&output_span);
+    if(status>=0){assert(!out->data_ptr);assert(output_span.length==(out->kind==TX_STREAM_OUTPUT?out->length:0));
+        if((uintptr_t)output_span.data>UINT32_MAX){
+            TxStreamEvent saved=*out;const uint8_t* data=output_span.data;
+            assert(terra_world_stream_step(id,units,out)<0);assert(!memcmp(&saved,out,sizeof(saved)));
+            status=terra_world_stream_step_native(id,units,out,&output_span);
+            assert(status>=0&&output_span.data==data&&!memcmp(&saved,out,sizeof(saved)));
+        }
+    }
+    return status;
+}
+static int native_stream_acquire(uint32_t id,TxStreamInputLease* out){
+    int status=terra_world_stream_acquire_input_native(id,out,&input_span);
+    if(!status){assert(!out->data_ptr);assert(input_span.length==out->length&&input_span.capacity>=out->length);
+        if((uintptr_t)input_span.data>UINT32_MAX){
+            uint32_t lease_id=out->lease_id;assert(!terra_world_stream_release_input(id,lease_id));
+            assert(terra_world_stream_acquire_input(id,out)<0);
+            status=terra_world_stream_acquire_input_native(id,out,&input_span);
+            assert(!status&&out->lease_id!=lease_id&&!out->data_ptr);
+        }
+    }
+    return status;
+}
 static uint32_t *handle;
 static TxStreamEvent *event;
 static TxStreamInputLease *lease;
-static void *bridge_alloc(uint32_t length){uint32_t pointer=tx_malloc(length);assert(pointer);return (void*)(uintptr_t)pointer;}
+static void *bridge_alloc(uint32_t length){void* pointer=tx_bridge_alloc_native(length);assert(pointer);return pointer;}
 static int stream_begin(uint32_t world,const char *operation,const char *request){
     char *name=bridge_alloc((uint32_t)strlen(operation)+1),*json=bridge_alloc((uint32_t)strlen(request)+1);
     strcpy(name,operation);strcpy(json,request);
     int status=terra_world_stream_operation_begin(world,name,json,handle);
-    tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)json);return status;
+    tx_bridge_free_native(name);tx_bridge_free_native(json);return status;
 }
 static uint8_t *pump(uint32_t task,const uint8_t *source,uint32_t source_len,uint32_t *out_len){
     uint8_t *output=NULL;uint32_t capacity=0;*out_len=0;
     for(uint32_t steps=0;steps<10000000;steps++){
-        check(terra_world_stream_step(task,1024,event));
+        check(native_stream_step(task,1024,event));
         if(event->kind==TX_STREAM_NEED_SOURCE){
             assert(event->source_id==1&&event->offset<=source_len&&event->length<=source_len-event->offset);
-            check(terra_world_stream_acquire_input(task,lease));
-            memcpy((void*)(uintptr_t)lease->data_ptr,source+event->offset,event->length);
+            check(native_stream_acquire(task,lease));
+            memcpy(input_span.data,source+event->offset,event->length);
             check(terra_world_stream_commit_input(task,lease->lease_id,1,lease->offset,lease->length));
         }else if(event->kind==TX_STREAM_OUTPUT){
             uint32_t end=event->offset+event->length;assert(end>=event->offset);
             if(end>capacity){capacity=end;output=realloc(output,capacity);assert(output);}
-            memcpy(output+event->offset,(void*)(uintptr_t)event->data_ptr,event->length);
+            memcpy(output+event->offset,output_span.data,event->length);
             check(terra_world_stream_ack_output(task));
         }else if(event->kind==TX_STREAM_READY){*out_len=event->result_size;return output;}
         else assert(event->kind==TX_STREAM_MORE);
@@ -259,11 +280,11 @@ static void stream_map_error_contract(void){
     tx_set_error("TERRAX_NOT_FOUND","deliberately stale error before media creation");
     int status=0;
     for(unsigned steps=0;steps<10000;steps++){
-        status=terra_world_stream_step(task,1024,event);if(status<0)break;
+        status=native_stream_step(task,1024,event);if(status<0)break;
         if(event->kind==TX_STREAM_NEED_SOURCE){
             assert(event->offset<=length&&event->length<=length-event->offset);
-            check(terra_world_stream_acquire_input(task,lease));
-            memcpy((void*)(uintptr_t)lease->data_ptr,source+event->offset,event->length);
+            check(native_stream_acquire(task,lease));
+            memcpy(input_span.data,source+event->offset,event->length);
             check(terra_world_stream_commit_input(task,lease->lease_id,1,lease->offset,lease->length));
         }else assert(event->kind==TX_STREAM_MORE);
     }
@@ -354,9 +375,6 @@ static void map_names_contract(void){
 
 int main(int argc,char **argv){
 #ifdef TERRAX_HEADER_STRING_STREAM_TESTS
-#if defined(__GLIBC__)
-    mallopt(M_MMAP_MAX,0);
-#endif
     handle=bridge_alloc(sizeof *handle);event=bridge_alloc(sizeof *event);lease=bridge_alloc(sizeof *lease);
 #endif
     if(argc==2){
@@ -386,7 +404,7 @@ int main(int argc,char **argv){
     padded_contract();
 finished:
 #ifdef TERRAX_HEADER_STRING_STREAM_TESTS
-    tx_free((uint32_t)(uintptr_t)handle);tx_free((uint32_t)(uintptr_t)event);tx_free((uint32_t)(uintptr_t)lease);
+    tx_bridge_free_native(handle);tx_bridge_free_native(event);tx_bridge_free_native(lease);
 #endif
     puts("long header strings and non-canonical length prefixes: ok");return 0;
 }

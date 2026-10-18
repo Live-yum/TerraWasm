@@ -95,7 +95,7 @@ uint32_t cx_wire_mask(const TxTile* t){return t->wire_red|(t->wire_blue<<1)|(t->
 int cx_inside_wiring(const CxWorld* w,uint32_t x,uint32_t y){return w->width>4u&&w->height>4u&&x>=2u&&y>=2u&&x<w->width-2u&&y<w->height-2u;}
 int cx_emit(CxWorld* w,uint32_t kind,uint32_t source,uint32_t offset,uint32_t length,const void* data){
     memset(&w->event,0,sizeof(w->event));w->event.abi_version=1;w->event.kind=kind;
-    w->event.source_id=source;w->event.offset=offset;w->event.length=length;w->event.data_ptr=(uint32_t)(uintptr_t)data;
+    w->event.source_id=source;w->event.offset=offset;w->event.length=length;w->event_data=(const uint8_t*)data;
     w->event.phase=w->phase;w->event.completed=w->x;w->event.total=w->width;return TCW_CONTINUE;
 }
 int cx_world_tile(CxWorld* w,TxTile* out){
@@ -192,7 +192,7 @@ int32_t terra_circuit_world_supply(uint32_t handle,uint32_t source_id,uint32_t o
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;
     if(w->event.kind!=TCW_READ||source_id!=w->event.source_id||offset!=w->event.offset||length!=w->event.length||(!data&&length))return TCW_INVALID;
 #ifdef __wasm__
-    if(!tx_bridge_range_is_valid((uint32_t)(uintptr_t)data,length))return TCW_INVALID;
+    if(!tx_bridge_contains_native(data,length))return TCW_INVALID;
 #endif
     if(w->read_target==1){memcpy(w->cache+w->read_slot*CX_PAGE_SIZE,data,length);}
     else{memcpy(w->input,data,length);w->input_offset=offset;w->input_length=length;}
@@ -211,7 +211,7 @@ int32_t terra_circuit_world_ack(uint32_t handle){
     }else{w->result_count=0;w->phase=CX_IDLE;}
     memset(&w->event,0,sizeof(w->event));return TCW_OK;
 }
-int32_t terra_circuit_world_step(uint32_t handle,uint32_t work_units,TerraCircuitWorldEvent* out){
+static int32_t circuit_world_step_impl(uint32_t handle,uint32_t work_units,TerraCircuitWorldEvent* out){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;
     if(!out||!work_units)return TCW_INVALID;if(!tx_get_world(w->world_handle))return TCW_HANDLE;
     if(w->phase==CX_FAILED)return -(int)(w->error?w->error:-TCW_STATE);
@@ -241,6 +241,20 @@ int32_t terra_circuit_world_step(uint32_t handle,uint32_t work_units,TerraCircui
     memset(out,0,sizeof(*out));out->abi_version=1;out->kind=w->phase==CX_IDLE?TCW_READY:TCW_MORE;out->phase=w->phase;out->completed=w->x;out->total=w->width;
     if(w->phase==CX_IDLE){out->result_kind=w->command.kind;out->reserved=w->twld_state&1u;if(w->command.kind==TCW_SAVE){out->source_id=w->output_source;out->result_count=w->save_result_size;out->reserved=w->twld_saved_size;}else if(w->command.kind==TCW_FRAGMENTS||w->command.kind==TCW_EXTRACT)out->result_count=cx_fragments_result_count(w);}
     return w->phase==CX_IDLE?TCW_OK:TCW_CONTINUE;
+}
+int32_t terra_circuit_world_step(uint32_t handle,uint32_t work_units,TerraCircuitWorldEvent* out){
+    int32_t status=circuit_world_step_impl(handle,work_units,out);
+    if(status>=0&&(out->kind==TCW_WRITE||out->kind==TCW_RESULT)) {
+        CxWorld* w=cx_lookup(handle);
+        if(!tx_wasm_span32(w->event_data,out->length,&out->data_ptr))return cx_fail(NULL,TCW_STATE,"output pointer requires the native span adapter");
+    }
+    return status;
+}
+int32_t terra_circuit_world_step_native(uint32_t handle,uint32_t work_units,TerraCircuitWorldEvent* out,TerraConstSpan* span){
+    if(!span)return TCW_INVALID;*span=(TerraConstSpan){0};
+    int32_t status=circuit_world_step_impl(handle,work_units,out);
+    if(status>=0){out->data_ptr=0;if(out->kind==TCW_WRITE||out->kind==TCW_RESULT){span->data=cx_lookup(handle)->event_data;span->length=out->length;}}
+    return status;
 }
 int32_t terra_circuit_world_stats(uint32_t handle,TerraCircuitWorldStats* out){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(!out)return TCW_INVALID;TerraVmStats s;memset(&s,0,sizeof(s));if(w->vm)terra_vm_stats(w->vm,&s);

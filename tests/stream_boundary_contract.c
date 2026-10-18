@@ -1,6 +1,4 @@
-/* On LP64 Linux the public Wasm32 bridge requires low addresses. The local
- * runner uses -no-pie and disables glibc mmap allocations. Emscripten has native
- * 32-bit addresses; no allocator accommodation is needed there. */
+/* Native stream contracts use pointer spans, including high-address LP64/ASan allocations. */
 #include "terra_stream.h"
 #include "terra_world.h"
 #include "terra_types.h"
@@ -10,11 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
-#if defined(__GLIBC__) && !defined(__wasm__)
-#include <malloc.h>
-#endif
-extern uint32_t tx_malloc(uint32_t);
-extern void tx_free(uint32_t);
 extern uint32_t tx_native_heap_used(void);
 extern TxWorld* tx_get_world(uint32_t);
 extern void tx_render_stream_color(TxWorld*,const TxTile*,uint32_t,uint8_t*);
@@ -22,6 +15,32 @@ extern void txw_test_allocation_limit(uint32_t);
 extern void txw_test_stream_memory_bytes(uint32_t);
 extern int tx_stream_parse_tile_rules(TxWorld*,const char*,int,TxTileRule**,uint32_t*);
 extern void tx_internal_free(void*);
+static TerraConstSpan output_span;
+static TerraMutableSpan input_span;
+static int native_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+    int status=terra_world_stream_step_native(id,units,out,&output_span);
+    if(status>=0){assert(!out->data_ptr);assert(output_span.length==(out->kind==TX_STREAM_OUTPUT?out->length:0));
+        if((uintptr_t)output_span.data>UINT32_MAX){
+            TxStreamEvent saved=*out;const uint8_t* data=output_span.data;
+            assert(terra_world_stream_step(id,units,out)<0);assert(!memcmp(&saved,out,sizeof(saved)));
+            status=terra_world_stream_step_native(id,units,out,&output_span);
+            assert(status>=0&&output_span.data==data&&!memcmp(&saved,out,sizeof(saved)));
+        }
+    }
+    return status;
+}
+static int native_stream_acquire(uint32_t id,TxStreamInputLease* out){
+    int status=terra_world_stream_acquire_input_native(id,out,&input_span);
+    if(!status){assert(!out->data_ptr);assert(input_span.length==out->length&&input_span.capacity>=out->length);
+        if((uintptr_t)input_span.data>UINT32_MAX){
+            uint32_t lease_id=out->lease_id;assert(!terra_world_stream_release_input(id,lease_id));
+            assert(terra_world_stream_acquire_input(id,out)<0);
+            status=terra_world_stream_acquire_input_native(id,out,&input_span);
+            assert(!status&&out->lease_id!=lease_id&&!out->data_ptr);
+        }
+    }
+    return status;
+}
 static uint8_t* source;static uint32_t source_size,world;
 static uint32_t *hp;static TxStreamEvent* ep;static TxStreamInputLease* lp;static TxStreamStats* sp;
 static uint8_t* bridge;
@@ -29,24 +48,24 @@ static uint32_t pump_work_units=1;
 static uint32_t get32(const uint8_t*p){return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t be(const uint8_t*p){return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];}
 static void check(int status){if(status){char error[512];uint64_t n;terra_info_get_last_error_json(error,sizeof(error),&n);fprintf(stderr,"status %d: %s\n",status,error);abort();}}
-static void* alloc(uint32_t n){uint32_t p=tx_malloc(n);assert(p);return (void*)(uintptr_t)p;}
+static void* alloc(uint32_t n){void* p=tx_bridge_alloc_native(n);assert(p);return p;}
 static char* string(const char*s){char*p=alloc((uint32_t)strlen(s)+1);strcpy(p,s);return p;}
-static uint32_t begin(const char*name,const char*request){char*n=string(name),*r=string(request);int status=terra_world_stream_operation_begin(world,n,r,hp);tx_free((uint32_t)(uintptr_t)n);tx_free((uint32_t)(uintptr_t)r);check(status);assert(*hp);return *hp;}
+static uint32_t begin(const char*name,const char*request){char*n=string(name),*r=string(request);int status=terra_world_stream_operation_begin(world,n,r,hp);tx_bridge_free_native(n);tx_bridge_free_native(r);check(status);assert(*hp);return *hp;}
 static uint8_t* pump(uint32_t id,int leased,uint32_t*size){
  uint8_t* output=NULL;uint32_t cap=0;*size=0;
  for(uint32_t step=0;step<10000000;step++){
-  check(terra_world_stream_step(id,pump_work_units,ep));TxStreamEvent first=*ep;
-  if(ep->kind){check(terra_world_stream_step(id,pump_work_units,ep));assert(!memcmp(&first,ep,sizeof(first)));}
+  check(native_stream_step(id,pump_work_units,ep));TxStreamEvent first=*ep;
+  if(ep->kind){check(native_stream_step(id,pump_work_units,ep));assert(!memcmp(&first,ep,sizeof(first)));}
   if(ep->kind==TX_STREAM_NEED_SOURCE){assert(ep->source_id==1&&ep->offset<=source_size&&ep->length<=source_size-ep->offset);
-   if(leased){check(terra_world_stream_acquire_input(id,lp));assert(lp->abi_version==2&&lp->length==ep->length&&lp->capacity>=lp->length);assert(terra_world_stream_acquire_input(id,lp)<0);
-    memcpy((void*)(uintptr_t)lp->data_ptr,source+lp->offset,lp->length);uint32_t lease=lp->lease_id;
+   if(leased){check(native_stream_acquire(id,lp));assert(lp->abi_version==2&&lp->length==ep->length&&lp->capacity>=lp->length);assert(native_stream_acquire(id,lp)<0);
+    memcpy(input_span.data,source+lp->offset,lp->length);uint32_t lease=lp->lease_id;
     assert(terra_world_stream_commit_input(id,lease,2,lp->offset,lp->length)<0);
     assert(terra_world_stream_commit_input(id,lease,1,lp->offset+1,lp->length)<0);
     assert(terra_world_stream_commit_input(id,lease,1,lp->offset,lp->length-1)<0);
     check(terra_world_stream_commit_input(id,lease,1,lp->offset,lp->length));assert(terra_world_stream_commit_input(id,lease,1,lp->offset,lp->length)<0);
    }else{memcpy(bridge,source+ep->offset,ep->length);check(terra_world_stream_supply_source(id,1,ep->offset,bridge,ep->length));}
   }else if(ep->kind==TX_STREAM_OUTPUT){uint32_t end=ep->offset+ep->length;assert(end>=ep->offset);
-   if(end>cap){cap=end*2+1024;output=realloc(output,cap);assert(output);}memcpy(output+ep->offset,(void*)(uintptr_t)ep->data_ptr,ep->length);
+   if(end>cap){cap=end*2+1024;output=realloc(output,cap);assert(output);}memcpy(output+ep->offset,output_span.data,ep->length);
    check(terra_world_stream_ack_output(id));
   }else if(ep->kind==TX_STREAM_READY){*size=ep->result_size;check(terra_world_stream_get_stats(id,sp));return output;}
   else assert(ep->kind==TX_STREAM_MORE);
@@ -71,7 +90,7 @@ static void png_contract(const char*path,int noise){load(path);uint32_t baseline
  if(noise==2)assert(sp->cache_copy_bytes==tiles&&sp->source_requests==2&&sp->source_bytes<tiles+1024);
  printf("PNG %s records=%u source=%u decoded=%u requests=%u cache=%u bytes\n",noise==2?"short-columns":noise?"noise":"RLE",sp->tile_records,sp->source_bytes,sp->decoded_tile_bytes,sp->source_requests,sp->cache_bytes);
  verify_png(png,n,noise);free(png);check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
- id=begin("render_preview_png","{}");check(terra_world_stream_step(id,1,ep));check(terra_world_stream_cancel(id));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
+ id=begin("render_preview_png","{}");check(native_stream_step(id,1,ep));check(terra_world_stream_cancel(id));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
  check(terra_world_close(world));world=0;free(source);source=NULL;
 }
 static uint8_t* operation(const char*name,const char*json,uint32_t*n){uint32_t id=begin(name,json);uint8_t*b=pump(id,1,n);check(terra_world_stream_close(id));return b;}
@@ -118,7 +137,7 @@ static void mixed_plan_contract(const char*path){
  uint32_t baseline=tx_native_heap_used();
  const char*bad[]={"{\"operations\":[{\"operation\":\"header_patch\",\"request\":{\"patch\":{\"worldName\":\"must rollback\"}}},{\"operation\":\"unknown\",\"request\":{}}]}",
  "{\"operations\":[{\"operation\":\"batch_update_tiles\",\"request\":{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"type\":2},\"limit\":1}]}}]}"};
- for(unsigned i=0;i<2;i++){char*name=string("edit_plan"),*request=string(bad[i]);assert(terra_world_stream_operation_begin(world,name,request,hp)<0&&!*hp);tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);assert(!strcmp(tx_get_world(world)->worldName,"ordered"));assert(tx_native_heap_used()==baseline);}
+ for(unsigned i=0;i<2;i++){char*name=string("edit_plan"),*request=string(bad[i]);assert(terra_world_stream_operation_begin(world,name,request,hp)<0&&!*hp);tx_bridge_free_native(name);tx_bridge_free_native(request);assert(!strcmp(tx_get_world(world)->worldName,"ordered"));assert(tx_native_heap_used()==baseline);}
  check(terra_world_close(world));free(source);world=0;source=NULL;
 }
 static void reject_tile_rule(const char*request,int streaming){
@@ -126,7 +145,7 @@ static void reject_tile_rule(const char*request,int streaming){
  if(streaming){
   char*name=string("batch_update_tiles"),*json=string(request);
   assert(terra_world_stream_operation_begin(world,name,json,hp)<0&&!*hp);
-  tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)json);
+  tx_bridge_free_native(name);tx_bridge_free_native(json);
  }else{
   char response[256];uint64_t needed;
   assert(terra_op_execute_json(world,"batch_update_tiles",request,response,sizeof(response),&needed)!=TERRAX_WORLD_STATUS_OK);
@@ -203,19 +222,19 @@ static void legacy_supply_contract(const char*path){
  TxWorld*w=tx_get_world(world);uint32_t version=w->version;w->version=TX_CURRENT_KNOWN_VERSION+1;
  assert(terra_world_stream_operation_begin(world,name,request,hp)<0&&!*hp);
  char error[512];uint64_t needed;terra_info_get_last_error_json(error,sizeof(error),&needed);assert(strstr(error,"TERRAX_FUTURE_VERSION_READ_ONLY"));w->version=version;
- tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);
+ tx_bridge_free_native(name);tx_bridge_free_native(request);
  check(terra_world_close(world));free(source);source=NULL;world=0;
 }
 static void faults_contract(const char*path){
  load(path);uint32_t baseline=tx_native_heap_used();char*name=string("render_preview_png"),*request=string("{}");
  txw_test_allocation_limit(1024u*1024u);assert(terra_world_stream_operation_begin(world,name,request,hp)<0&&!*hp);txw_test_allocation_limit(UINT32_MAX);
- assert(tx_get_world(world)&&tx_native_heap_used()==baseline);tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);
+ assert(tx_get_world(world)&&tx_native_heap_used()==baseline);tx_bridge_free_native(name);tx_bridge_free_native(request);
  // Truncating a candidate footer must not replace the already open workspace.
  uint32_t truncated=source_size-1;check(terra_world_stream_open_begin(1,truncated,hp));uint32_t id=*hp;int failed=0;
  for(unsigned step=0;step<1000&&!failed;step++){
-  int status=terra_world_stream_step(id,1,ep);if(status<0){failed=1;break;}
+  int status=native_stream_step(id,1,ep);if(status<0){failed=1;break;}
   assert(ep->kind!=TX_STREAM_READY);
-  if(ep->kind==TX_STREAM_NEED_SOURCE){assert(ep->offset+ep->length<=truncated);check(terra_world_stream_acquire_input(id,lp));memcpy((void*)(uintptr_t)lp->data_ptr,source+lp->offset,lp->length);if(terra_world_stream_commit_input(id,lp->lease_id,1,lp->offset,lp->length)<0)failed=1;}
+  if(ep->kind==TX_STREAM_NEED_SOURCE){assert(ep->offset+ep->length<=truncated);check(native_stream_acquire(id,lp));memcpy(input_span.data,source+lp->offset,lp->length);if(terra_world_stream_commit_input(id,lp->lease_id,1,lp->offset,lp->length)<0)failed=1;}
  }
  assert(failed&&tx_get_world(world));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
  // A changed indexed source cannot smuggle malformed per-column RLE through
@@ -223,20 +242,20 @@ static void faults_contract(const char*path){
  uint32_t at=get32(source+30);uint8_t old=source[at];source[at]=0xff;
  id=begin("render_preview_png","{}");failed=0;
  for(unsigned step=0;step<1000&&!failed;step++){
-  if(terra_world_stream_step(id,1,ep)<0){failed=1;break;}
-  if(ep->kind==TX_STREAM_NEED_SOURCE){check(terra_world_stream_acquire_input(id,lp));memcpy((void*)(uintptr_t)lp->data_ptr,source+lp->offset,lp->length);check(terra_world_stream_commit_input(id,lp->lease_id,1,lp->offset,lp->length));}
+  if(native_stream_step(id,1,ep)<0){failed=1;break;}
+  if(ep->kind==TX_STREAM_NEED_SOURCE){check(native_stream_acquire(id,lp));memcpy(input_span.data,source+lp->offset,lp->length);check(terra_world_stream_commit_input(id,lp->lease_id,1,lp->offset,lp->length));}
   else if(ep->kind==TX_STREAM_OUTPUT)check(terra_world_stream_ack_output(id));else assert(ep->kind!=TX_STREAM_READY);
  }
  assert(failed);check(terra_world_stream_close(id));source[at]=old;assert(tx_native_heap_used()==baseline);
  check(terra_world_close(world));world=0;free(source);source=NULL;
 }
 static void lease_contract(const char*path){FILE*f=fopen(path,"rb");assert(f);fseek(f,0,SEEK_END);uint32_t n=ftell(f);fclose(f);
- check(terra_world_stream_open_begin(1,n,hp));uint32_t id=*hp;check(terra_world_stream_acquire_input(id,lp));uint32_t lease=lp->lease_id;
+ check(terra_world_stream_open_begin(1,n,hp));uint32_t id=*hp;check(native_stream_acquire(id,lp));uint32_t lease=lp->lease_id;
  assert(terra_world_stream_supply_source(id,1,0,bridge,lp->length)<0);check(terra_world_stream_release_input(id,lease));assert(terra_world_stream_release_input(id,lease)<0);
- check(terra_world_stream_acquire_input(id,lp));lease=lp->lease_id;
+ check(native_stream_acquire(id,lp));lease=lp->lease_id;
 #ifndef __wasm__
  txw_test_stream_memory_bytes(65536);assert(terra_world_stream_commit_input(id,lease,1,0,lp->length)<0);
- assert(terra_world_stream_release_input(id,lease)<0);txw_test_stream_memory_bytes(0);check(terra_world_stream_acquire_input(id,lp));lease=lp->lease_id;
+ assert(terra_world_stream_release_input(id,lease)<0);txw_test_stream_memory_bytes(0);check(native_stream_acquire(id,lp));lease=lp->lease_id;
 #endif
  check(terra_world_stream_cancel(id));assert(terra_world_stream_commit_input(id,lease,1,0,lp->length)<0);check(terra_world_stream_close(id));
  check(terra_world_stream_open_begin(1,n,hp));uint32_t next=*hp;assert(next!=id);assert(terra_world_stream_commit_input(next,lease,1,0,lp->length)<0);check(terra_world_stream_close(next));
@@ -253,11 +272,11 @@ static void begin_error_contract(const char*path){
  check(terra_info_get_last_error_json(error,sizeof(error),&required));
  assert(strstr(error,"TERRAX_STATE_ERROR")&&strstr(error,"another task is active"));
  check(terra_world_stream_close(id));
- tx_free((uint32_t)(uintptr_t)name);name=string("unknown_operation");
+ tx_bridge_free_native(name);name=string("unknown_operation");
  assert(terra_world_stream_operation_begin(world,name,request,hp)<0);assert(!*hp);
  check(terra_info_get_last_error_json(error,sizeof(error),&required));
  assert(strstr(error,"TERRAX_STREAM_OPERATION_FAILED")); /* no stale busy/detail */
- tx_free((uint32_t)(uintptr_t)name);tx_free((uint32_t)(uintptr_t)request);
+ tx_bridge_free_native(name);tx_bridge_free_native(request);
  id=begin("save","{}");check(terra_world_stream_close(id));
  check(terra_world_close(world));world=0;free(source);source=NULL;
 }
@@ -266,9 +285,6 @@ static void begin_error_contract(const char*path){
 #include "circuit_supports_contract.inc"
 #include "stream_preview_contract.inc"
 int main(int argc,char**argv){assert(argc==2);
-#if defined(__GLIBC__) && !defined(__wasm__)
- mallopt(M_MMAP_MAX,0);mallopt(M_MMAP_THRESHOLD,1024*1024*1024);
-#endif
  hp=alloc(4);ep=alloc(sizeof(*ep));lp=alloc(sizeof(*lp));sp=alloc(sizeof(*sp));bridge=alloc(1024*1024);
  if(getenv("TERRAX_TEST_CIRCUIT_OBJECTS_ONLY")){circuit_objects_contract(argv[1]);circuit_object_versions_stream_contract(argv[1]);goto finished;}
  char circuit_path[1024];snprintf(circuit_path,sizeof(circuit_path),"%s/circuit-fragments.wld",argv[1]);circuit_fragments_contract(circuit_path);circuit_stamp_contract(circuit_path);
@@ -282,5 +298,5 @@ int main(int argc,char**argv){assert(argc==2);
  snprintf(path,sizeof(path),"%s/small.wld",argv[1]);tile_rule_validation_contract(path);begin_error_contract(path);
  snprintf(path,sizeof(path),"%s/noise.wld",argv[1]);faults_contract(path);
 finished:
- tx_free((uint32_t)(uintptr_t)bridge);tx_free((uint32_t)(uintptr_t)sp);tx_free((uint32_t)(uintptr_t)lp);tx_free((uint32_t)(uintptr_t)ep);tx_free((uint32_t)(uintptr_t)hp);puts("native stream boundaries passed");return 0;
+ tx_bridge_free_native(bridge);tx_bridge_free_native(sp);tx_bridge_free_native(lp);tx_bridge_free_native(ep);tx_bridge_free_native(hp);puts("native stream boundaries passed");return 0;
 }

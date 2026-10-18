@@ -375,6 +375,7 @@ else()
         endfunction()
 
         add_terra_contract(terra_allocator_contract tests/allocator_contract.c)
+        add_terra_contract(terra_native_span_contract tests/native_span_contract.c)
 
         if(TERRAWASM_ENABLE_WLD)
             find_package(ZLIB REQUIRED)
@@ -415,11 +416,7 @@ else()
                 add_terra_contract(terra_header_string_contract tests/header_string_contract.c ZLIB::ZLIB)
                 target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_FIXTURE_DIR="${HEADER_STRING_FIXTURES}")
                 add_dependencies(terra_header_string_contract terra_header_string_fixtures)
-                if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT TERRAWASM_SANITIZERS)
-                    target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_STREAM_TESTS)
-                    target_compile_options(terra_header_string_contract PRIVATE -fno-pie)
-                    target_link_options(terra_header_string_contract PRIVATE -no-pie)
-                endif()
+                target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_STREAM_TESTS)
             endif()
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_rows_contract tests/marker_rows_contract.c ZLIB::ZLIB)
@@ -440,43 +437,46 @@ else()
             add_terra_contract(terra_pixel_workspace_contract tests/pixel_workspace_contract.c)
             target_compile_definitions(terra_pixel_workspace_contract PRIVATE TERRAX_TESTING)
 
-            # The public stream bridge uses Wasm32 pointers. LP64 ASan reserves
-            # high addresses, so run this bridge contract in the native job;
-            # the existing parser/renderer contracts still run under ASan.
-            if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT TERRAWASM_SANITIZERS)
-                find_program(TERRAX_NODE_EXECUTABLE node)
-                if(TERRAX_NODE_EXECUTABLE)
-                    set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
-                    add_custom_command(
-                        OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                               "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
-                               "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                               "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
-                        COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
-                        DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
-                        VERBATIM)
-                    add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                        "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
-                        "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                        "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
-                    add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
-                    target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG -fno-pie)
-                    target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
-                    target_link_options(terra_stream_boundary_contract PRIVATE -no-pie)
-                    target_link_libraries(terra_stream_boundary_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-                    add_dependencies(terra_stream_boundary_contract terra_stream_fixtures)
-                    add_test(NAME terra_stream_boundary_contract COMMAND terra_stream_boundary_contract "${STREAM_FIXTURES}")
-                    add_executable(terra_op_atomic_response_contract tests/op_atomic_response_contract.c)
-                    target_compile_definitions(terra_op_atomic_response_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
-                    target_compile_options(terra_op_atomic_response_contract PRIVATE -UNDEBUG)
-                    target_link_libraries(terra_op_atomic_response_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-                    add_dependencies(terra_op_atomic_response_contract terra_stream_fixtures)
-                    add_test(NAME terra_op_atomic_response_contract COMMAND terra_op_atomic_response_contract "${STREAM_FIXTURES}/small.wld")
-                    add_dependencies(terra_world_checkpoint_contract terra_stream_fixtures)
-                    add_test(NAME terra_world_checkpoint_generated_file COMMAND terra_world_checkpoint_contract "${STREAM_FIXTURES}/small.wld")
-                else()
-                    message(STATUS "Stream boundary fixture generation needs Node; contract not enabled")
+            # Pointer-span native adapters allow PIE and sanitizer allocations.
+            find_program(TERRAX_NODE_EXECUTABLE node)
+            if(TERRAX_NODE_EXECUTABLE)
+                set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
+                add_custom_command(
+                    OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                           "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
+                           "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
+                           "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
+                    COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
+                    DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
+                    VERBATIM)
+                add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                    "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
+                    "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
+                    "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
+                add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
+                target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG)
+                target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_link_libraries(terra_stream_boundary_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_stream_boundary_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_stream_boundary_contract PRIVATE -fsanitize=address,undefined)
                 endif()
+                add_dependencies(terra_stream_boundary_contract terra_stream_fixtures)
+                add_test(NAME terra_stream_boundary_contract COMMAND terra_stream_boundary_contract "${STREAM_FIXTURES}")
+                add_executable(terra_op_atomic_response_contract tests/op_atomic_response_contract.c)
+                target_compile_definitions(terra_op_atomic_response_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_op_atomic_response_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_op_atomic_response_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_op_atomic_response_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_op_atomic_response_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_op_atomic_response_contract terra_stream_fixtures)
+                add_test(NAME terra_op_atomic_response_contract COMMAND terra_op_atomic_response_contract "${STREAM_FIXTURES}/small.wld")
+                add_dependencies(terra_world_checkpoint_contract terra_stream_fixtures)
+                add_test(NAME terra_world_checkpoint_generated_file COMMAND terra_world_checkpoint_contract "${STREAM_FIXTURES}/small.wld")
+            else()
+                message(STATUS "Stream boundary fixture generation needs Node; contract not enabled")
             endif()
 
 

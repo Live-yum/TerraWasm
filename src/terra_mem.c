@@ -1,3 +1,4 @@
+#include "terra_native_span.h"
 /*
  * terra_mem.c -- Owned allocation domains, TxBuf, toolchain libc.
  *
@@ -262,25 +263,20 @@ static void* tx_new_root(uint32_t size, uint32_t domain) {
     return (uint8_t*)header + sizeof(TxAllocHeader);
 }
 
-uint32_t tx_malloc(uint32_t size) {
-    void* payload = tx_new_root(size, TX_DOMAIN_BRIDGE);
-    return (uint32_t)(uintptr_t)payload;
+void* tx_bridge_alloc_native(size_t size) {
+    if (size > UINT32_MAX) return NULL;
+    return tx_new_root((uint32_t)size, TX_DOMAIN_BRIDGE);
 }
-
-void tx_free(uint32_t ptr) {
-    void* payload = (void*)(uintptr_t)ptr;
-    tx_release_root(tx_find_root(payload, TX_DOMAIN_BRIDGE), TX_DOMAIN_BRIDGE);
+void tx_bridge_free_native(void* pointer) {
+    tx_release_root(tx_find_root(pointer, TX_DOMAIN_BRIDGE), TX_DOMAIN_BRIDGE);
 }
-
-uint32_t tx_bridge_allocation_size(uint32_t ptr) {
-    void* payload = (void*)(uintptr_t)ptr;
-    TxAllocHeader* header = tx_find_root(payload, TX_DOMAIN_BRIDGE);
+size_t tx_bridge_allocation_size_native(const void* pointer) {
+    TxAllocHeader* header = tx_find_root((void*)pointer, TX_DOMAIN_BRIDGE);
     return header ? header->root.size : 0u;
 }
-
-int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
-    if (!ptr) return length == 0u;
-    uintptr_t address = (uintptr_t)ptr;
+int tx_bridge_contains_native(const void* pointer, size_t length) {
+    if (!pointer) return length == 0u;
+    uintptr_t address = (uintptr_t)pointer;
     TxAllocHeader* root = tx_bridge_head;
     while (root) {
         if (root->root.magic == TX_ALLOC_MAGIC &&
@@ -289,15 +285,35 @@ int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
             uintptr_t payload = (uintptr_t)((uint8_t*)root + sizeof(TxAllocHeader));
             if (address >= payload) {
                 uintptr_t offset = address - payload;
-                if (offset <= root->root.size &&
-                    length <= root->root.size - (uint32_t)offset) {
-                    return 1;
-                }
+                if (offset <= root->root.size && length <= root->root.size - offset) return 1;
             }
         }
         root = root->root.next;
     }
     return 0;
+}
+int tx_wasm_span32(const void* pointer, size_t length, uint32_t* out_offset) {
+    if (!out_offset) return 0;
+    *out_offset = 0;
+    uintptr_t address = (uintptr_t)pointer;
+    if (address > UINT32_MAX || (!pointer && length) ||
+        (uint64_t)length > (uint64_t)UINT32_MAX + 1u - address) return 0;
+    *out_offset = (uint32_t)address;
+    return 1;
+}
+int tx_wasm_offset32(const void* pointer, uint32_t* out_offset) { return tx_wasm_span32(pointer,0,out_offset); }
+uint32_t tx_malloc(uint32_t size) {
+    void* payload = tx_bridge_alloc_native(size);
+    uint32_t offset = 0;
+    if (!tx_wasm_span32(payload, size, &offset)) tx_bridge_free_native(payload);
+    return offset;
+}
+void tx_free(uint32_t ptr) { tx_bridge_free_native((void*)(uintptr_t)ptr); }
+uint32_t tx_bridge_allocation_size(uint32_t ptr) {
+    return (uint32_t)tx_bridge_allocation_size_native((const void*)(uintptr_t)ptr);
+}
+int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
+    return tx_bridge_contains_native((const void*)(uintptr_t)ptr, length);
 }
 
 uint8_t* tx_alloc(uint32_t size) {

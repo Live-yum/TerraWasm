@@ -1,3 +1,4 @@
+#include "terra_native_span.h"
 #include "terra_owner_guards.h"
 /*
  * terra_pixel_art.c -- Pixel art queue implementation.
@@ -422,11 +423,11 @@ int txw_begin_pixel_art_indexed(
     return 0;
 }
 
-int txw_add_pixel_art_chunk(
+static int add_pixel_art_chunk_from_pointer(
     uint32_t handle,
     int32_t chunk_x,
     int32_t chunk_y,
-    uint32_t indices_ptr,
+    const uint8_t* source_indices,
     uint32_t index_count,
     uint32_t used)
 {
@@ -443,7 +444,7 @@ int txw_add_pixel_art_chunk(
         tx_set_error("TERRAX_INVALID_ARGUMENT", "chunk coordinates out of range");
         return -1;
     }
-    if (!indices_ptr || index_count != TX_PIXEL_ART_CHUNK_CELLS) {
+    if (!source_indices || index_count != TX_PIXEL_ART_CHUNK_CELLS) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "chunk indices payload must contain 4096 values");
         return -1;
     }
@@ -453,7 +454,7 @@ int txw_add_pixel_art_chunk(
     }
 
     uint32_t bytes = TX_PIXEL_ART_CHUNK_SIZE * TX_PIXEL_ART_CHUNK_SIZE * sizeof(uint16_t);
-    if (!tx_bridge_range_is_valid(indices_ptr, bytes)) {
+    if (!tx_bridge_contains_native(source_indices, bytes)) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "chunk indices exceed their bridge allocation");
         return -1;
     }
@@ -466,7 +467,7 @@ int txw_add_pixel_art_chunk(
         tx_set_error("TERRAX_WASM_OOM", "indexed chunk allocation failed");
         return -1;
     }
-    memcpy(indices, (const void*)(uintptr_t)indices_ptr, bytes);
+    memcpy(indices, source_indices, bytes);
 
     uint32_t table_index = (uint32_t)chunk_y * w->pixel_art_chunk_cols + (uint32_t)chunk_x;
     TxPixelArtChunk* existing = w->pixel_art_chunk_table[table_index];
@@ -496,6 +497,10 @@ int txw_add_pixel_art_chunk(
 
     tx_clear_error();
     return 0;
+}
+
+int txw_add_pixel_art_chunk(uint32_t handle,int32_t x,int32_t y,uint32_t indices_ptr,uint32_t count,uint32_t used) {
+    return add_pixel_art_chunk_from_pointer(handle,x,y,(const uint8_t*)(uintptr_t)indices_ptr,count,used);
 }
 
 static uint16_t pixel_bulk_u16le(const uint8_t* p) {
@@ -611,12 +616,12 @@ int txw_add_pixel_art_chunks_bulk(
         uint32_t chunk_x = pixel_bulk_u16le(record);
         uint32_t chunk_y = pixel_bulk_u16le(record + 2u);
         uint32_t used = pixel_bulk_u16le(record + 4u);
-        uint32_t indices_ptr = (uint32_t)(uintptr_t)(record + TX_PIXEL_ART_BULK_HEADER_BYTES);
-        if (txw_add_pixel_art_chunk(
+        const uint8_t* source_indices = record + TX_PIXEL_ART_BULK_HEADER_BYTES;
+        if (add_pixel_art_chunk_from_pointer(
             handle,
             (int32_t)chunk_x,
             (int32_t)chunk_y,
-            indices_ptr,
+            source_indices,
             TX_PIXEL_ART_CHUNK_CELLS,
             used) < 0) return -1;
     }

@@ -7,13 +7,13 @@ static void circuit_objects_contract(const char* dir){
  char path[1024];snprintf(path,sizeof(path),"%s/circuit-objects.wld",dir);load(path);uint32_t baseline=tx_native_heap_used(),handle,geometry_size,expected_size;
  uint8_t* geometry_bytes=object_file(dir,"circuit-objects.geometry",&geometry_size),*expected=object_file(dir,"circuit-objects.cob",&expected_size);uint32_t* geometry=alloc(geometry_size);memcpy(geometry,geometry_bytes,geometry_size);free(geometry_bytes);
  assert(tx_get_world(world)->version==326);assert(!terra_circuit_world_begin(world,2,0,0,32u*1024u*1024u,hp));handle=*hp;fragment_pump(handle);
- TerraCircuitWorldCommand command={0};command.abi_version=1;command.kind=7;command.count=4;command.data_ptr=(uint32_t)(uintptr_t)geometry;command.data_count=geometry_size/16;
- assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==1&&fragment_rows[7]==2);uint32_t fragment=fragment_rows[0],cells=fragment_rows[5];
+ TerraCircuitWorldCommand command={0};command.abi_version=1;command.kind=7;command.count=4;command.data_ptr=0;command.data_count=geometry_size/16;
+ assert(!native_circuit_command(handle,&command,geometry));fragment_pump(handle);assert(fragment_total==1&&fragment_rows[7]==2);uint32_t fragment=fragment_rows[0],cells=fragment_rows[5];
  command=(TerraCircuitWorldCommand){0};command.abi_version=1;command.kind=8;command.mask=fragment;command.count=cells;command.flags=1;command.aux_source_id=11;command.width=4u*1024u*1024u;command.height=32768;
- assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_objects_size==expected_size&&!memcmp(fragment_objects,expected,expected_size));assert(fragment_total==cells&&fragment_row_count==cells);
+ assert(!native_circuit_command(handle,&command,geometry));fragment_pump(handle);assert(fragment_objects_size==expected_size&&!memcmp(fragment_objects,expected,expected_size));assert(fragment_total==cells&&fragment_row_count==cells);
  uint32_t* records=malloc(cells*32);assert(records);memcpy(records,fragment_rows,cells*32);for(uint32_t i=0;i<cells;i++){records[i*8]-=3;records[i*8+1]-=4;}
- uint32_t extraction_baseline=tx_native_heap_used();fragment_cancel_objects=1;assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(!fragment_cancel_objects&&tx_native_heap_used()==extraction_baseline);
- assert(!terra_circuit_world_close(handle));tx_free((uint32_t)(uintptr_t)geometry);free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;assert(tx_native_heap_used()==baseline);
+ uint32_t extraction_baseline=tx_native_heap_used();fragment_cancel_objects=1;assert(!native_circuit_command(handle,&command,geometry));fragment_pump(handle);assert(!fragment_cancel_objects&&tx_native_heap_used()==extraction_baseline);
+ assert(!terra_circuit_world_close(handle));tx_bridge_free_native(geometry);free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;assert(tx_native_heap_used()==baseline);
  stamp_objects=fragment_objects;stamp_objects_size=fragment_objects_size;
  char request[256];snprintf(request,sizeof(request),"{\"x\":3,\"y\":20,\"width\":90,\"height\":4,\"recordCount\":%u,\"recordSourceId\":9,\"mode\":\"overlay\",\"objectSourceId\":10,\"objectBytes\":%u,\"objectCount\":18}",cells,stamp_objects_size);
  uint32_t id=begin("stamp_tiles",request),n;uint8_t* output=stamp_pump(id,records,cells*32,&n,0,1);assert(output);check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
@@ -31,7 +31,7 @@ static void circuit_objects_contract(const char* dir){
  for(uint32_t which=0;which<6;which++){uint32_t offset=which==0?0:which==1?28:which==2?32+24:which==3?32+16:which==4?32+8:8,value=get32(fragment_objects+offset);object_put(fragment_objects+offset,which==4?90:which==5?87:0xffffffffu);id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,cells*32,&n,2,which&1));check(terra_world_stream_close(id));object_put(fragment_objects+offset,value);assert(tx_native_heap_used()==baseline);}
  /* One missing non-root object tile must not manufacture a partial object. */
  uint32_t changed=0;for(uint32_t i=0;i<cells;i++)if((records[i*8+2]&65535u)==378&&records[i*8+1]==2){changed=i;break;}assert(changed);uint32_t saved=records[changed*8+2];records[changed*8+2]=0;id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,cells*32,&n,2,0));check(terra_world_stream_close(id));records[changed*8+2]=saved;
- id=begin("stamp_tiles",request);check(terra_world_stream_step(id,1,ep));assert(ep->kind==TX_STREAM_NEED_SOURCE&&ep->source_id==10);check(terra_world_stream_acquire_input(id,lp));check(terra_world_stream_cancel(id));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
+ id=begin("stamp_tiles",request);check(native_stream_step(id,1,ep));assert(ep->kind==TX_STREAM_NEED_SOURCE&&ep->source_id==10);check(native_stream_acquire(id,lp));check(terra_world_stream_cancel(id));check(terra_world_stream_close(id));assert(tx_native_heap_used()==baseline);
  /* Even an orphan metadata anchor in a non-root destination cell collides. */
  TxWorld* queued=tx_get_world(world);uint32_t te_start=get32(source+46),te_len=get32(source+50)-te_start;uint8_t* orphan=tx_alloc(te_len+14);assert(orphan);memcpy(orphan,source+te_start,te_len);object_put(orphan,12);uint8_t* added=orphan+te_len;memset(added,0,14);added[0]=1;object_put(added+1,50000);added[5]=5;added[7]=20;
  assert(set_section_override_data(queued,5,orphan,te_len+14));id=begin("stamp_tiles",request);assert(!stamp_pump(id,records,cells*32,&n,2,1));check(terra_world_stream_close(id));uint8_t* restored=tx_alloc(te_len);assert(restored);memcpy(restored,source+te_start,te_len);assert(set_section_override_data(queued,5,restored,te_len));
@@ -59,15 +59,15 @@ static void circuit_object_versions_stream_contract(const char* dir){
   snprintf(name,sizeof(name),"circuit-objects-v%u.cob",version);uint8_t* expected=object_file(dir,name,&expected_size);
   uint32_t* geometry=alloc(geometry_size);memcpy(geometry,geometry_bytes,geometry_size);free(geometry_bytes);
   assert(!terra_circuit_world_begin(world,2,0,0,32u*1024u*1024u,hp));uint32_t handle=*hp;fragment_pump(handle);
-  TerraCircuitWorldCommand command={0};command.abi_version=1;command.kind=TCW_FRAGMENTS;command.count=4;command.data_ptr=(uint32_t)(uintptr_t)geometry;command.data_count=geometry_size/16;
-  assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);assert(fragment_total==1&&fragment_rows[7]==2);
+  TerraCircuitWorldCommand command={0};command.abi_version=1;command.kind=TCW_FRAGMENTS;command.count=4;command.data_ptr=0;command.data_count=geometry_size/16;
+  assert(!native_circuit_command(handle,&command,geometry));fragment_pump(handle);assert(fragment_total==1&&fragment_rows[7]==2);
   uint32_t cells=fragment_rows[5],fragment=fragment_rows[0];
   command=(TerraCircuitWorldCommand){0};command.abi_version=1;command.kind=TCW_EXTRACT;command.mask=fragment;command.count=cells;command.flags=1;command.aux_source_id=11;command.width=4u*1024u*1024u;command.height=32768;
-  assert(!terra_circuit_world_command(handle,&command));fragment_pump(handle);
+  assert(!native_circuit_command(handle,&command,geometry));fragment_pump(handle);
   assert(fragment_objects_size==expected_size&&!memcmp(fragment_objects,expected,expected_size));
   uint32_t* records=malloc(cells*32);assert(records);memcpy(records,fragment_rows,cells*32);
   for(uint32_t i=0;i<cells;i++){records[i*8]-=3;records[i*8+1]-=4;}
-  assert(!terra_circuit_world_close(handle));tx_free((uint32_t)(uintptr_t)geometry);free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;
+  assert(!terra_circuit_world_close(handle));tx_bridge_free_native(geometry);free(fragment_scratch);fragment_scratch=NULL;fragment_scratch_size=0;
   assert(tx_native_heap_used()==baseline);stamp_objects=fragment_objects;stamp_objects_size=fragment_objects_size;
   char request[256];snprintf(request,sizeof request,"{\"x\":3,\"y\":20,\"width\":22,\"height\":4,\"recordCount\":%u,\"recordSourceId\":9,\"mode\":\"overlay\",\"objectSourceId\":10,\"objectBytes\":%u,\"objectCount\":%u}",cells,stamp_objects_size,get32(expected+12));
   uint32_t id=begin("stamp_tiles",request),n;uint8_t* output=stamp_pump(id,records,cells*32,&n,0,1);assert(output);

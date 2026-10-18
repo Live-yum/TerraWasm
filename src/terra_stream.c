@@ -77,6 +77,7 @@ typedef struct EditRuleGroup {
 typedef struct StreamTask {
     uint32_t id, stage, is_write, old_handle;
     TxStreamEvent event;
+    const uint8_t* event_data;
     TxStreamInputLease lease;
     TxStreamStats stats;
     TxWorld* candidate;
@@ -160,7 +161,7 @@ uint32_t txw_test_stream_begin_for_runtime(void) {
 #endif
 
 static int fail(const char* code,const char* message) { tx_set_error(code,message);return -1; }
-static int valid_range(const void* ptr,uint32_t bytes) { return ptr&&tx_bridge_range_is_valid((uint32_t)(uintptr_t)ptr,bytes); }
+static int valid_range(const void* ptr,uint32_t bytes) { return ptr&&tx_bridge_contains_native(ptr,bytes); }
 static uint32_t u16(const uint8_t* p){return (uint32_t)p[0]|((uint32_t)p[1]<<8);}
 static uint32_t u32(const uint8_t* p){return u16(p)|(u16(p+2)<<16);}
 static void put16(uint8_t* p,uint32_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
@@ -181,11 +182,11 @@ static int validate_footer(TxWorld* w){
 }
 int tx_stream_has_task(void) { return current != NULL; }
 static StreamTask* task(uint32_t id){return current&&current->id==id&&current->stage!=CANCELLED?current:NULL;}
-static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;}
+static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;t->event_data=NULL;}
 static void event(StreamTask* t,uint32_t kind,uint32_t offset,uint32_t length,const void* data){
     if(kind==TX_STREAM_NEED_SOURCE)counter_add(&t->stats.source_requests,1);
     clear_event(t);t->event.kind=kind;t->event.source_id=t->source_id;t->event.offset=offset;
-    t->event.length=length;t->event.data_ptr=(uint32_t)(uintptr_t)data;
+    t->event.length=length;t->event_data=(const uint8_t*)data;
     t->event.completed_columns=t->x;t->event.total_columns=t->candidate?(uint32_t)t->candidate->maxTilesX:0;
 }
 void tx_stream_release_world(TxWorld* w){
@@ -571,16 +572,25 @@ int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t
         return fail("TERRAX_INVALID_ARGUMENT","source event/range mismatch or leased input");
     return consume_source(t,offset,bytes,length);
 }
-int32_t terra_world_stream_acquire_input(uint32_t id,TxStreamInputLease* out){
+static int32_t acquire_input_impl(uint32_t id,TxStreamInputLease* out,TerraMutableSpan* native_span){
     StreamTask* t=task(id);
     if(!t||!valid_range(out,sizeof(*out))||t->event.kind!=TX_STREAM_NEED_SOURCE||t->lease.lease_id)
         return fail("TERRAX_STATE_ERROR","source input is not available for a lease");
+    uint8_t* destination=input_destination(t);uint32_t offset=0;
+    if(!destination||(!native_span&&!tx_wasm_span32(destination,t->event.length,&offset)))
+        return fail("TERRAX_STATE_ERROR","input pointer requires the native span adapter");
     memset(&t->lease,0,sizeof(t->lease));t->lease.abi_version=2;
     t->lease.lease_id=lease_generation++;if(!t->lease.lease_id)t->lease.lease_id=lease_generation++;
     t->lease.source_id=t->event.source_id;t->lease.offset=t->event.offset;
     t->lease.length=t->lease.capacity=t->event.length;
-    t->lease.data_ptr=(uint32_t)(uintptr_t)input_destination(t);
+    t->lease.data_ptr=offset;
+    if(native_span)*native_span=(TerraMutableSpan){destination,t->event.length,t->event.length};
     t->lease.memory_bytes=lease_memory_bytes();*out=t->lease;return 0;
+}
+int32_t terra_world_stream_acquire_input(uint32_t id,TxStreamInputLease* out){return acquire_input_impl(id,out,NULL);}
+int32_t terra_world_stream_acquire_input_native(uint32_t id,TxStreamInputLease* out,TerraMutableSpan* span){
+    if(!span)return fail("TERRAX_INVALID_ARGUMENT","native input span is required");
+    return acquire_input_impl(id,out,span);
 }
 int32_t terra_world_stream_commit_input(uint32_t id,uint32_t lease_id,uint32_t source_id,uint32_t offset,uint32_t length){
     StreamTask* t=task(id);
@@ -780,7 +790,7 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
                 }
                 TxBuf response={0};buf_init(&response,256);int ok=op_execute_json(w,t->operation,t->request,&response);
                 if(ok<0){if(response.data)tx_internal_free(response.data);return -1;}
-                t->result=(uint8_t*)(uintptr_t)tx_last_ptr;t->result_length=tx_last_len;
+                t->result=tx_last_ptr;t->result_length=tx_last_len;
                 if(response.data&&response.data!=t->result)tx_internal_free(response.data);
                 t->stage=OP_RESULT;continue;
             }
@@ -954,7 +964,7 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
     }
     *out=t->event;return 0;
 }
-int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+static int32_t stream_step_dispatch(uint32_t id,uint32_t units,TxStreamEvent* out){
     int32_t result=stream_step_impl(id,units,out);
     if(result<0&&current&&current->id==id&&current->stamp&&
        current->stage!=CANCELLED&&current->stage!=ADOPTED){
@@ -966,6 +976,19 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
         clear_event(current);
     }
     return result;
+}
+int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+    int32_t status=stream_step_dispatch(id,units,out);
+    if(status>=0&&current&&current->id==id&&!tx_wasm_span32(current->event_data,out->kind==TX_STREAM_OUTPUT?out->length:0,&out->data_ptr))
+        return fail("TERRAX_STATE_ERROR","output pointer requires the native span adapter");
+    return status;
+}
+int32_t terra_world_stream_step_native(uint32_t id,uint32_t units,TxStreamEvent* out,TerraConstSpan* span){
+    if(!span)return fail("TERRAX_INVALID_ARGUMENT","native output span is required");
+    *span=(TerraConstSpan){0};
+    int32_t status=stream_step_dispatch(id,units,out);
+    if(status>=0&&current&&current->id==id){out->data_ptr=0;span->data=current->event_data;span->length=span->data?out->length:0;}
+    return status;
 }
 int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     StreamTask* t=task(id);if(out&&valid_range(out,4))*out=0;
