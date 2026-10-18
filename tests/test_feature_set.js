@@ -67,7 +67,7 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.equal(typeof M._terra_world_open_from_buffer, hasWld ? "function" : "undefined");
   assert.equal(typeof M._terra_plr_open_from_buffer, hasPlr ? "function" : "undefined");
   assert.equal(manifest.targets.node.exports.includes("_terra_world_open_from_buffer"), hasWld);
-  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), featureSet === "all");
+  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), false);
   assert.equal(manifest.targets.node.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
   assert.equal(manifest.targets.web.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
 

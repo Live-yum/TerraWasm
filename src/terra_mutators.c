@@ -977,8 +977,8 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     if(w->legacy_wld){
         if(!patch_i64(&request,fields,field_count,"version",w->version,w->version,w->version,&version_value))return -1;
         }else{
-    if(!patch_i64(&request,fields,field_count,"version",w->version,88,326,&version_value)||
-       !patch_i64(&request,fields,field_count,"type",w->file_type,0,UINT8_MAX,&type_value)||
+    if(!patch_i64(&request,fields,field_count,"version",w->version,w->version,w->version,&version_value)||
+       !patch_i64(&request,fields,field_count,"type",w->file_type,w->file_type,w->file_type,&type_value)||
        !patch_i64(&request,fields,field_count,"revision",w->revision,0,UINT32_MAX,&revision_value)||
        !patch_u64(&request,fields,field_count,"favoriteFlags",w->favorite,&favorite)||
        !patch_i64(&request,fields,field_count,"tileTypeCount",w->tile_type_count,0,UINT16_MAX,&tile_count_value))return -1;
