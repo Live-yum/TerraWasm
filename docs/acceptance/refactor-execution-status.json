@@ -172,8 +172,8 @@
     },
     {
       "id": "G06",
-      "status": "not_fully_accepted",
-      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+      "status": "passed",
+      "details": "Producer 965d533: real high-address LP64 pointer spans, unchanged Wasm32 layouts/exports, native 37/37, ASan/UBSan 37/37 with executor LSan limitation, clean Wasm 220/220. See execution-status.md and ../native-pointer-spans.md."
     },
     {
       "id": "G07",

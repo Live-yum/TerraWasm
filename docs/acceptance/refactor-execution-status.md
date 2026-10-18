@@ -128,3 +128,28 @@ and rollback, and the full queued-graph state vector before resuming execution.
 The two focused ASan/UBSan contracts pass with the prior explicit LeakSanitizer
 limitation. Web wrapper is 21,832 bytes and Wasm is 456,866 bytes; budgets pass.
 Fixed V2 receipts and the broader acceptance program remain incomplete.
+
+## Native pointer-span boundary — 965d533
+
+Producer `965d5336a437a3906e2b6d4aa296fc1b3d5d0e8f` introduces native pointer/
+size_t spans for stream leases/events and circuit command/results, full-pointer
+bridge allocation/range checks, and checked Wasm32 range encoding. An invalid
+wire range is rejected rather than truncated; its pending event/lease admission
+can be retried through the native adapter. Pixel bulk forwarding also no longer
+narrows its internal pointer. Wire layouts, export names and versions remain
+unchanged. See [native pointer spans](../native-pointer-spans.md).
+
+The native stream/header tests and manual scripts no longer force low addresses
+or adjust glibc allocation. Both executables are verified PIE; actual allocations
+above UINT32_MAX pass the range/free contract. Native CTest 37/37 and full
+ASan/UBSan CTest 37/37 pass, now including the formerly excluded stream/header
+paths. Standalone PLR native 5/5 and separate C++ linkage smoke pass. The manual
+stream normal/ASan and checkpoint ASan runners pass; the PLR differential codec
+golden is unchanged. Leak detection remains disabled only for this executor's
+previously documented limitation, not in the checked-in scripts.
+
+Clean Emscripten 5.0.7 Node/Web plus production-consumer tests: 220/220, zero
+skips. Web wrapper is 21,832 bytes; Wasm is 457,472 bytes; artifact budgets pass.
+G06's LP64 response/roundtrip/free and Wasm32 layout/sanitizer scenario is verified
+for this producer. This is not completion of fixed V2 outcome receipts or every
+remaining work package.
