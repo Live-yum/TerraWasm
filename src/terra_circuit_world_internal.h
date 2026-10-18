@@ -59,7 +59,7 @@ typedef struct CxWorld {
     CxModTile* mods; uint32_t mod_count,mod_capacity,mod_cursor;
     TerraCircuitWorldEvent event;
     TerraCircuitWorldCommand command;
-    uint8_t* input; uint32_t input_offset,input_length;
+    uint8_t* input; uint32_t input_offset,input_length,input_source;
     uint32_t read_target,read_slot;
     uint32_t width,height,cursor,x,y,col_stage,col_colour,col_row;
     TxTile* column; uint32_t* front; uint32_t* ids; uint32_t* seed_ids; uint32_t* opposite_ids; uint32_t* gate_at_y; uint32_t* pixel_at_y;
@@ -104,6 +104,8 @@ typedef struct CxWorld {
     CxInputPoint* points; uint32_t point_count,point_index;
     uint32_t* result; uint32_t result_count,result_capacity;
     uint32_t query_x0,query_x1,query_y0,query_y1,query_stride,query_point;
+    uint32_t query_wall_direct,query_run_end;
+    TxTile query_tile;
     uint32_t* trigger_nets; uint32_t trigger_count,trigger_capacity,trigger_remaining;
     uint32_t seed_lamps;
     uint32_t eval_group,eval_offset,eval_member,eval_gate,eval_valid;

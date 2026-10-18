@@ -7,7 +7,7 @@ const { makeSectionedWorld } = require('./sectioned-world');
 
 // Independent, small sectioned WLD encoder for mechanism contracts. It uses
 // WorldFile's published flags and never asks the DUT to construct its fixture.
-function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
+function makeCircuitWorld(cells, width = 40, height = 32, version = 196, { rle = false } = {}) {
   const name = 'circuit-contract', base = makeSectionedWorld(version, { worldName: name });
   const table = version >= 135 ? 26 : 6;
   const count = base.readUInt16LE(table - 2), oldStart = base.readUInt32LE(table);
@@ -22,6 +22,14 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
   const important = Buffer.alloc(2); important.writeUInt16LE(tileCount);
   const format = Buffer.concat([base.subarray(0, oldStart - 3), important, mask]);
   const records = [], map = new Map(cells.map(cell => [`${cell.x},${cell.y}`, cell]));
+  let previous = null, repeat = 0;
+  const flush = () => {
+    if (!previous) return;
+    const record = Buffer.from(previous), run = Buffer.alloc(repeat > 255 ? 2 : repeat ? 1 : 0);
+    if (repeat > 255) { record[0] |= 128; run.writeUInt16LE(repeat); }
+    else if (repeat) { record[0] |= 64; run[0] = repeat; }
+    records.push(record, run); previous = null; repeat = 0;
+  };
   for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) {
     const t = map.get(`${x},${y}`) || {}, out = [], active = t.type !== undefined, wires = t.wires || 0;
     let f1 = active ? 2 : 0, f2 = ((wires & 7) << 1) | ((t.brick || 0) << 4), f3 = (wires & 8) ? 32 : 0;
@@ -30,8 +38,11 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
     if (t.actuator) f3 |= 2; if (t.inactive) f3 |= 4;
     if (t.wall) f1 |= 4; if ((t.wall || 0) > 255) f3 |= 64;
     if (t.paint) f3 |= 8; if (t.wallPaint) f3 |= 16;
+    const f4 = (t.invisibleBlock ? 2 : 0) | (t.invisibleWall ? 4 : 0) | (t.fullbrightBlock ? 8 : 0) | (t.fullbrightWall ? 16 : 0);
+    if (f4) { assert.ok(version >= 269); f3 |= 1; }
     if (f3) f2 |= 1; if (f2) f1 |= 1;
     out.push(f1); if (f1 & 1) out.push(f2); if (f2 & 1) out.push(f3);
+    if (f3 & 1) out.push(f4);
     if (active) {
       out.push(t.type & 255); if (f1 & 32) out.push(t.type >>> 8);
       if (framed.has(t.type)) out.push((t.fx || 0) & 255, ((t.fx || 0) >> 8) & 255, (t.fy || 0) & 255, ((t.fy || 0) >> 8) & 255);
@@ -40,7 +51,13 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196) {
     if (t.wall) { out.push(t.wall & 255); if (t.wallPaint) out.push(t.wallPaint); }
     if (t.liquid) out.push(t.liquid);
     if (f3 & 64) out.push(t.wall >>> 8);
-    records.push(Buffer.from(out));
+    const record = Buffer.from(out);
+    if (!rle) records.push(record);
+    else {
+      if (previous?.equals(record) && repeat < 32767) repeat++;
+      else { flush(); previous = record; }
+      if (y === height - 1) flush();
+    }
   }
   const footer = Buffer.concat([Buffer.from([1, Buffer.byteLength(name)]), Buffer.from(name), Buffer.from([1, 0, 0, 0])]);
   const sections = [header, Buffer.concat(records), version < 294 ? Buffer.from([0, 0, 40, 0]) : Buffer.alloc(2),
@@ -133,7 +150,7 @@ async function makeDriver() {
     okay(M._terra_world_stream_adopt(openTask, 1, hp)); world = M.HEAPU32[hp >>> 2]; okay(M._terra_world_stream_close(openTask)); openTask = 0;
     okay(M._terra_circuit_world_begin(world, 2, sidecar ? 3 : 0, sidecar?.length || 0, maximum, hp)); circuit = M.HEAPU32[hp >>> 2]; return pump();
   }
-  return { M, open, close, command, start, event, respond, pump, stats, sources, get worldHandle() { return world; },
+  return { M, open, close, command, start, event, respond, pump, stats, sources, get worldHandle() { return world; }, get circuitHandle() { return circuit; },
     cancel() { okay(M._terra_circuit_world_cancel(circuit)); },
     cell(x, y) { const row = command(1, { x, y }).rows[0]; return { x: row[0], y: row[1], type: row[2] & 65535, flags: row[2] >>> 16 & 255, wires: row[2] >>> 24 & 15, fx: row[3] & 65535, fy: row[3] >>> 16 }; },
     dispose() { close(); for (const p of pointers) M._tx_free(p); },
