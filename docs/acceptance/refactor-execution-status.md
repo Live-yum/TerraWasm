@@ -182,3 +182,30 @@ workspace commit sequence is not a universal document revision. The consumer
 must retain applied evidence across output allocation and transport failures;
 its verification is tracked in viewer-app. No release, CI rerun or migration
 activation is claimed.
+
+## Buffered replacement candidate ownership — bb0466a
+
+Producer `bb0466a52093aa87d680b3c318f69262c0428bee` validates an independently
+owned buffered replacement before closing the old world. Allocation or parsing
+failure retains the old owner; the final swap allocates nothing. The old
+implementation fails the first injected-allocation regression because its old
+handle is already stale. See [replacement contract and limits](../buffered-world-replacement.md).
+
+A v1 `worldCommit` capability is validated against compiled identity, marker and
+exports. Legacy frame-important bitmaps are retained inside the candidate's
+persistent allocation rather than the old arena. Prepared output caches and
+independent caller output retain their established ownership. Native tests cover
+96 fault positions across modern/legacy and prepared/unprepared paths: six
+candidate failures preserve old state/live bytes; 90 replacements succeed.
+Repeated replacement, legacy bitmap reads and exact serialized bytes are checked.
+
+Native CTest 39/39, ASan/UBSan 39/39 (the prior executor LSan limitation applies),
+standalone PLR native 5/5 and clean Node/Web plus production-consumer regression
+222/222 pass. Web wrapper is 22,494 bytes and Wasm is 460,066 bytes; budgets pass.
+No native memory ceiling was raised. A candidate that cannot coexist with the
+old world is rejected, not admitted by prematurely freeing its only live owner.
+
+This does not claim complete save-preparation byte atomicity or host persistence
+receipts. Consumer preallocation, retained-handle failure handling and uncertain
+post-swap delivery are verified separately in viewer-app; broader P05/G05
+acceptance remains partial.
