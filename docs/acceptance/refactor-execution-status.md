@@ -1,22 +1,31 @@
 # Refactor handoff — 2026-10-18
 
 This is an intentionally incomplete implementation handoff, not release approval.
-The user stopped expansion after the current execution round. No PR, merge,
+Implementation continues in the refactor branch. No PR, merge,
 release or deployment was requested or performed. `master` was not changed.
 
 ## Inputs and provenance
 
 Base viewer commit: `4e2cfcb7b6382321f7c95502a43feee64ec8dedd`.
 Base Terra commit: `0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2`.
-Library source: `libfile_11cb1c5c49ac8191a171b48b91df50b8`,
-`viewer-terrawasm-execution-kit-20261018(1).zip`.
-The execution environment lacked Library prepare_materialize/read/search. It did
-not receive or inspect the ZIP. The parent supplied verified text excerpts of
-backlog.json, acceptance.json, contracts.ts, native outcome proposal, package
-budget/auditor/collector material, and the reference review. These excerpts are
-reference specifications, not proof of implementation or test success. The full
-refactor-plan.md, every attachment file, and private map bytes were not locally
-available. No personal map was committed.
+Specification: viewer-terrawasm-execution-kit-20261018, 28 work packages and
+52 target acceptance gates. The implementation and tests below are scoped
+engineering evidence, not platform or release approval. No personal map is
+included in the repository.
+
+## Follow-on verification
+
+- Debug native build links libm explicitly and passes all 32 CTest contracts.
+- Standalone JSON mutations now keep their response/cache publication inside an
+  owned checkpoint. A response-allocation failure restores the original world.
+- The new `terra_op_atomic_response_contract` sweeps 80 allocation-failure points:
+  six rejected operations preserve the world and 74 successful probes fill the
+  cached response without allocation. The same test fails against the preceding
+  API implementation, demonstrating the post-mutation response-OOM regression.
+- Existing caller checkpoints stay caller-owned and must be rolled back by the
+  caller on failure. This does not claim completion of the fixed V2 receipt ABI.
+- Web Wasm compilation with pinned Emscripten 5.0.7 is available; the final
+  source-identity build and consumer synchronization remain required below.
 
 ## Work packages
 
@@ -65,7 +74,7 @@ H5 mutations. Some legacy synchronous KV writers are not fully fenced across
 windows; enabling migration would therefore be unsafe. No Release A or rollback
 build has been released. Do not enable migration based on this branch.
 
-## Executed validation
+## Initial checkpoint validation
 
 - Terra native CMake build succeeded, final CTest **31/31** after fetching the
   repository's existing LFS fixtures. Initial run was 29/31 with pointer files.
