@@ -123,6 +123,7 @@ typedef struct TxWorld {
     uint8_t  active;
     uint32_t handle;            /* packed generation + slot token exposed to JS */
     uint32_t allocation_mark;   /* native sequence before the first owned root */
+    uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
 
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;

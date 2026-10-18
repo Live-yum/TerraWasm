@@ -151,7 +151,8 @@ if ($Test) {
         "tests/test_fixture_contract.js"
     )
     $regressionTests = @($commonTests)
-    if ($Features -eq "all") { $regressionTests += "tests/test_foreign_checkpoint_owners.js" }
+    if ($Features -eq "all") { $regressionTests += "tests/test_foreign_checkpoint_owners.js",
+    "tests/test_world_outcome.js" }
     if ($Features -ne "plr") { $regressionTests += $wldTests }
     if ($Features -ne "wld") { $regressionTests += @("tests/test_plr.js", "tests/test_plr_real_fixture.js") }
 

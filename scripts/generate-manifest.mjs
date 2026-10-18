@@ -56,6 +56,8 @@ function validateStreamAbi(stream, exports, label) {
   for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
 }
 
+export const WORLD_OUTCOME_EXPORTS = ['_terra_world_outcome_abi_version', '_terra_op_execute_json_receipt', '_terra_world_workspace_commit_receipt', '_terra_world_workspace_rollback_receipt']
+const WORLD_OUTCOME = {version:2,bytes:40,explicitJoin:true,commitSequence:true}
 export const WORLD_WORKSPACE_EXPORTS = ['abi_version','checkpoint_size','begin','commit','rollback','save_to_buffer'].map(name => `_terra_world_workspace_${name}`)
 const WORLD_WORKSPACE = {version:1,checkpoint:true,rollback:true}
 export const PIXEL_WORKSPACE_EXPORTS = ['abi_version', 'create', 'close', 'stats', 'tx_begin', 'tx_commit', 'tx_rollback', 'palette_add', 'palette_read', 'nearest', 'match_colors', 'cells', 'stroke', 'fill', 'replace', 'transform', 'import_rgba', 'read_rect', 'read_block', 'raster_block', 'block_versions', 'undo', 'redo', 'checkpoint', 'clear_history'].map(name => `_terra_pixel_workspace_${name}`)
@@ -73,6 +75,9 @@ function workspaceAbi(value, expected, exports, required, label) {
   for (const name of required) if (!exports.includes(name)) fail(`${label} workspace export ${name} is missing`)
 }
 function validateWorkspaces(abi, exports, featureSet, label) {
+  workspaceAbi(abi.worldOutcome, WORLD_OUTCOME, exports, WORLD_OUTCOME_EXPORTS, `${label} world outcome`)
+  if (abi.worldOutcome && (featureSet === 'plr' || !abi.worldWorkspace)) fail(`${label} world outcome feature mismatch`)
+
   workspaceAbi(abi.circuit, CIRCUIT_ABI, exports, CIRCUIT_EXPORTS, `${label} circuit`)
   workspaceAbi(abi.circuitWorld, CIRCUIT_WORLD_ABI, exports, CIRCUIT_WORLD_EXPORTS, `${label} circuit world`)
   // Known standalone profiles cannot claim the other domain. Future feature
@@ -88,6 +93,14 @@ function validateWorkspaces(abi, exports, featureSet, label) {
 }
 function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
+  if (identity.worldOutcomeAbiVersion !== undefined) {
+    const enabled = ['all','wld'].includes(identity.featureSet)
+    if (identity.worldOutcomeAbiVersion !== (enabled ? 2 : 0)) fail(`${label} world outcome identity version mismatch`)
+    if (enabled) {
+      if (typeof module._terra_world_outcome_abi_version !== 'function' || module._terra_world_outcome_abi_version() !== 2) fail(`${label} compiled world outcome version mismatch`)
+      abi.worldOutcome = {...WORLD_OUTCOME}
+    }
+  }
   if (identity.circuitWorldAbiVersion !== undefined) {
     const enabled = ['all','wld'].includes(identity.featureSet)
     if (identity.circuitWorldAbiVersion !== (enabled ? 1 : 0)) fail(`${label} circuit world identity version mismatch`)
@@ -308,7 +321,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   }
   if (!targets.node || !targets.web) fail('both Node and Web builds are required')
   const identity = identities.web
-  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion', 'circuitAbiVersion']) {
+  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldOutcomeAbiVersion', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion', 'circuitAbiVersion']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')

@@ -10,6 +10,7 @@
 #include "terra_icon.h"
 #include "terra_world.h"
 #include "terra_checkpoint.h"
+#include "terra_native_span.h"
 #include "terra_owner_guards.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -542,6 +543,10 @@ terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_by
     terrax_world_status status = terra_world_workspace_checkpoint_size(handle, &required);
     if (status != TERRAX_WORLD_STATUS_OK) return status;
     TxWorld* world = tx_get_world(handle);
+    if (world->workspace_revision == UINT64_MAX) {
+        tx_set_error("TERRAX_STATE_ERROR", "workspace revision is exhausted");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     if (required > max_bytes) {
         tx_set_error("TERRAX_WASM_OOM", "workspace rollback checkpoint exceeds reserved memory");
         return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
@@ -568,8 +573,16 @@ static terrax_world_status tx_finish_workspace(uint32_t handle, uint32_t token, 
         tx_set_error("TERRAX_STATE_ERROR", "workspace checkpoint token is stale or invalid");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
-    tx_checkpoint_finish(rollback);
+    if (!rollback && world->workspace_revision == UINT64_MAX) {
+        tx_set_error("TERRAX_STATE_ERROR", "workspace revision is exhausted");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
+    if (!tx_checkpoint_finish(rollback)) {
+        tx_set_error("TERRAX_STATE_ERROR", "workspace allocator checkpoint is missing");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     if (rollback) *world = g_workspace_checkpoint;
+    else ++world->workspace_revision;
     memset(&g_workspace_checkpoint, 0, sizeof(g_workspace_checkpoint));
     g_workspace_token = 0;
     tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
@@ -1350,6 +1363,10 @@ static terrax_world_status tx_op_execute_json_inner(
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
+static int tx_operation_mutates_world(const char* name) {
+    return name && (tx_streq_c(name,"header_patch") || tx_streq_c(name,"replace_chests") ||
+        tx_streq_c(name,"replace_bestiary") || tx_streq_c(name,"batch_update_tiles"));
+}
 /* A standalone mutation commits only after its probe response and exact
  * request key are deliverable. A caller-owned checkpoint remains caller-owned:
  * on failure the caller must roll it back before admitting another mutation. */
@@ -1357,11 +1374,7 @@ terrax_world_status terra_op_execute_json(
     uint32_t handle, const char* operation_name, const char* request_json,
     char* response_buffer, uint64_t response_buffer_size, uint64_t* required_size) {
     TxWorld* world = tx_get_world(handle);
-    int mutation = operation_name && (
-        tx_streq_c(operation_name, "header_patch") ||
-        tx_streq_c(operation_name, "replace_chests") ||
-        tx_streq_c(operation_name, "replace_bestiary") ||
-        tx_streq_c(operation_name, "batch_update_tiles"));
+    int mutation = tx_operation_mutates_world(operation_name);
     uint32_t token = 0, bytes = 0;
     if (world && request_json && mutation && !g_workspace_token &&
         !tx_response_key_matches(world, operation_name, request_json)) {
@@ -1399,6 +1412,150 @@ terrax_world_status terra_op_execute_json(
     tx_last_error[i] = 0; tx_last_status = original_status;
     if (required_size) *required_size = 0;
     return status;
+}
+
+static uint32_t tx_outcome_state(const TxWorld* world) {
+    if (!world) return TERRA_TX_INVALID;
+    if (g_workspace_token && g_workspace_checkpoint.handle == world->handle)
+        return tx_checkpoint_active() ? TERRA_TX_OPEN : TERRA_TX_INVALID;
+    return TERRA_TX_IDLE;
+}
+static terrax_world_status tx_outcome_write(TerraOutcomeV2* out, terrax_world_status status,
+    uint32_t effect, uint32_t state, uint64_t before, uint64_t after) {
+    *out=(TerraOutcomeV2){sizeof(*out),TERRA_OUTCOME_VERSION,(int32_t)status,effect,state,0,before,after};
+    return status;
+}
+uint32_t terra_world_outcome_abi_version(void) { return TERRA_OUTCOME_VERSION; }
+static terrax_world_status tx_finish_outcome(uint32_t handle,uint32_t token,int rollback,TerraOutcomeV2* out) {
+    if (!out) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    TxWorld* world=tx_get_world(handle);uint64_t before=world?world->workspace_revision:0;
+    terrax_world_status status=tx_finish_workspace(handle,token,rollback);
+    world=tx_get_world(handle);
+    uint32_t state=tx_outcome_state(world);
+    return tx_outcome_write(out,status,status==TERRAX_WORLD_STATUS_OK?(rollback?TERRA_EFFECT_ROLLED_BACK:TERRA_EFFECT_APPLIED):
+        (world&&state==TERRA_TX_INVALID?TERRA_EFFECT_UNKNOWN:TERRA_EFFECT_NONE),
+        status==TERRAX_WORLD_STATUS_OK?(rollback?TERRA_TX_ROLLED_BACK:TERRA_TX_COMMITTED):state,before,world?world->workspace_revision:0);
+}
+terrax_world_status terra_world_workspace_commit_outcome(uint32_t handle,uint32_t token,TerraOutcomeV2* out) {
+    return tx_finish_outcome(handle,token,0,out);
+}
+terrax_world_status terra_world_workspace_rollback_outcome(uint32_t handle,uint32_t token,TerraOutcomeV2* out) {
+    return tx_finish_outcome(handle,token,1,out);
+}
+terrax_world_status terra_op_execute_json_outcome(uint32_t handle,const char* operation,const char* request,
+    char* response,uint64_t capacity,uint64_t* required,uint32_t options,TerraOutcomeV2* out) {
+    if (!out) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    TxWorld* world=tx_get_world(handle);uint64_t before=world?world->workspace_revision:0;
+    tx_outcome_write(out,TERRAX_WORLD_STATUS_INTERNAL_ERROR,TERRA_EFFECT_NONE,tx_outcome_state(world),before,before);
+    if (required) *required=0;
+    if (!world) return tx_outcome_write(out,tx_invalid_handle(),TERRA_EFFECT_NONE,TERRA_TX_INVALID,0,0);
+    if (options & ~TERRA_OUTCOME_JOIN_CALLER) {
+        tx_set_error("TERRAX_INVALID_ARGUMENT","unknown outcome transaction option");
+        return tx_outcome_write(out,TERRAX_WORLD_STATUS_INVALID_ARGUMENT,TERRA_EFFECT_NONE,tx_outcome_state(world),before,before);
+    }
+    if (tx_outcome_state(world)==TERRA_TX_INVALID) {
+        tx_set_error("TERRAX_STATE_ERROR","workspace owner invariant is invalid");
+        return tx_outcome_write(out,TERRAX_WORLD_STATUS_STATE_ERROR,TERRA_EFFECT_UNKNOWN,TERRA_TX_INVALID,before,before);
+    }
+    int mutation=tx_operation_mutates_world(operation)&&request&&!tx_response_key_matches(world,operation,request);
+    if (!mutation) {
+        terrax_world_status status=terra_op_execute_json(handle,operation,request,response,capacity,required);
+        return tx_outcome_write(out,status,TERRA_EFFECT_NONE,tx_outcome_state(world),before,world->workspace_revision);
+    }
+    uint32_t token=g_workspace_token;int owned=!token;
+    if (token && !(options&TERRA_OUTCOME_JOIN_CALLER)) {
+        tx_set_error("TERRAX_STATE_ERROR","outcome mutation must explicitly join its caller checkpoint");
+        return tx_outcome_write(out,TERRAX_WORLD_STATUS_STATE_ERROR,TERRA_EFFECT_NONE,TERRA_TX_OPEN,before,before);
+    }
+    if (owned) {
+        TxPreparedOutput* prepared=world->prepared_output;world->prepared_output=NULL;
+        uint32_t bytes=0;terrax_world_status status=terra_world_workspace_checkpoint_size(handle,&bytes);
+        if (status==TERRAX_WORLD_STATUS_OK) status=terra_world_workspace_begin(handle,bytes,&token);
+        world->prepared_output=prepared;
+        if (status!=TERRAX_WORLD_STATUS_OK)
+            return tx_outcome_write(out,status,TERRA_EFFECT_NONE,tx_outcome_state(world),before,world->workspace_revision);
+    }
+    terrax_world_status status=terra_op_execute_json(handle,operation,request,response,capacity,required);
+    if (status==TERRAX_WORLD_STATUS_OK||status==TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL) {
+        if (!owned) return tx_outcome_write(out,status,TERRA_EFFECT_APPLIED,TERRA_TX_OPEN,before,world->workspace_revision);
+        terrax_world_status finish=terra_world_workspace_commit(handle,token);
+        if (finish==TERRAX_WORLD_STATUS_OK)
+            return tx_outcome_write(out,status,TERRA_EFFECT_APPLIED,TERRA_TX_COMMITTED,before,world->workspace_revision);
+        status=finish;
+    }
+    char diagnostic[256];memcpy(diagnostic,tx_last_error,sizeof(diagnostic));
+    int32_t diagnostic_status=tx_last_status;
+    tx_output_clear(world);
+    terrax_world_status rollback=terra_world_workspace_rollback(handle,token);
+    if (required) *required=0;
+    if (rollback!=TERRAX_WORLD_STATUS_OK)
+        return tx_outcome_write(out,rollback,TERRA_EFFECT_UNKNOWN,TERRA_TX_INVALID,before,world->workspace_revision);
+    memcpy(tx_last_error,diagnostic,sizeof(diagnostic));tx_last_status=diagnostic_status;
+    return tx_outcome_write(out,status,TERRA_EFFECT_ROLLED_BACK,TERRA_TX_ROLLED_BACK,before,world->workspace_revision);
+}
+
+
+/* Wire controls are caller bridge memory, outside rollback-owned allocation. */
+static int tx_receipt_control(uint8_t* out,uint32_t capacity) {
+    return out && capacity==TERRA_OUTCOME_WIRE_BYTES && tx_bridge_contains_native(out,capacity);
+}
+static void tx_receipt_u64(uint8_t* out,uint64_t value,unsigned bytes) {
+    for(unsigned i=0;i<bytes;i++)out[i]=(uint8_t)(value>>(8*i));
+}
+static void tx_receipt_encode(uint8_t* out,const TerraOutcomeV2* value) {
+    tx_receipt_u64(out,TERRA_OUTCOME_WIRE_BYTES,4);
+    tx_receipt_u64(out+4,value->version,4);tx_receipt_u64(out+8,(uint32_t)value->status,4);
+    tx_receipt_u64(out+12,value->effect,4);tx_receipt_u64(out+16,value->transaction_state,4);
+    tx_receipt_u64(out+20,0,4);tx_receipt_u64(out+24,value->revision_before,8);
+    tx_receipt_u64(out+32,value->revision_after,8);
+}
+static int tx_receipt_overlaps(const void* a,size_t an,const void* b,size_t bn) {
+    if(!an||!bn)return 0;
+    uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;
+    return x<=y?y-x<an:x-y<bn;
+}
+static size_t tx_receipt_string_bytes(const char* text) {
+    size_t capacity=tx_bridge_allocation_size_native(text);
+    for(size_t i=0;i<capacity;i++)if(!text[i])return i+1;
+    return 0;
+}
+terrax_world_status terra_op_execute_json_receipt(uint32_t handle,const char* operation,const char* request,
+    char* response,uint64_t capacity,uint64_t* required,uint32_t options,uint8_t* receipt,uint32_t receipt_capacity) {
+    if(!tx_receipt_control(receipt,receipt_capacity))return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    size_t op_bytes=tx_receipt_string_bytes(operation),request_bytes=tx_receipt_string_bytes(request);
+    int valid=op_bytes&&request_bytes&&capacity<=SIZE_MAX&&required&&
+        !((uintptr_t)required%_Alignof(uint64_t))&&tx_bridge_contains_native(required,8)&&
+        ((!response&&!capacity)||(response&&tx_bridge_contains_native(response,(size_t)capacity)));
+    if(valid) {
+        valid=!tx_receipt_overlaps(receipt,40,operation,op_bytes)&&
+            !tx_receipt_overlaps(receipt,40,request,request_bytes)&&
+            !tx_receipt_overlaps(receipt,40,response,(size_t)capacity)&&
+            !tx_receipt_overlaps(receipt,40,required,8)&&
+            !tx_receipt_overlaps(required,8,operation,op_bytes)&&
+            !tx_receipt_overlaps(required,8,request,request_bytes)&&
+            !tx_receipt_overlaps(required,8,response,(size_t)capacity)&&
+            !tx_receipt_overlaps(response,(size_t)capacity,operation,op_bytes)&&
+            !tx_receipt_overlaps(response,(size_t)capacity,request,request_bytes);
+    }
+    TerraOutcomeV2 out;
+    terrax_world_status status;
+    if(!valid) {
+        TxWorld* world=tx_get_world(handle);uint64_t revision=world?world->workspace_revision:0;
+        tx_set_error("TERRAX_INVALID_ARGUMENT","invalid or overlapping outcome bridge buffers");
+        status=tx_outcome_write(&out,TERRAX_WORLD_STATUS_INVALID_ARGUMENT,TERRA_EFFECT_NONE,tx_outcome_state(world),revision,revision);
+    } else status=terra_op_execute_json_outcome(handle,operation,request,response,capacity,required,options,&out);
+    tx_receipt_encode(receipt,&out);return status;
+}
+static terrax_world_status tx_workspace_receipt(uint32_t handle,uint32_t token,int rollback,uint8_t* receipt,uint32_t capacity) {
+    if(!tx_receipt_control(receipt,capacity))return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    TerraOutcomeV2 out;terrax_world_status status=tx_finish_outcome(handle,token,rollback,&out);
+    tx_receipt_encode(receipt,&out);return status;
+}
+terrax_world_status terra_world_workspace_commit_receipt(uint32_t handle,uint32_t token,uint8_t* receipt,uint32_t capacity) {
+    return tx_workspace_receipt(handle,token,0,receipt,capacity);
+}
+terrax_world_status terra_world_workspace_rollback_receipt(uint32_t handle,uint32_t token,uint8_t* receipt,uint32_t capacity) {
+    return tx_workspace_receipt(handle,token,1,receipt,capacity);
 }
 
 /* ====================================================================

@@ -81,14 +81,17 @@ static const char g_capabilities[] =
 #endif
 
 #if TERRAWASM_FEATURE_WLD
+#define TERRAX_OUTCOME_VERSION 2
 #define TERRAX_STREAM_IDENTITY_JSON ",\"stream\":{\"version\":2,\"inputLease\":true,\"editPlan\":true,\"pngColumnCursors\":true,\"stampTiles\":true,\"stampObjects\":1}"
 #else
+#define TERRAX_OUTCOME_VERSION 0
 #define TERRAX_STREAM_IDENTITY_JSON ""
 #endif
 
 static const char g_build_info_json[] =
     "{\"abiVersion\":" TERRAX_STRINGIFY(TERRAX_ABI_VERSION)
     TERRAX_STREAM_IDENTITY_JSON
+    ",\"worldOutcomeAbiVersion\":" TERRAX_STRINGIFY(TERRAX_OUTCOME_VERSION)
     ",\"worldWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"pixelWorkspaceAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
     ",\"circuitAbiVersion\":" TERRAX_STRINGIFY(TERRAWASM_FEATURE_WLD)
