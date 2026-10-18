@@ -153,3 +153,32 @@ skips. Web wrapper is 21,832 bytes; Wasm is 457,472 bytes; artifact budgets pass
 G06's LP64 response/roundtrip/free and Wasm32 layout/sanitizer scenario is verified
 for this producer. This is not completion of fixed V2 outcome receipts or every
 remaining work package.
+
+## Fixed world outcome control records — fddd743
+
+Producer `fddd743645cd08f7501665117abe229183411a10` adds caller-owned V2 native
+outcomes and checked, explicit little-endian 40-byte wire receipts for the world
+JSON mutation dispatcher and workspace completion. Existing caller checkpoints
+must be joined explicitly. A joined mutation failure confirms rollback of the
+entire caller checkpoint, including earlier provisional edits. A response-cache
+fill reports no new effect; it must not erase the probe's applied evidence.
+See [fixed outcome scope and wire contract](../native-fixed-outcomes.md).
+
+Native CTest 38/38 and ASan/UBSan 38/38 pass; the previously documented executor
+LeakSanitizer limitation still applies. Standalone PLR native remains 5/5. The
+320-case allocation-fault sweep yields two pre-admission rejections, 20 confirmed
+whole-checkpoint rollbacks and 298 applied/cache-fill cases. Tests additionally
+cover bounded/overlapping wire buffers, allocation-free completion controls,
+unsafe-address admission and complete 64-bit little-endian commit sequences.
+
+Clean Emscripten 5.0.7 Node/Web plus production-consumer regression: 222/222,
+zero skips. Web wrapper: 22,370 bytes; Wasm: 459,977 bytes; artifact budgets pass.
+The manifest capability is checked against exports, the real version marker
+and compiled identity; standalone PLR does not advertise world outcomes.
+
+P05/G05 remain partial: these receipts cover the named world operations, not
+all native mutation families or host publication/persistence. Their per-handle
+workspace commit sequence is not a universal document revision. The consumer
+must retain applied evidence across output allocation and transport failures;
+its verification is tracked in viewer-app. No release, CI rerun or migration
+activation is claimed.
