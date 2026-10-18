@@ -4,6 +4,7 @@
 #include "terra_commands.h"
 #include "terra_world.h"
 #include "terra_checkpoint.h"
+#include "terra_output.h"
 #include "terra_reader.h"
 #include "terra_types.h"
 
@@ -119,9 +120,12 @@ terrax_world_status terra_world_apply_commands(
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
     uint32_t checkpoint_bytes = 0, token = 0;
+    TxPreparedOutput* prepared = world->prepared_output;
+    world->prepared_output = NULL;
     status = terra_world_workspace_checkpoint_size(handle, &checkpoint_bytes);
-    if (status != TERRAX_WORLD_STATUS_OK) return status;
-    status = terra_world_workspace_begin(handle, checkpoint_bytes, &token);
+    if (status == TERRAX_WORLD_STATUS_OK)
+        status = terra_world_workspace_begin(handle, checkpoint_bytes, &token);
+    world->prepared_output = prepared;
     if (status != TERRAX_WORLD_STATUS_OK) return status;
     uint32_t offset = TERRAX_COMMAND_HEADER_BYTES;
     for (uint32_t index = 0u; index < count; index++) {
@@ -154,6 +158,7 @@ abort_batch:
     { extern char tx_last_error[]; extern int32_t tx_last_status;
       int32_t failure_status = tx_last_status; char error[1024];
       unsigned i = 0; for (; i + 1 < sizeof(error) && tx_last_error[i]; ++i) error[i] = tx_last_error[i]; error[i] = 0;
+      tx_output_clear(world);
       terra_world_workspace_rollback(handle, token);
       for (i = 0; error[i]; ++i) tx_last_error[i] = error[i]; tx_last_error[i] = 0;
       tx_last_status = failure_status;

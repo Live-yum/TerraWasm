@@ -974,8 +974,10 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     int64_t requested_version=w->version,requested_type=w->file_type;
     if(!patch_i64(&request,fields,field_count,"version",w->version,0,UINT32_MAX,&requested_version)||
        !patch_i64(&request,fields,field_count,"type",w->file_type,0,UINT8_MAX,&requested_type))return -1;
-    if(requested_version!=w->version||requested_type!=w->file_type)
+    if(requested_version!=w->version)
         return mut_error("TERRAX_NOT_SUPPORTED", "format conversion requires rebuilding every affected section");
+    if(requested_type!=w->file_type)
+        return mut_error("TERRAX_VALIDATION_ERROR", "header patch cannot change the WLD file type");
     int64_t version_value=w->version,type_value=w->file_type,revision_value=w->revision,tile_count_value=w->tile_type_count;uint64_t favorite=w->favorite;
     TxBuf bitmap={0};int bitmap_changed=0;
     char magic[8];uint32_t magic_len=0u;
