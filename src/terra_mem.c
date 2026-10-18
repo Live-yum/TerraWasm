@@ -68,6 +68,8 @@ union TxAllocHeader {
 };
 
 #ifdef TERRAX_TESTING
+static uint64_t tx_test_allocation_attempts;
+uint64_t txw_test_allocation_attempts(void){return tx_test_allocation_attempts;}
 static uint32_t tx_test_allocation_limit=UINT32_MAX;
 static uint32_t tx_test_fail_after=UINT32_MAX;
 void txw_test_fail_after(uint32_t n){tx_test_fail_after=n;}
@@ -234,6 +236,7 @@ static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
 
 static void* tx_new_root(uint32_t size, uint32_t domain) {
 #ifdef TERRAX_TESTING
+    tx_test_allocation_attempts++;
     if(size>tx_test_allocation_limit||!tx_test_has_headroom(size))return NULL;
     if(tx_test_fail_after!=UINT32_MAX){if(!tx_test_fail_after)return NULL;--tx_test_fail_after;}
 #endif
@@ -328,6 +331,9 @@ void tx_internal_free(void* payload) {
 
 static void* tx_internal_realloc_domain(
     void* payload, uint32_t size, uint32_t domain) {
+    #ifdef TERRAX_TESTING
+    tx_test_allocation_attempts++;
+    #endif
     if (!payload) return tx_new_root(size ? size : 1u, domain);
     TxAllocHeader* old = tx_lookup_root(payload, domain);
     if (!old) return NULL;
@@ -523,17 +529,28 @@ uint32_t tx_get_world_open_count(void) { return tx_world_open_count; }
 /* ---------- TxBuf dynamic buffer ---------- */
 
 void buf_init(TxBuf* b, uint32_t cap) {
+    b->mode = TX_BUF_DYNAMIC;
     b->len = 0;
     b->cap = cap ? cap : 128u;
     b->data = tx_alloc(b->cap);
     b->ok = b->data != NULL;
 }
 
+void buf_init_count(TxBuf* b) {
+    *b = (TxBuf){NULL, 0, UINT32_MAX, 1, TX_BUF_COUNT};
+}
+
+void buf_init_fixed(TxBuf* b, void* data, uint32_t capacity) {
+    *b = (TxBuf){data, 0, capacity, data != NULL, TX_BUF_FIXED};
+}
+
 int buf_reserve(TxBuf* b, uint32_t extra) {
     if (!b->ok) return 0;
     if (extra > 0xffffffffu - b->len) { b->ok = 0; return 0; }
     uint32_t need = b->len + extra;
+    if (b->mode == TX_BUF_COUNT) return 1;
     if (need <= b->cap) return 1;
+    if (b->mode == TX_BUF_FIXED) { b->ok = 0; return 0; }
     uint32_t next = b->cap ? b->cap : 128u;
     while (next < need) {
         uint32_t old = next;
@@ -549,12 +566,15 @@ int buf_reserve(TxBuf* b, uint32_t extra) {
 }
 
 void buf_u8(TxBuf* b, uint8_t v) {
-    if (buf_reserve(b, 1)) b->data[b->len++] = v;
+    if (buf_reserve(b, 1)) {
+        if (b->mode != TX_BUF_COUNT) b->data[b->len] = v;
+        b->len++;
+    }
 }
 
 void buf_bytes(TxBuf* b, const void* p, uint32_t n) {
     if (buf_reserve(b, n)) {
-        if (n) memcpy(b->data + b->len, p, n);
+        if (n && b->mode != TX_BUF_COUNT) memcpy(b->data + b->len, p, n);
         b->len += n;
     }
 }

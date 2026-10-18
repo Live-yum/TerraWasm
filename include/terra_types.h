@@ -98,12 +98,18 @@ struct TxPixelArtChunk {
 
 /* ---------- Dynamic buffer ---------- */
 
+typedef enum TxBufMode { TX_BUF_DYNAMIC = 0, TX_BUF_COUNT = 1, TX_BUF_FIXED = 2 } TxBufMode;
+
 typedef struct TxBuf {
     uint8_t* data;
     uint32_t len;
     uint32_t cap;
     int      ok;
+    TxBufMode mode; /* Zero initialization preserves the dynamic default. */
 } TxBuf;
+
+void buf_init_count(TxBuf* b);
+void buf_init_fixed(TxBuf* b, void* data, uint32_t capacity);
 
 /* ---------- Error state (V2 API structured error) ---------- */
 

@@ -56,6 +56,8 @@ function validateStreamAbi(stream, exports, label) {
   for (const name of STREAM_EXPORTS) if (!exports.includes(name)) fail(`${label} stream export ${name} is missing`)
 }
 
+export const HEADER_JSON_EXPORTS = ['_terra_header_json_abi_version', '_terra_header_get_json']
+const HEADER_JSON = {version:1,allocationFreeProbe:true,directWrite:true}
 export const WORLD_COMMIT_EXPORTS = ['_terra_world_commit_abi_version','_terra_world_commit_to_buffer']
 const WORLD_COMMIT = {version:1,candidateBeforeSwap:true}
 export const WORLD_OUTCOME_EXPORTS = ['_terra_world_outcome_abi_version', '_terra_op_execute_json_receipt', '_terra_world_workspace_commit_receipt', '_terra_world_workspace_rollback_receipt']
@@ -77,6 +79,8 @@ function workspaceAbi(value, expected, exports, required, label) {
   for (const name of required) if (!exports.includes(name)) fail(`${label} workspace export ${name} is missing`)
 }
 function validateWorkspaces(abi, exports, featureSet, label) {
+  workspaceAbi(abi.headerJson, HEADER_JSON, exports, HEADER_JSON_EXPORTS, `${label} header JSON`)
+  if (abi.headerJson && featureSet === 'plr') fail(`${label} header JSON feature mismatch`)
   workspaceAbi(abi.worldCommit, WORLD_COMMIT, exports, WORLD_COMMIT_EXPORTS, `${label} world commit`)
   if (abi.worldCommit && featureSet === 'plr') fail(`${label} world commit feature mismatch`)
   workspaceAbi(abi.worldOutcome, WORLD_OUTCOME, exports, WORLD_OUTCOME_EXPORTS, `${label} world outcome`)
@@ -97,6 +101,14 @@ function validateWorkspaces(abi, exports, featureSet, label) {
 }
 function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
+  if (identity.headerJsonAbiVersion !== undefined) {
+    const enabled = ['all','wld'].includes(identity.featureSet)
+    if (identity.headerJsonAbiVersion !== (enabled ? 1 : 0)) fail(`${label} header JSON identity version mismatch`)
+    if (enabled) {
+      if (typeof module._terra_header_json_abi_version !== 'function' || module._terra_header_json_abi_version() !== 1) fail(`${label} compiled header JSON version mismatch`)
+      abi.headerJson = {...HEADER_JSON}
+    }
+  }
   if (identity.worldCommitAbiVersion !== undefined) {
     const enabled = ['all','wld'].includes(identity.featureSet)
     if (identity.worldCommitAbiVersion !== (enabled ? 1 : 0)) fail(`${label} world commit identity version mismatch`)
@@ -333,7 +345,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
   }
   if (!targets.node || !targets.web) fail('both Node and Web builds are required')
   const identity = identities.web
-  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'worldCommitAbiVersion', 'worldOutcomeAbiVersion', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion', 'circuitAbiVersion']) {
+  for (const field of ['abiVersion', 'sourceCommit', 'dirty', 'compiler', 'featureSet', 'commonFlagsText', 'headerJsonAbiVersion', 'worldCommitAbiVersion', 'worldOutcomeAbiVersion', 'worldWorkspaceAbiVersion', 'pixelWorkspaceAbiVersion', 'playerWorkspaceAbiVersion', 'circuitAbiVersion']) {
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')

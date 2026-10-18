@@ -397,7 +397,7 @@ static int apply_write_rules(StreamTask* t,TxTile* tile,uint32_t run){
             /* Each operation observes what the previous WLD encode/decode
              * would retain (e.g. an inactive tile no longer carries type).
              * Preserve operation-local material matching's original tile. */
-            uint8_t bytes[TILE_MAX_BYTES];TxBuf b={bytes,0,sizeof(bytes),1};write_tile(w,&b,tile,0);
+            uint8_t bytes[TILE_MAX_BYTES];TxBuf b={bytes,0,sizeof(bytes),1,TX_BUF_FIXED};write_tile(w,&b,tile,0);
             if(!b.ok)return 0;
             uint8_t* saved=w->file;uint32_t saved_len=w->file_len,off=0;
             w->file=bytes;w->file_len=b.len;int ok=read_tile_at(w,&off,b.len,tile);w->file=saved;w->file_len=saved_len;

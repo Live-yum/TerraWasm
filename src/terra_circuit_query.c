@@ -175,7 +175,7 @@ static int copy_source(CxWorld* w,uint32_t offset,uint32_t count){
 }
 static int flush_tile(CxWorld* w){
     if(!w->save_previous_valid)return TCW_OK;if(w->output_length>w->output_capacity-64u)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,w->output_length,w->output);
-    TxBuf b={w->output,w->output_length,w->output_capacity,1};write_tile(w->world,&b,&w->save_previous,w->save_repeat);if(!b.ok||b.data!=w->output)return cx_fail(w,TCW_MEMORY,"streaming WLD circuit output buffer overflow");w->output_length=b.len;w->save_previous_valid=0;return TCW_OK;
+    TxBuf b={w->output,w->output_length,w->output_capacity,1,TX_BUF_FIXED};write_tile(w->world,&b,&w->save_previous,w->save_repeat);if(!b.ok||b.data!=w->output)return cx_fail(w,TCW_MEMORY,"streaming WLD circuit output buffer overflow");w->output_length=b.len;w->save_previous_valid=0;return TCW_OK;
 }
 int cx_save_step(CxWorld* w,uint32_t* work){
     if(w->phase==CX_SAVE_PREFIX){

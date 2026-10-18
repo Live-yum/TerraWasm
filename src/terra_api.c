@@ -1020,6 +1020,44 @@ static void tx_clear_section_response(TxWorld* world, int release_root) {
     world->section_response_index = -1;
 }
 
+/* Optional allocation-free header producer. The count and write passes use the
+ * exact legacy serializer. No section response cache is consulted or changed.
+ * Worlds are single-thread owned: mutation between separate calls is supported,
+ * concurrent mutation/overlapping source and destination memory is not. */
+uint32_t terra_header_json_abi_version(void) { return 1u; }
+
+terrax_world_status terra_header_get_json(uint32_t handle, char* buffer,
+                                         uint64_t buffer_size, uint64_t* required_size) {
+    if (required_size) *required_size = 0;
+    TxWorld* world = tx_get_world(handle);
+    if (!world) return tx_invalid_handle();
+    tx_clear_error();
+    TxBuf count;
+    buf_init_count(&count);
+    int serialized = serialize_section_json(world, 0, &count);
+    buf_u8(&count, 0);
+    if (!serialized || !count.ok) {
+        if (!tx_last_error[0])
+            tx_set_error("TERRAX_SIZE_OVERFLOW", "header JSON size exceeds uint32 representation");
+        return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+    }
+    if (required_size) *required_size = count.len;
+    if (!buffer || !buffer_size) return TERRAX_WORLD_STATUS_OK;
+    if (buffer_size < (uint64_t)count.len) return TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL;
+    TxBuf fixed;
+    /* Count is representable; do not truncate the caller's uint64 capacity. */
+    buf_init_fixed(&fixed, buffer, count.len);
+    serialized = serialize_section_json(world, 0, &fixed);
+    buf_u8(&fixed, 0);
+    if (!serialized || !fixed.ok || fixed.len != count.len) {
+        if (!tx_last_error[0])
+            tx_set_error("TERRAX_STATE_ERROR", "header changed during serialization");
+        return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+    }
+    tx_clear_error();
+    return TERRAX_WORLD_STATUS_OK;
+}
+
 terrax_world_status terra_section_get_json(
     uint32_t handle,
     const char* section_name,
@@ -1285,7 +1323,7 @@ static terrax_world_status tx_op_execute_json_inner(
        Operations that store section overrides on the bump heap must finish
        before the response allocation so override data is not corrupted when
        the response is copied back to the caller. */
-    TxBuf response;
+    TxBuf response = {0};
     response.data = NULL;
     response.len = 0;
     response.cap = 0;
