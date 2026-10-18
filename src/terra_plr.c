@@ -11,6 +11,7 @@
  */
 
 #include "terra_plr.h"
+#include "terra_checkpoint.h"
 #include "terra_types.h"
 #include "terra_reader.h"
 
@@ -3783,6 +3784,10 @@ static terrax_world_status plr_copy_document_json_result(
             "TERRAX_INVALID_ARGUMENT",
             "null PLR document or required-size pointer");
     }
+    /* A query may use temporary roots, but must not publish a cache that the
+     * foreign world rollback would later free behind this document's pointer. */
+    if (tx_checkpoint_active() && !document->json_cache)
+        return plr_copy_json_result(document->root, buffer, buffer_size, required_size);
     if (!document->json_cache) {
         g_plr_oom = 0;
         uint32_t length = 0u;
@@ -3948,6 +3953,8 @@ static int plr_write_file(const char *path, const uint8_t *data, uint32_t length
 terrax_world_status terra_plr_open_from_buffer(
     const uint8_t *buffer, uint32_t buffer_len, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     if (!buffer || !out_handle || buffer_len == 0u) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -3966,6 +3973,8 @@ terrax_world_status terra_plr_open_from_buffer(
 terrax_world_status terra_plr_open(
     const char *path_utf8, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     uint32_t path_length = 0u;
     if (!path_utf8 || !out_handle ||
         !plr_cstring_length_bounded(path_utf8, PLR_MAX_JSON_BYTES, &path_length) ||
@@ -3992,6 +4001,8 @@ terrax_world_status terra_plr_open(
 terrax_world_status terra_plr_open_json(
     const char *json_utf8, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     if (!json_utf8 || !out_handle) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -4010,6 +4021,8 @@ terrax_world_status terra_plr_open_json(
 }
 
 terrax_world_status terra_plr_close(uint32_t handle) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     plr_destroy_document(document);
@@ -4074,6 +4087,8 @@ terrax_world_status terra_plr_get_field_json(
 
 terrax_world_status terra_plr_replace_json(
     uint32_t handle, const char *json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4174,6 +4189,8 @@ static terrax_world_status plr_apply_field_edits(
 
 terrax_world_status terra_plr_set(
     uint32_t handle, const char *pointer_utf8, const char *value_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4206,6 +4223,8 @@ terrax_world_status terra_plr_set(
 
 terrax_world_status terra_plr_set_many(
     uint32_t handle, const char *edits_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4224,6 +4243,8 @@ terrax_world_status terra_plr_set_many(
 uint32_t terra_plr_workspace_abi_version(void) { return 1u; }
 
 terrax_world_status terra_plr_release_caches(uint32_t handle) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     plr_invalidate_document_caches(document);
@@ -4274,31 +4295,29 @@ terrax_world_status terra_plr_save_to_buffer(
     uint32_t handle, uint8_t *output, uint32_t capacity, uint32_t *out_required) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
-    if (!out_required) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
-            "TERRAX_INVALID_ARGUMENT",
-            "null PLR required-size pointer");
-    }
+    if (!out_required) return plr_status_error(TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+        "TERRAX_INVALID_ARGUMENT", "null PLR required-size pointer");
     *out_required = 0u;
+    /* Encode against a stack copy during foreign checkpoints. Existing original
+     * bytes/caches are borrowed; a newly encoded cache is scoped to this call. */
+    PlrDocumentSlot transient;
+    PlrDocumentSlot *source = document;
+    if (tx_checkpoint_active()) { transient = *document; source = &transient; }
     terrax_world_status status = TERRAX_WORLD_STATUS_OK;
     uint32_t length = 0u;
-    const uint8_t *encoded = plr_encoded_document(document, &length, &status);
-    if (!encoded) return status;
+    const uint8_t *encoded = plr_encoded_document(source, &length, &status);
+    uint8_t *temporary = source != document && source->encoded_cache != document->encoded_cache
+        ? source->encoded_cache : NULL;
+    if (!encoded) { free(temporary); return status; }
     *out_required = length;
-    if (!output || capacity == 0u) {
-        tx_clear_error();
-        return TERRAX_WORLD_STATUS_OK;
+    if (output && capacity) {
+        if (capacity < length) status = plr_status_error(TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
+            "TERRAX_BUFFER_TOO_SMALL", "PLR output buffer is too small");
+        else memcpy(output, encoded, length);
     }
-    if (capacity < length) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
-            "TERRAX_BUFFER_TOO_SMALL",
-            "PLR output buffer is too small");
-    }
-    memcpy(output, encoded, length);
-    tx_clear_error();
-    return TERRAX_WORLD_STATUS_OK;
+    free(temporary);
+    if (status == TERRAX_WORLD_STATUS_OK) tx_clear_error();
+    return status;
 }
 
 terrax_world_status terra_plr_encode(
@@ -4308,6 +4327,8 @@ terrax_world_status terra_plr_encode(
 
 terrax_world_status terra_plr_save(
     uint32_t handle, const char *path_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     uint32_t path_length = 0u;
@@ -4633,6 +4654,8 @@ static terrax_world_status plr_patch_apply(
 
 terrax_world_status terra_plr_apply_patch_json(
     uint32_t handle, const char *patch_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(

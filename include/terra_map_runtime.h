@@ -25,6 +25,7 @@ typedef struct TxMapRuntimeLayout {
     uint32_t paint_count;
 } TxMapRuntimeLayout;
 
+/* Palette setters reject active world checkpoints before allocation/invalidation. */
 /* Public WASM bridge setter. (0,0) clears when no world is open. */
 int32_t txw_set_map_runtime(uint32_t data_ptr, uint32_t data_len);
 /* Native/test setter; copies data and never retains the caller's buffer. */

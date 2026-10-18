@@ -41,6 +41,9 @@ typedef struct TerraCircuitStats {
     uint32_t colour, processed, queued, active_bytes, peak_bytes, max_bytes, queue_capacity, reserved;
 } TerraCircuitStats;
 
+/* While a world allocator checkpoint owns admission, graph creation and every
+ * mutation/step/cancel/close return STATE without changing an existing traversal.
+ * Stats remain readable; this admission rejection is not execution cancellation. */
 uint32_t terra_circuit_abi_version(void);
 int32_t terra_circuit_create(uint32_t width, uint32_t height, uint32_t max_cells,
     uint32_t max_bytes, uint32_t* out_handle);

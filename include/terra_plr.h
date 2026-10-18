@@ -11,6 +11,9 @@
 #define TERRA_PLR_H
 
 #include <stdint.h>
+/* World checkpoints fence player creation/mutation/close and filesystem save.
+ * Pure reads and buffer encoding remain available using scoped, nonpublished
+ * scratch when necessary; borrowed pre-existing caches remain unchanged. */
 #include "terra_status.h"
 
 #ifdef __cplusplus

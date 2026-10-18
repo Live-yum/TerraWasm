@@ -515,6 +515,12 @@ else()
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
             )
 
+            if(TERRAWASM_ENABLE_WLD)
+                add_terra_contract(terra_foreign_owner_checkpoint_contract tests/foreign_owner_checkpoint_contract.c ZLIB::ZLIB)
+                target_compile_definitions(terra_foreign_owner_checkpoint_contract PRIVATE
+                    TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
+            endif()
+
             add_terra_contract(terra_plr_workspace_contract tests/plr_workspace_contract.c)
             target_compile_definitions(terra_plr_workspace_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
