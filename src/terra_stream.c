@@ -1,3 +1,4 @@
+#include "terra_owner_guards.h"
 /* Cooperative file-backed WLD reader/writer. No whole tile or output buffer. */
 #include "terra_stream.h"
 #include "terra_checkpoint.h"
@@ -969,6 +970,7 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
 int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     StreamTask* t=task(id);if(out&&valid_range(out,4))*out=0;
     if(!t||t->stage!=DONE||t->result_kind||t->event.kind!=TX_STREAM_READY||!source_id||!valid_range(out,4))return fail("TERRAX_STATE_ERROR","candidate is not ready for adoption");
+    if(!tx_world_can_activate_stream())return -1;
     TxWorld* w=t->candidate;
     memset(&w->marker_color_index,0,sizeof(w->marker_color_index));memset(&w->icon_atlas,0,sizeof(w->icon_atlas));
     if(w->region_mask){tx_internal_free(w->region_mask);w->region_mask=NULL;}w->surface_sand_split=0;
@@ -978,7 +980,8 @@ int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     w->pixel_art_indexed=0;w->pixel_art_map_count=0;w->stream_source_id=source_id;
     for(uint32_t g=0;g<t->group_count;g++)if(t->groups[g].rules){tx_internal_free(t->groups[g].rules);t->groups[g].rules=NULL;}
     t->group_count=0;
-    tx_stream_activate_world(w,out);tx_internal_free(w);t->candidate=NULL;t->stage=ADOPTED;t->old_handle=0;tx_clear_error();return 0;
+    if(!tx_stream_activate_world(w,out))return -1;
+    tx_internal_free(w);t->candidate=NULL;t->stage=ADOPTED;t->old_handle=0;tx_clear_error();return 0;
 }
 int32_t terra_world_stream_cancel(uint32_t id){
     StreamTask* t=current&&current->id==id?current:NULL;if(!t||t->stage==ADOPTED)return fail("TERRAX_STATE_ERROR","task cannot be cancelled");

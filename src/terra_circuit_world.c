@@ -1,5 +1,7 @@
 /* Streaming, bounded-memory WLD circuit session. See docs/CIRCUIT_WORLD_ABI_V1.md. */
 #include "terra_circuit_world_internal.h"
+#include "terra_owner_guards.h"
+#include "terra_checkpoint.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +18,19 @@ extern int tx_bridge_range_is_valid(uint32_t,uint32_t);
 typedef union CxAllocation { struct { uint32_t bytes; } v; max_align_t alignment; } CxAllocation;
 static CxWorld* sessions[4];
 static uint32_t next_session=1;
+int tx_circuit_world_owns_world(uint32_t handle) {
+    for(uint32_t i=0;i<4;i++)if(sessions[i]&&sessions[i]->world_handle==handle)return 1;
+    return 0;
+}
+int tx_circuit_world_require_unleased(uint32_t handle) {
+    if(!tx_circuit_world_owns_world(handle))return 1;
+    tx_set_error("TERRAX_STATE_ERROR","close circuit sessions before changing their source world");
+    return 0;
+}
+int tx_circuit_world_has_sessions(void) {
+    for(uint32_t i=0;i<4;i++)if(sessions[i])return 1;
+    return 0;
+}
 CxWorld* cx_lookup(uint32_t id) {
     for(uint32_t i=0;i<4;i++)if(sessions[i]&&sessions[i]->id==id)return sessions[i];
     return NULL;
@@ -149,6 +164,7 @@ static void destroy(CxWorld* w){
 uint32_t terra_circuit_world_abi_version(void){return TERRA_CIRCUIT_WORLD_ABI;}
 int32_t terra_circuit_world_begin(uint32_t world_handle,uint32_t scratch_source_id,uint32_t twld_source_id,uint32_t twld_size,uint32_t max_bytes,uint32_t* out_handle){
     if(!out_handle)return TCW_INVALID;*out_handle=0;
+    if(tx_checkpoint_active())return cx_fail(NULL,TCW_STATE,"finish workspace transaction before opening a circuit session");
     TxWorld* world=tx_get_world(world_handle);
     if(!world||!scratch_source_id||scratch_source_id==world->stream_source_id||scratch_source_id==twld_source_id||(!twld_source_id&&twld_size))return TCW_INVALID;
     if(world->legacy_wld)return cx_fail(NULL,TCW_UNSUPPORTED,"circuit simulation requires a sectioned WLD file");

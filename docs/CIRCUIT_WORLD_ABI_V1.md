@@ -44,6 +44,17 @@ the capability to a binary that does not implement it.
 Open the source with the [streaming world ABI](STREAM_ABI_V2.md), finish its
 validation, and adopt the resulting world handle before beginning a circuit.
 The world and immutable source must remain available until the circuit closes.
+A successful circuit begin pins the native world handle until successful circuit
+close, including after cancellation or compiler failure. World close, source
+mutation, workspace checkpoint admission, and ordinary save materialization
+reject while pinned. Beginning a circuit during a workspace checkpoint also
+rejects before allocating session state.
+
+Detached stream operations may still read the immutable source and produce a
+candidate. Adopting that candidate rejects before changing either owner while
+any circuit session pins the current world; the same READY candidate may be
+retried after every circuit session closes. Cancellation alone does not release
+the source lease. These guards use the existing status codes and ABI version.
 Known sectioned WLD layouts, including format 326, can be simulated. Legacy and
 unrecognized future layouts remain outside the mutable circuit interface; the
 ordinary world reader retains its own compatibility behavior.

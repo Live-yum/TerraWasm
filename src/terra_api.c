@@ -10,6 +10,7 @@
 #include "terra_icon.h"
 #include "terra_world.h"
 #include "terra_checkpoint.h"
+#include "terra_owner_guards.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -473,6 +474,10 @@ terrax_world_status terra_world_close(
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
 
+    if (tx_circuit_world_owns_world(handle)) {
+        tx_set_error("TERRAX_STATE_ERROR", "close circuit sessions before closing their world");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     if (g_workspace_token) {
         tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction before closing its world");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
@@ -494,8 +499,17 @@ terrax_world_status terra_world_close(
 
 /* Candidate roots belong to the persistent domain, so closing the old arena
  * cannot invalidate them. This final ownership swap does not allocate. */
+int tx_world_can_activate_stream(void) {
+    if (g_workspace_token || tx_checkpoint_active() || tx_circuit_world_has_sessions()) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction and close circuit sessions before replacing the world");
+        return 0;
+    }
+    return 1;
+}
 int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
-    if (g_worlds[0].active) terra_world_close(g_worlds[0].handle);
+    if (out_handle) *out_handle = 0;
+    if (!candidate || !out_handle || !tx_world_can_activate_stream()) return 0;
+    if (g_worlds[0].active && terra_world_close(g_worlds[0].handle) != TERRAX_WORLD_STATUS_OK) return 0;
     g_worlds[0] = *candidate;
     g_worlds[0].handle = tx_next_handle(0u);
     g_worlds[0].active = 1u;
@@ -513,7 +527,7 @@ terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint3
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
     if (!out_bytes) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
-    if (g_workspace_token || tx_stream_has_task() || tx_world_has_task()) {
+    if (g_workspace_token || tx_stream_has_task() || tx_world_has_task() || tx_circuit_world_owns_world(handle)) {
         tx_set_error("TERRAX_STATE_ERROR", "workspace checkpoint requires an idle owner");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
@@ -566,6 +580,10 @@ terrax_world_status terra_world_workspace_commit(uint32_t handle, uint32_t token
 terrax_world_status terra_world_workspace_rollback(uint32_t handle, uint32_t token) { return tx_finish_workspace(handle, token, 1); }
 
 static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
+    if (tx_circuit_world_owns_world(world->handle)) {
+        tx_set_error("TERRAX_STATE_ERROR", "close circuit sessions before materializing their world for save");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     /* Compact stream metadata is never a complete file, at any version. */
     if (world->stream_source_id) {
         tx_set_error("TERRAX_NOT_SUPPORTED", "source-backed world requires stream save");
@@ -1062,6 +1080,10 @@ terrax_world_status terra_section_set_json(
     const char* json_utf8) {
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
+    if (tx_circuit_world_owns_world(handle)) {
+        tx_set_error("TERRAX_STATE_ERROR", "close circuit sessions before changing their world");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
     tx_clear_section_response(world, 1);
     if (!section_name || !json_utf8) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "null parameter");
