@@ -18,10 +18,13 @@ included in the repository.
 - Debug native build links libm explicitly and passes all 32 CTest contracts.
 - Standalone JSON mutations now keep their response/cache publication inside an
   owned checkpoint. A response-allocation failure restores the original world.
-- The new `terra_op_atomic_response_contract` sweeps 80 allocation-failure points:
-  six rejected operations preserve the world and 74 successful probes fill the
-  cached response without allocation. The same test fails against the preceding
+- The new `terra_op_atomic_response_contract` sweeps 160 allocation-failure cases with and without a prepared output:
+  rejected operations preserve the world and successful probes fill the cached
+  response without allocation; close releases all native roots. The same test fails against the preceding
   API implementation, demonstrating the post-mutation response-OOM regression.
+- Successful standalone mutations preserve prepared output scanning; failure
+  discards derived output caches before restoring document state. The existing
+  one-scan PNG/list/MAP and regional replacement contracts remain required.
 - Existing caller checkpoints stay caller-owned and must be rolled back by the
   caller on failure. This does not claim completion of the fixed V2 receipt ABI.
 - Web Wasm compilation with pinned Emscripten 5.0.7 is available; the final

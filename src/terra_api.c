@@ -1343,9 +1343,15 @@ terrax_world_status terra_op_execute_json(
     uint32_t token = 0, bytes = 0;
     if (world && request_json && mutation && !g_workspace_token &&
         !tx_response_key_matches(world, operation_name, request_json)) {
+        /* Derived scan outputs are not rollback state. Keep an existing output
+         * preparation alive on success instead of forcing another tile scan.
+         * Detach it from the snapshot; on failure discard it before rollback. */
+        TxPreparedOutput* prepared = world->prepared_output;
+        world->prepared_output = NULL;
         terrax_world_status status = terra_world_workspace_checkpoint_size(handle, &bytes);
         if (status == TERRAX_WORLD_STATUS_OK)
             status = terra_world_workspace_begin(handle, bytes, &token);
+        world->prepared_output = prepared;
         if (status != TERRAX_WORLD_STATUS_OK) {
             if (required_size) *required_size = 0;
             return status;
@@ -1364,6 +1370,7 @@ terrax_world_status terra_op_execute_json(
     for (; i + 1 < sizeof(diagnostic) && tx_last_error[i]; ++i) diagnostic[i] = tx_last_error[i];
     diagnostic[i] = 0;
     int32_t original_status = tx_last_status;
+    tx_output_clear(world);
     terrax_world_status rolled_back = terra_world_workspace_rollback(handle, token);
     if (rolled_back != TERRAX_WORLD_STATUS_OK) return rolled_back;
     for (i = 0; diagnostic[i]; ++i) tx_last_error[i] = diagnostic[i];

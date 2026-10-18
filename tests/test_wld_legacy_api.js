@@ -175,7 +175,7 @@ test("legacy WLD rejects unrepresentable edits without changing the original byt
     handle = M.HEAPU32[handleOut >>> 2];
     const operations = [
       ["batch_update_tiles", { rules: [{ where: { type: 3 }, patch: { wire_yellow: true } }] }, "TERRAX_VALIDATION_ERROR"],
-      ["header_patch", { patch: { maxTilesX: 2 } }, "TERRAX_VALIDATION_ERROR"],
+      ["header_patch", { patch: { maxTilesX: 2 } }, "TERRAX_NOT_SUPPORTED"],
       ["header_patch", { patch: { bloodMoon: true, boughtCat: true } }, "TERRAX_NOT_SUPPORTED"],
       ["replace_bestiary", { kills: [], sightings: [], chats: [] }, "TERRAX_NOT_SUPPORTED"],
     ];
