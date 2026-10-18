@@ -158,7 +158,7 @@
     {
       "id": "G03",
       "status": "not_fully_accepted",
-      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+      "details": "Producer 4123ed4 fully parses encoded PLR candidates and verifies actual readback before replacement; corruption, truncation, trailing bytes and OOM preserve originals. Platform durability/unknown publication and managed receipts remain unverified. See ../plr-candidate-validation.md."
     },
     {
       "id": "G04",

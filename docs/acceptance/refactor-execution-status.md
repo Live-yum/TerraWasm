@@ -209,3 +209,27 @@ This does not claim complete save-preparation byte atomicity or host persistence
 receipts. Consumer preallocation, retained-handle failure handling and uncertain
 post-swap delivery are verified separately in viewer-app; broader P05/G05
 acceptance remains partial.
+
+## PLR candidate parsing and readback — 4123ed4
+
+Producer `4123ed43d4ea1f539c8aaf39e2be5b64878b0c1f` fully decodes/parses encoded
+player bytes before creating an external-file candidate, then reads the closed
+candidate in bounded chunks and requires exact bytes and EOF before replacement.
+Normal opening shares the same decoder, including regional trailing-zero-capacity
+compatibility. Validation uses temporary roots, never a public document slot.
+
+The prior implementation accepts a deliberately corrupted completed candidate.
+New tests reject changed bytes, trailing bytes and truncation while preserving the
+original. Twelve allocation positions yield nine pre-publication rejections and
+three valid publications, with unchanged retained payload after every call. A
+save with all 16 public slots occupied succeeds without claiming a hidden slot.
+
+Native CTest 39/39, ASan/UBSan 39/39 (the documented executor LSan limit remains),
+standalone PLR native 5/5 and clean Node/Web plus production-consumer regression
+222/222 pass. Focused PLR/foreign-owner Wasm checks are 17/17. Web wrapper is
+22,494 bytes and Wasm is 460,079 bytes; artifact limits pass.
+
+This is verified native local-filesystem candidate validation, not directory
+sync/power-loss durability, a managed version/receipt CAS or cross-platform
+unknown-publication recovery. G03 remains partially accepted. See
+[validation scope](../plr-candidate-validation.md).
