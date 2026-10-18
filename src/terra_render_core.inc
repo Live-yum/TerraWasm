@@ -36,7 +36,7 @@ extern uint32_t       tx_get_tile_color_count(void);
 extern const uint8_t* tx_get_wall_colors(void);
 extern uint32_t       tx_get_wall_color_count(void);
 
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;

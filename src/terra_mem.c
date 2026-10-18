@@ -102,7 +102,7 @@ static uint64_t tx_total_peak_bytes = 0;
 static uint64_t tx_native_owned_peak_bytes = 0;
 
 /* Result pointers (set by operations, read by JS) */
-uint32_t tx_last_ptr = 0;
+uint8_t* tx_last_ptr = NULL;
 uint32_t tx_last_len = 0;
 uint32_t tx_last_width = 0;
 uint32_t tx_last_height = 0;
@@ -663,7 +663,7 @@ int set_result_buf(TxBuf* b) {
         tx_set_error("TERRAX_WASM_OOM", "out of memory");
         return -1;
     }
-    tx_last_ptr = (uint32_t)(uintptr_t)b->data;
+    tx_last_ptr = b->data;
     tx_last_len = b->len;
     tx_clear_error();
     return (int)b->len;
@@ -674,7 +674,7 @@ int set_result_bytes(uint8_t* p, uint32_t len) {
         tx_set_error("TERRAX_WASM_OOM", "out of memory");
         return -1;
     }
-    tx_last_ptr = (uint32_t)(uintptr_t)p;
+    tx_last_ptr = p;
     tx_last_len = len;
     tx_clear_error();
     return (int)len;

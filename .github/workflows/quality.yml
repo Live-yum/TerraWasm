@@ -168,7 +168,7 @@ jobs:
   # Consume the already uploaded Web artifact. These public ABI and circuit
   # tests do not compile Wasm again or gate the build jobs' artifact uploads.
   circuit-world-acceptance:
-    needs: wasm-feature-matrix
+    needs: wasm-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -176,11 +176,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - name: Download the compiled WLD Web artifact
+      - name: Download the production all Web artifact
         uses: actions/download-artifact@v7
         with:
-          name: terrawasm-wld-${{ github.sha }}
+          name: terrawasm-${{ github.sha }}
           path: ${{ runner.temp }}/circuit-wld-artifact
+      - name: Verify production all Web identity and core consumers
+        env:
+          TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
+        run: node --test tests/production_all_web_contract.cjs
       - name: Verify natural traps, sparse fragments and placement anchors in the compiled WLD artifact
         env:
           TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact

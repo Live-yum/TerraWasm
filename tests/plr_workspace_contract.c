@@ -12,6 +12,20 @@ int main(void) {
     uint32_t h = 0, required = 0;
     CHECK(fixture && terra_plr_open_json(fixture, &h) == 0, "workspace open");
     free(fixture);
+    /* A short candidate write must leave the published original intact. */
+    extern void terrax_test_plr_write_limit(uint32_t);
+    const char* save_path="build-native-player-short-write.plr";
+    FILE* original=fopen(save_path,"wb");CHECK(original,"create sentinel");
+    CHECK(fwrite("original",1,8,original)==8 && fclose(original)==0,"write sentinel");
+    terrax_test_plr_write_limit(8);
+    CHECK(terra_plr_save(h,save_path)==TERRAX_WORLD_STATUS_IO_ERROR,"short save rejected");
+    terrax_test_plr_write_limit(UINT32_MAX);
+    original=fopen(save_path,"rb");CHECK(original,"original preserved");
+    char sentinel[9]={0};CHECK(fread(sentinel,1,9,original)==8 && !strcmp(sentinel,"original"),"short write preserves bytes");
+    fclose(original);CHECK(terra_plr_save(h,save_path)==0,"candidate publication succeeds");
+    uint32_t reopened=0;CHECK(terra_plr_open(save_path,&reopened)==0,"published candidate reopens");
+    CHECK(terra_plr_close(reopened)==0,"close candidate");remove(save_path);
+
     CHECK(terra_plr_workspace_abi_version() == 1, "workspace ABI");
     CHECK(terra_plr_get_keys(h, "", NULL, 0, &required) == 0 && required < 4096, "bounded field discovery");
     char *keys = malloc(required);

@@ -25,6 +25,11 @@ static void roundtrip(int streaming) {
     w->file=streaming?tx_persistent_alloc(1024):tx_alloc(1024);
     assert(w->file); memset(w->file,7,1024);w->file_len=1024;
     if(streaming){w->stream_owned=1;w->stream_source_id=99;w->stream_columns=(uint32_t*)tx_persistent_alloc(12);memset(w->stream_columns,3,12);}
+    if(streaming) {
+        uint32_t required=99;
+        assert(terra_world_save_to_buffer(handle,NULL,0,&required)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);
+        assert(required==0);
+    }
     w->section_overrides[0].data=tx_alloc(64);w->section_overrides[0].len=64;w->section_overrides[0].active=1;
     memset(w->section_overrides[0].data,11,64);
     w->pixel_art_pixels=tx_alloc(16);w->pixel_art_pixels_len=16;memset(w->pixel_art_pixels,19,16);
@@ -38,6 +43,7 @@ static void roundtrip(int streaming) {
         assert(size>1104&&size<10000); /* independent persistent bitmap is excluded */
         assert(terra_world_workspace_begin(handle,size-1,&token)!=0&&token==0);
         assert(terra_world_workspace_begin(handle,size,&token)==0&&token);
+        if(streaming){uint32_t required=99;assert(terra_world_workspace_save_to_buffer(handle,NULL,0,&required)==TERRAX_WORLD_STATUS_NOT_SUPPORTED&&required==0);}
         assert(terra_world_workspace_begin(handle,size,&ignored)!=0);
         assert(terra_world_workspace_rollback(handle,token+1)!=0);
         assert(terra_world_close(handle)==TERRAX_WORLD_STATUS_STATE_ERROR);
@@ -74,10 +80,36 @@ static void roundtrip(int streaming) {
     assert(w->file[20]==80&&w->revision==24&&w->section_overrides[0].data!=override);
     assert(terra_world_close(handle)==0);
 }
+static void put32(uint8_t* p,uint32_t n){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(i*8));}
+static void batch_rollback(uint32_t handle) {
+    const char* json[]={"{\"rules\":[{\"where\":{\"type\":1},\"patch\":{\"tile_color\":1}}]}","{\"rules\":\"invalid\"}"};
+    uint32_t length=16;for(unsigned i=0;i<2;i++)length+=8+(uint32_t)strlen(json[i]);
+    uint8_t* commands=calloc(1,length);assert(commands);
+    put32(commands,TERRAX_COMMAND_MAGIC);commands[4]=1;put32(commands+8,2);put32(commands+12,length-16);
+    uint32_t offset=16;for(unsigned i=0;i<2;i++){commands[offset]=1;put32(commands+offset+4,(uint32_t)strlen(json[i]));memcpy(commands+offset+8,json[i],strlen(json[i]));offset+=8+(uint32_t)strlen(json[i]);}
+    uint32_t required=0;assert(terra_world_save_to_buffer(handle,NULL,0,&required)==0);
+    uint8_t *before=malloc(required),*after=malloc(required);assert(before&&after);
+    assert(terra_world_save_to_buffer(handle,before,required,&required)==0);
+    assert(terra_world_apply_commands(handle,commands,length)!=0);
+    assert(!tx_checkpoint_active());
+    assert(terra_world_save_to_buffer(handle,after,required,&required)==0);
+    assert(!memcmp(before,after,required));
+    uint32_t size=0,token=0;assert(terra_world_workspace_checkpoint_size(handle,&size)==0);
+    assert(terra_world_workspace_begin(handle,size,&token)==0);
+    assert(terra_world_apply_commands(handle,commands,length)==TERRAX_WORLD_STATUS_STATE_ERROR);
+    assert(tx_checkpoint_active());assert(terra_world_workspace_commit(handle,token)==0);
+    free(before);free(after);free(commands);
+}
 static void real_operations(const char* path) {
     uint32_t handle=0,size=0,token=0,required=0;uint64_t json_size=0;char response[2048];
     assert(terra_world_open(path,&handle)==0);
+    batch_rollback(handle);
     assert(terra_op_execute_json(handle,"header_patch","{\"patch\":{\"worldName\":\"unsaved baseline\"}}",response,sizeof(response),&json_size)==0);
+    const char* forbidden[] = {"maxTilesX", "maxTilesY", "tileTypeCount", "tileFrameImportantBitmap"};
+    for(unsigned i=0;i<4;i++) {
+        char request[128];snprintf(request,sizeof(request),"{\"patch\":{\"%s\":1}}",forbidden[i]);
+        assert(terra_op_execute_json(handle,"header_patch",request,response,sizeof(response),&json_size)==TERRAX_WORLD_STATUS_NOT_SUPPORTED);
+    }
     TxWorld* world=tx_get_world(handle);assert(!strcmp(world->worldName,"unsaved baseline"));
     assert(terra_world_workspace_checkpoint_size(handle,&size)==0);
     assert(terra_world_workspace_begin(handle,size,&token)==0);

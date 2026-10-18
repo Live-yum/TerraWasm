@@ -2,6 +2,8 @@
  * terra_commands.c -- Versioned binary command buffer ABI.
  */
 #include "terra_commands.h"
+#include "terra_world.h"
+#include "terra_checkpoint.h"
 #include "terra_reader.h"
 #include "terra_types.h"
 
@@ -13,7 +15,7 @@ extern void tx_internal_free(void* ptr);
 extern void* memcpy(void* dst, const void* src, unsigned long n);
 extern void buf_init(TxBuf* b, uint32_t cap);
 extern int execute_batch_update_tiles(TxWorld* world, const char* request, int jlen, TxBuf* response);
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 
 static uint16_t read_u16(const uint8_t* bytes) {
@@ -110,6 +112,17 @@ terrax_world_status terra_world_apply_commands(
     terrax_world_status status = validate_commands(commands, command_len, &count);
     if (status != TERRAX_WORLD_STATUS_OK) return status;
 
+    /* This entry owns its rollback. Reject joining another owner's transaction
+     * before any mutation; the caller retains its checkpoint and token. */
+    if (tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "command batches cannot join an active checkpoint");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
+    uint32_t checkpoint_bytes = 0, token = 0;
+    status = terra_world_workspace_checkpoint_size(handle, &checkpoint_bytes);
+    if (status != TERRAX_WORLD_STATUS_OK) return status;
+    status = terra_world_workspace_begin(handle, checkpoint_bytes, &token);
+    if (status != TERRAX_WORLD_STATUS_OK) return status;
     uint32_t offset = TERRAX_COMMAND_HEADER_BYTES;
     for (uint32_t index = 0u; index < count; index++) {
         uint16_t opcode = read_u16(commands + offset);
@@ -119,7 +132,8 @@ terrax_world_status terra_world_apply_commands(
             uint8_t* request = tx_alloc(record_len + 1u);
             if (!request) {
                 tx_set_error("TERRAX_WASM_OOM", "command request allocation failed");
-                return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+                status = TERRAX_WORLD_STATUS_INTERNAL_ERROR;
+                goto abort_batch;
             }
             memcpy(request, commands + offset, record_len);
             request[record_len] = 0u;
@@ -130,10 +144,19 @@ terrax_world_status terra_world_apply_commands(
             if (response.data) tx_internal_free(response.data);
             tx_last_ptr = 0u;
             tx_last_len = 0u;
-            if (result < 0) return TERRAX_WORLD_STATUS_VALIDATION_ERROR;
+            if (result < 0) { status = TERRAX_WORLD_STATUS_VALIDATION_ERROR; goto abort_batch; }
         }
         offset += record_len;
     }
-    tx_clear_error();
-    return TERRAX_WORLD_STATUS_OK;
+    return terra_world_workspace_commit(handle, token);
+abort_batch:
+    /* Rollback clears the diagnostic; preserve the original failure. */
+    { extern char tx_last_error[]; extern int32_t tx_last_status;
+      int32_t failure_status = tx_last_status; char error[1024];
+      unsigned i = 0; for (; i + 1 < sizeof(error) && tx_last_error[i]; ++i) error[i] = tx_last_error[i]; error[i] = 0;
+      terra_world_workspace_rollback(handle, token);
+      for (i = 0; error[i]; ++i) tx_last_error[i] = error[i]; tx_last_error[i] = 0;
+      tx_last_status = failure_status;
+    }
+    return status;
 }

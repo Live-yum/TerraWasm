@@ -57,7 +57,7 @@ extern void json_u64(TxBuf* b, uint64_t v);
 extern uint32_t tx_strlen(const char* s);
 extern int tx_streq_c(const char* a, const char* b);
 
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
@@ -169,7 +169,7 @@ void tx_reclaim_transients(void) {
     if (current > mark) {
         tx_rewind(mark);
     }
-    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
+    tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
 }
 
 /* ---------- Helper: copy string to caller buffer (two-call pattern) ---------- */
@@ -486,7 +486,7 @@ terrax_world_status terra_world_close(
     memset(world, 0, sizeof(TxWorld));
     uint32_t count = tx_get_world_open_count();
     if (count > 0) tx_set_world_open_count(count - 1);
-    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
+    tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
     tx_rewind(allocation_mark);
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
@@ -558,7 +558,7 @@ static terrax_world_status tx_finish_workspace(uint32_t handle, uint32_t token, 
     if (rollback) *world = g_workspace_checkpoint;
     memset(&g_workspace_checkpoint, 0, sizeof(g_workspace_checkpoint));
     g_workspace_token = 0;
-    tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
+    tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
@@ -566,6 +566,11 @@ terrax_world_status terra_world_workspace_commit(uint32_t handle, uint32_t token
 terrax_world_status terra_world_workspace_rollback(uint32_t handle, uint32_t token) { return tx_finish_workspace(handle, token, 1); }
 
 static terrax_world_status tx_prepare_world_for_save(TxWorld* world) {
+    /* Compact stream metadata is never a complete file, at any version. */
+    if (world->stream_source_id) {
+        tx_set_error("TERRAX_NOT_SUPPORTED", "source-backed world requires stream save");
+        return TERRAX_WORLD_STATUS_NOT_SUPPORTED;
+    }
     if (tx_world_is_future(world)) {
         /* Stream metadata is not a complete original WLD. Use stream save. */
         if (world->stream_source_id) {
@@ -1134,7 +1139,7 @@ static void tx_clear_cached_response(TxWorld* world, int release_roots) {
 
 static void tx_clear_media_result(TxWorld* world, int release_root) {
     uint8_t* media = world->media_result;
-    if (media && tx_last_ptr == (uint32_t)(uintptr_t)media) {
+    if (media && tx_last_ptr == media) {
         tx_last_ptr = 0u;
         tx_last_len = 0u;
         tx_last_width = 0u;
@@ -1271,7 +1276,7 @@ terrax_world_status terra_op_execute_json(
                tx_streq_c(on_copy, "mark_tiles_and_chests_map")) {
         if (!tx_last_ptr || tx_last_len == 0u || tx_last_len > TX_MAP_MAX_OUTPUT_BYTES) {
             if (tx_last_ptr) tx_internal_free((void*)(uintptr_t)tx_last_ptr);
-            tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0u;
+            tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0u;
             if (response.data) tx_internal_free(response.data);
             world->last_op_heap_end = world->heap_mark;
             tx_set_error("TERRAX_RESULT_TOO_LARGE", "map output is empty or exceeds the 128 MiB budget");
@@ -1292,7 +1297,7 @@ terrax_world_status terra_op_execute_json(
     if (!response.ok || !response.data) {
         if (response.data) tx_internal_free(response.data);
         tx_clear_media_result(world, 1);
-        tx_last_ptr = tx_last_len = tx_last_width = tx_last_height = 0;
+        tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
         tx_set_error("TERRAX_WASM_OOM", "operation response allocation failed");
         return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
     }
@@ -1303,7 +1308,7 @@ terrax_world_status terra_op_execute_json(
     /* Probe and short-buffer calls cache the exact response so retries do not
        execute a mutating operation twice. */
     if (!response_buffer || response_buffer_size == 0 || response_buffer_size < needed) {
-        world->op_response_ptr = (uint32_t)(uintptr_t)response.data;
+        world->op_response_ptr = response.data;
         world->op_response_len = resp_len + 1u;
         if (!tx_cache_response_key(world, on_copy, request_copy)) {
             tx_clear_cached_response(world, 1);

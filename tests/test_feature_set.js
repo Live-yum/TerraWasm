@@ -59,7 +59,7 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.deepEqual(capabilities.features, EXPECTED_FEATURES[featureSet]);
   assert.equal(identity.featureSet, featureSet);
   assert.equal(identity.viewerWebProfile, false, "Node is not a Web profile");
-  assert.equal(manifest.build.viewerWebProfile, featureSet === "wld",
+  assert.equal(manifest.build.viewerWebProfile, featureSet !== "plr",
     "the compiled Web profile follows feature selection without another switch");
 
   const hasWld = featureSet !== "plr";

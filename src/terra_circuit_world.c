@@ -138,7 +138,7 @@ static void destroy(CxWorld* w){
 #define RELEASE(field) cx_free(w,w->field)
     RELEASE(input);RELEASE(column);RELEASE(front);RELEASE(ids);RELEASE(seed_ids);RELEASE(opposite_ids);RELEASE(gate_at_y);RELEASE(pixel_at_y);RELEASE(checkpoint_index);RELEASE(column_gates);
     RELEASE(action_bits);RELEASE(action_rank);RELEASE(actions);RELEASE(cache);RELEASE(cache_pages);RELEASE(cache_map);RELEASE(stored_pages);
-    RELEASE(intern_buffer);RELEASE(hashes);RELEASE(general);RELEASE(lamps);RELEASE(devices);RELEASE(pixels);RELEASE(overrides);RELEASE(bindings);
+    RELEASE(intern_buffer);RELEASE(hashes);RELEASE(general);RELEASE(lamps);RELEASE(devices);RELEASE(pixels);RELEASE(overrides);RELEASE(bindings);RELEASE(binding_index);
     RELEASE(points);RELEASE(result);RELEASE(output);RELEASE(general_snapshot);RELEASE(mods);RELEASE(ports);RELEASE(pixel_touched);RELEASE(pixel_snapshot);
     RELEASE(mechs);RELEASE(mechs_snapshot);RELEASE(trigger_nets);RELEASE(override_snapshot);
     RELEASE(projectiles);RELEASE(projectile_snapshot);RELEASE(solid_spans);RELEASE(solid_columns);

@@ -987,16 +987,6 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
         if(!tx_last_error[0])tx_set_error("TERRAX_INTERNAL_ERROR", "tile section rebuild failed");
         return -1;
     }
-    w->output_capture = w->prepared_output && w->prepared_output->ready;
-    extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
-    if (!set_section_override_data(w, 1, tile_buf.data, tile_buf.len)) {
-        w->output_capture = 0;
-        tx_internal_free(tile_buf.data);
-        tx_internal_free(rules);
-        return -1;
-    }
-
-    w->output_capture = 0;
     uint32_t total_matched = 0, total_updated = 0;
     buf_cstr(response, "{\"status\":\"ok\",\"rule_count\":");
     json_u32(response, (uint32_t)rule_count);
@@ -1019,6 +1009,23 @@ int execute_batch_update_tiles(TxWorld* w, const char* request, int jlen,
     buf_cstr(response, ",\"total_updated\":");
     json_u32(response, total_updated);
     buf_u8(response, '}');
+    /* Reserve the API terminator before publishing the rebuilt tile section. */
+    buf_u8(response, 0);
+    if (!response->ok) {
+        tx_internal_free(tile_buf.data); tx_internal_free(rules);
+        return set_result_buf(response);
+    }
+    --response->len;
+    w->output_capture = w->prepared_output && w->prepared_output->ready;
+    extern int set_section_override_data(TxWorld* w, int idx, uint8_t* data, uint32_t len);
+    if (!set_section_override_data(w, 1, tile_buf.data, tile_buf.len)) {
+        w->output_capture = 0;
+        tx_internal_free(tile_buf.data);
+        tx_internal_free(rules);
+        return -1;
+    }
+
+    w->output_capture = 0;
     int result = set_result_buf(response);
     tx_internal_free(rules);
     return result;

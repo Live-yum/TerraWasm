@@ -214,7 +214,7 @@ extern void* tx_region_stream_begin(TxWorld*,TxTileRule*,uint32_t);
 extern int tx_region_stream_run(TxWorld*,void*,uint32_t,uint32_t,TxTile*,uint32_t);
 extern void tx_region_stream_finish(TxWorld*,void*);
 extern void tx_region_stream_free(void*);
-extern uint32_t tx_last_ptr,tx_last_len;
+extern uint8_t* tx_last_ptr; extern uint32_t tx_last_len;
 static char* copy_bridge_string(const char* p,uint32_t maximum){
     if(!valid_range(p,1))return NULL;
     uint32_t n=0;while(n<maximum&&valid_range(p+n,1)&&p[n])n++;
@@ -320,7 +320,7 @@ static int same_tile_format(const TxWorld* a,const TxWorld* b){
 static int compact_metadata(StreamTask* t,const char* operation,const char* request){
     TxWorld* w=t->candidate;TxBuf response={0};buf_init(&response,256);
     int ok=op_execute_json(w,operation,request,&response);
-    if(response.data)tx_internal_free(response.data);tx_last_ptr=tx_last_len=0;
+    if(response.data)tx_internal_free(response.data);tx_last_ptr = NULL; tx_last_len=0;
     if(ok<0)return 0;
     TxWorld compact={0};if(!compact_copy(&compact,w)){
         if(compact.file)tx_internal_free(compact.file);return 0;

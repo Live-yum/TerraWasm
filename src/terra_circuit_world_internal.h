@@ -101,6 +101,7 @@ typedef struct CxWorld {
     CxOverride* overrides; uint32_t override_count,override_capacity;
     CxOverride* override_snapshot; uint32_t override_snapshot_capacity,override_saved_count;
     CxBinding* bindings; uint32_t binding_count,binding_capacity;
+    uint32_t* binding_index; uint32_t binding_index_capacity;
     CxInputPoint* points; uint32_t point_count,point_index;
     uint32_t* result; uint32_t result_count,result_capacity;
     uint32_t query_x0,query_x1,query_y0,query_y1,query_stride,query_point;
@@ -159,6 +160,7 @@ int cx_query_step(CxWorld*,uint32_t*);
 int cx_command_complete(CxWorld*);
 int cx_save_step(CxWorld*,uint32_t*);
 uint32_t cx_wire_mask(const TxTile*);
+CxBinding* cx_find_binding(CxWorld*,uint32_t,uint32_t);
 uint32_t cx_true_lamp(CxWorld*,const CxBinding*);
 int cx_override_value(CxWorld*,uint32_t,uint32_t,uint32_t);
 int cx_set_override(CxWorld*,uint32_t,uint32_t,uint32_t,uint32_t);

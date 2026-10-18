@@ -436,7 +436,7 @@ typedef struct TxWorld {
      * transient allocations without corrupting caller-allocated data. */
     uint32_t last_op_heap_end;
     /* Exact-keyed, single-use operation response for the two-call pattern. */
-    uint32_t op_response_ptr;
+    uint8_t* op_response_ptr;
     uint32_t op_response_len;
     uint8_t* op_request_key;
     uint32_t op_request_key_len;

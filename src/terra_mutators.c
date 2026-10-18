@@ -29,7 +29,7 @@ extern int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t l
 extern void *memcpy(void *dst,const void *src,unsigned long n);
 extern void *memset(void *dst,int value,unsigned long n);
 extern int memcmp(const void *a,const void *b,unsigned long n);
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok);
 extern uint8_t *tx_alloc(uint32_t size);
@@ -966,6 +966,11 @@ TX_COLD_MUTATOR int tx_mutate_header_patch(TxWorld *w,const char *request_text,u
     if(w->pointer_count<1u)return mut_error("TERRAX_NOT_SUPPORTED","world has no header section");
     TxJsonParser request={request_text,request_len,0u};TxPatchField fields[TX_MAX_HEADER_PATCH_FIELDS];uint32_t field_count=0u;
     if(!parse_patch_fields(&request,fields,&field_count))return -1;
+    /* Layout conversions require rebuilding tiles and validating every section. */
+    static const char* layout_fields[] = {"maxTilesX", "maxTilesY", "tileTypeCount", "tileFrameImportantBitmap"};
+    for (unsigned i = 0; i < sizeof(layout_fields)/sizeof(layout_fields[0]); ++i)
+        if (patch_find(fields, field_count, layout_fields[i]))
+            return mut_error("TERRAX_NOT_SUPPORTED", "layout fields require a dedicated conversion operation");
     int64_t version_value=w->version,type_value=w->file_type,revision_value=w->revision,tile_count_value=w->tile_type_count;uint64_t favorite=w->favorite;
     TxBuf bitmap={0};int bitmap_changed=0;
     char magic[8];uint32_t magic_len=0u;

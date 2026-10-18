@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "source": "parent-verified attachment text excerpts; ZIP not local",
+  "migrationEnabled": false,
+  "tasks": [
+    {
+      "id": "P00",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P01",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P02",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P03",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P04",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P05",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P06",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P07",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P08",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P09",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P10",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P11",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P12",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P13",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P14",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P15",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P16",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P17",
+      "status": "not_completed",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P18",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P19",
+      "status": "not_completed",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P20",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P21",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P22",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P23",
+      "status": "not_completed",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P24",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P25",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P26",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    },
+    {
+      "id": "P27",
+      "status": "partially_implemented",
+      "details": "execution-status.md"
+    }
+  ],
+  "gates": [
+    {
+      "id": "G01",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G02",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G03",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G04",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G05",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G06",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G07",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G08",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G09",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G10",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G11",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G12",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G13",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G14",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G15",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G16",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G17",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G18",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G19",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G20",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G21",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G22",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G23",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G24",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G25",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G26",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G27",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G28",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G29",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G30",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G31",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G32",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G33",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G34",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G35",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G36",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G37",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G38",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G39",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G40",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G41",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G42",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G43",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G44",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G45",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G46",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G47",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G48",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G49",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G50",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G51",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    },
+    {
+      "id": "G52",
+      "status": "not_fully_accepted",
+      "details": "See scoped test evidence; no comprehensive platform acceptance claimed"
+    }
+  ]
+}

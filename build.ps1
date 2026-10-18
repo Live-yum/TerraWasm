@@ -100,18 +100,9 @@ if ($AllowDirty) { $manifestArgs += "--allow-dirty" }
 $manifestExitCode = $LASTEXITCODE
 Pop-Location
 if ($manifestExitCode -ne 0) { throw "Artifact manifest validation failed" }
-if ($Target -ne "node") {
-    Push-Location $ProjectDir
-    if ($AllowDirty) {
-        & node scripts/check-artifact-size.mjs build/terra.manifest.json --allow-dirty
-    } else {
-        & node scripts/check-artifact-size.mjs build/terra.manifest.json
-    }
-    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Web artifact size gate failed" }
-    Pop-Location
-}
 
 # --- Test ---
+$GateFailures = @()
 if ($Test) {
     if ($Target -eq "web") {
         throw "-Test requires the node or all target"
@@ -163,12 +154,26 @@ if ($Test) {
 
     Push-Location $ProjectDir
     & node --test @regressionTests 2>&1
-    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Node regression tests failed" }
+    if ($LASTEXITCODE -ne 0) { $GateFailures += "Node regression tests failed" }
     if ($Features -ne "plr") {
         & node tests/test_all.js 2>&1
-        if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Legacy operation suite failed" }
+        if ($LASTEXITCODE -ne 0) { $GateFailures += "Legacy operation suite failed" }
         & node bench/map_8400x2400.js 2>&1
-        if ($LASTEXITCODE -ne 0) { Pop-Location; throw "8400x2400 MAP benchmark failed" }
+        if ($LASTEXITCODE -ne 0) { $GateFailures += "8400x2400 MAP benchmark failed" }
     }
     Pop-Location
 }
+
+# Size is evaluated after behavior; a size failure must not hide test results.
+if ($Target -ne "node") {
+    Push-Location $ProjectDir
+    if ($AllowDirty) {
+        & node scripts/check-artifact-size.mjs build/terra.manifest.json --allow-dirty
+    } else {
+        & node scripts/check-artifact-size.mjs build/terra.manifest.json
+    }
+    if ($LASTEXITCODE -ne 0) { $GateFailures += "Web artifact size gate failed" }
+    Pop-Location
+}
+
+if ($GateFailures.Count -gt 0) { throw ($GateFailures -join "; ") }

@@ -29,7 +29,7 @@ extern void     tx_internal_free(void* ptr);
 extern void     tx_set_error(const char* code, const char* message);
 extern void     tx_clear_error(void);
 
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;

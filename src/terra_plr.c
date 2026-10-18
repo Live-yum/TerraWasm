@@ -21,6 +21,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memset(void *dst, int value, unsigned long n);
@@ -3896,14 +3903,45 @@ static int plr_read_file(
     return 1;
 }
 
-static int plr_write_file(
-    const char *path, const uint8_t *data, uint32_t length) {
+/* External file publication: same-directory exclusive candidate plus replacement.
+ * This is not a managed-history CAS or a durable publication receipt. */
+#ifdef TERRAX_TESTING
+static uint32_t plr_test_write_limit = UINT32_MAX;
+void terrax_test_plr_write_limit(uint32_t limit) { plr_test_write_limit = limit; }
+#endif
+static int plr_write_file(const char *path, const uint8_t *data, uint32_t length) {
     if (!path || (!data && length)) return 0;
-    FILE *file = fopen(path, "wb");
-    if (!file) return 0;
-    size_t written = fwrite(data, 1u, length, file);
+    uint32_t n = tx_strlen(path);
+    if (n > UINT32_MAX - 80u) return 0;
+    char *candidate = (char*)plr_malloc(n + 80u);
+    if (!candidate) return 0;
+    static uint32_t sequence;
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)_getpid();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    FILE *file = NULL;
+    for (unsigned attempt = 0; attempt < 128; ++attempt) {
+        snprintf(candidate, n + 80u, "%s.tmp.%lu.%lu", path, pid, (unsigned long)++sequence);
+        file = fopen(candidate, "wbx");
+        if (file || errno != EEXIST) break;
+    }
+    if (!file) { free(candidate); return 0; }
+    size_t requested = length;
+#ifdef TERRAX_TESTING
+    if (requested > plr_test_write_limit) requested = plr_test_write_limit;
+#endif
+    size_t written = fwrite(data, 1u, requested, file);
     int ok = written == length && fflush(file) == 0;
     if (fclose(file) != 0) ok = 0;
+#ifdef _WIN32
+    if (ok) ok = MoveFileExA(candidate, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    if (ok) ok = rename(candidate, path) == 0;
+#endif
+    if (!ok) remove(candidate);
+    free(candidate);
     return ok;
 }
 
