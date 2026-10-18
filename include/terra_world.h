@@ -37,6 +37,12 @@ terrax_world_status terra_world_save_to_buffer(
     uint32_t capacity,
     uint32_t* out_required);
 
+/* Candidate-before-swap v1: failure retains the old owner; successful fill
+ * replaces it without post-close allocation. Host delivery is not acknowledged. */
+uint32_t terra_world_commit_abi_version(void);
+terrax_world_status terra_world_commit_to_buffer(uint32_t handle, uint8_t* output,
+    uint32_t capacity, uint32_t* out_required, uint32_t* out_new_handle);
+
 terrax_world_status terra_world_open_from_buffer(
     const uint8_t* buffer,
     uint32_t buffer_len,

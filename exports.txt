@@ -157,3 +157,4 @@ _terra_world_outcome_abi_version
 _terra_op_execute_json_receipt
 _terra_world_workspace_commit_receipt
 _terra_world_workspace_rollback_receipt
+_terra_world_commit_abi_version

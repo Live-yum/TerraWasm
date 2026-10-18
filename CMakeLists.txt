@@ -445,14 +445,14 @@ else()
                     OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
                            "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
                            "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                           "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
+                           "${STREAM_FIXTURES}/commit-legacy87.wld" "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
                     COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
-                    DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
+                    DEPENDS tests/generate-stream-fixtures.js tests/helpers/legacy-world.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
                     VERBATIM)
                 add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
                     "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
                     "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                    "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
+                    "${STREAM_FIXTURES}/commit-legacy87.wld" "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
                 add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
                 target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG)
                 target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
@@ -483,6 +483,16 @@ else()
                 endif()
                 add_dependencies(terra_world_outcome_contract terra_stream_fixtures)
                 add_test(NAME terra_world_outcome_contract COMMAND terra_world_outcome_contract "${STREAM_FIXTURES}/small.wld")
+                add_executable(terra_world_commit_candidate_contract tests/world_commit_candidate_contract.c)
+                target_compile_definitions(terra_world_commit_candidate_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_world_commit_candidate_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_world_commit_candidate_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_world_commit_candidate_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_world_commit_candidate_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_world_commit_candidate_contract terra_stream_fixtures)
+                add_test(NAME terra_world_commit_candidate_contract COMMAND terra_world_commit_candidate_contract "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/commit-legacy87.wld")
                 add_dependencies(terra_world_checkpoint_contract terra_stream_fixtures)
                 add_test(NAME terra_world_checkpoint_generated_file COMMAND terra_world_checkpoint_contract "${STREAM_FIXTURES}/small.wld")
             else()
