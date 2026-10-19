@@ -36,7 +36,7 @@ int cx_twld_step(CxWorld* w,uint32_t* work){
         /* 4 KiB compressed input also bounds the worst-case inflate work and the
          * fixed-size frame rewrite's pending gzip output. */
         uint32_t n=w->twld_size-w->twld_cursor;if(n>4096u)n=4096u;
-        if(w->input_source!=w->twld_source||w->input_offset!=w->twld_cursor||w->input_length!=n){w->read_target=2;return cx_emit(w,TCW_READ,w->twld_source,w->twld_cursor,n,NULL);}
+        if(w->input_source!=w->twld_source||w->input_offset!=w->twld_cursor||w->input_length!=n){w->read_target=CX_READ_TWLD;return cx_emit(w,TCW_READ,w->twld_source,w->twld_cursor,n,NULL);}
         uint32_t final=w->twld_cursor+n==w->twld_size;int s=terra_twld_feed(w->twld,w->input,n,final);w->input_length=0;--*work;
         if(s<0)return cx_fail(w,s==TERRA_TWLD_OOM||s==TERRA_TWLD_LIMIT?TCW_MEMORY:TCW_FORMAT,"TWLD gzip/NBT replay failed validation");w->twld_cursor+=n;
         if(w->twld_mode==2u&&w->output_length)return cx_emit(w,TCW_WRITE,w->command.aux_source_id,w->twld_output_offset,w->output_length,w->output);

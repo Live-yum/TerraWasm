@@ -1,5 +1,6 @@
 /* Streaming, bounded-memory WLD circuit session. See docs/CIRCUIT_WORLD_ABI_V1.md. */
 #include "terra_circuit_world_internal.h"
+#include "terra_circuit_geometry.h"
 #include "terra_owner_guards.h"
 #include "terra_checkpoint.h"
 #include <limits.h>
@@ -37,8 +38,15 @@ CxWorld* cx_lookup(uint32_t id) {
 }
 static uint32_t vm_bytes(CxWorld* w) { uint32_t bytes=0;TerraVmStats s;if(w->vm){terra_vm_stats(w->vm,&s);bytes=s.allocated_bytes;}TerraTwldStats t;if(w->twld){terra_twld_stats(w->twld,&t);bytes+=t.allocated_bytes;}return bytes; }
 uint32_t cx_vm_available(CxWorld* w){uint64_t used=w->bytes;TerraTwldStats t;if(w->twld){terra_twld_stats(w->twld,&t);used+=t.allocated_bytes;}return used<w->maximum?w->maximum-(uint32_t)used:0u;}
+uint64_t cx_allocation_charge(uint32_t bytes){return (uint64_t)bytes+sizeof(CxAllocation)+32u;}
+uint64_t cx_resident_bytes(CxWorld* w){
+    uint32_t vm=0,twld=0;TerraVmStats s;TerraTwldStats t;
+    if(w->vm){terra_vm_stats(w->vm,&s);vm=s.allocated_bytes;}
+    if(w->twld){terra_twld_stats(w->twld,&t);twld=t.allocated_bytes;}
+    return cx_resident_total(w->bytes,vm,twld);
+}
 void* cx_alloc(CxWorld* w,uint32_t bytes) {
-    uint64_t n=(uint64_t)bytes+sizeof(CxAllocation)+32u;
+    uint64_t n=cx_allocation_charge(bytes);
     if(n>UINT32_MAX||(uint64_t)w->bytes+vm_bytes(w)+n>w->maximum) {
         cx_fail(w,TCW_MEMORY,"circuit allocation exceeds the available process memory budget");return NULL;
     }
@@ -104,7 +112,7 @@ int cx_world_tile(CxWorld* w,TxTile* out){
     uint32_t need=w->tile_end-w->cursor;if(need>32u)need=32u;
     if(w->input_source!=w->world_source||w->cursor<w->input_offset||w->cursor-w->input_offset>w->input_length||need>w->input_length-(w->cursor-w->input_offset)){
         uint32_t n=w->tile_end-w->cursor;if(n>TERRA_CIRCUIT_WORLD_WINDOW)n=TERRA_CIRCUIT_WORLD_WINDOW;
-        w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,w->cursor,n,NULL);
+        w->read_target=CX_READ_WORLD;return cx_emit(w,TCW_READ,w->world_source,w->cursor,n,NULL);
     }
     uint8_t* previous=w->world->file;uint32_t old_len=w->world->file_len;
     w->world->file=w->input;w->world->file_len=w->input_length;
@@ -126,7 +134,7 @@ static int cache_page(CxWorld* w,uint32_t page,uint32_t* out){
     p->page=page;p->valid=1;p->dirty=0;p->stamp=++w->cache_clock;w->cache_map[page]=slot+1u;
     *out=slot;
     if(w->stored_pages[page>>3]&(1u<<(page&7u))){
-        w->read_target=1;w->read_slot=slot;uint32_t at=page*CX_PAGE_SIZE,n=w->store_size-at;if(n>CX_PAGE_SIZE)n=CX_PAGE_SIZE;
+        w->read_target=CX_READ_SCRATCH;w->read_slot=slot;uint32_t at=page*CX_PAGE_SIZE,n=w->store_size-at;if(n>CX_PAGE_SIZE)n=CX_PAGE_SIZE;
         return cx_emit(w,TCW_READ,w->scratch_source,at,n,NULL);
     }
     memset(w->cache+slot*CX_PAGE_SIZE,0,CX_PAGE_SIZE);return TCW_OK;
@@ -148,6 +156,7 @@ static void destroy(CxWorld* w){
     if(!w)return;terra_vm_destroy(w->vm);w->vm=NULL;terra_twld_destroy(w->twld);w->twld=NULL;
     cx_fragments_free(w);
     cx_order_close(w);
+    cx_geometry_destroy(w);
     cx_words_free(w,&w->parents);cx_words_free(w,&w->code_ends);cx_words_free(w,&w->member_ends);cx_words_free(w,&w->previous_gate);
     cx_bytes_free(w,&w->map);cx_bytes_free(w,&w->checkpoints);cx_bytes_free(w,&w->code);cx_bytes_free(w,&w->members);
 #define RELEASE(field) cx_free(w,w->field)
@@ -194,7 +203,8 @@ int32_t terra_circuit_world_supply(uint32_t handle,uint32_t source_id,uint32_t o
 #ifdef __wasm__
     if(!tx_bridge_contains_native(data,length))return TCW_INVALID;
 #endif
-    if(w->read_target==1){memcpy(w->cache+w->read_slot*CX_PAGE_SIZE,data,length);}
+    if(w->read_target==CX_READ_GEOMETRY){int s=cx_order_supply_geometry(w,data,length);if(s)return s;}
+    else if(w->read_target==CX_READ_SCRATCH){memcpy(w->cache+w->read_slot*CX_PAGE_SIZE,data,length);}
     else{memcpy(w->input,data,length);w->input_offset=offset;w->input_length=length;w->input_source=source_id;}
     memset(&w->event,0,sizeof(w->event));return TCW_OK;
 }
@@ -234,7 +244,7 @@ static int32_t circuit_world_step_impl(uint32_t handle,uint32_t work_units,Terra
         else if(w->phase==CX_TICKS)status=cx_ticks_step(w,&work);
         else if(w->phase==CX_FRAGMENTS)status=cx_fragments_step(w,&work);
         else status=cx_fail(w,TCW_STATE,"unknown circuit session phase");
-        if(status<0){cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
+        if(status<0){cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
         if(w->event.kind){*out=w->event;return TCW_CONTINUE;}
         if(status==TCW_CONTINUE&&!work)break;
     }
@@ -263,5 +273,5 @@ int32_t terra_circuit_world_stats(uint32_t handle,TerraCircuitWorldStats* out){
         w->min_x,w->min_y,w->max_x,w->max_y,w->wire_cells,w->devices_count,w->gates,w->networks,w->vm?w->width:w->x,w->phase,bytes,peak,
         (uint32_t)w->ticks,(uint32_t)(w->ticks>>32),(uint32_t)s.net_pulses,(uint32_t)(s.net_pulses>>32),(uint32_t)s.gates_fired,(uint32_t)(s.gates_fired>>32)};return TCW_OK;
 }
-int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
+int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
 int32_t terra_circuit_world_close(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;for(uint32_t i=0;i<4;i++)if(sessions[i]==w){sessions[i]=NULL;break;}destroy(w);return TCW_OK;}

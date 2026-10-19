@@ -208,7 +208,7 @@ int32_t terra_circuit_world_command_native(uint32_t handle,const TerraCircuitWor
 }
 static int copy_source(CxWorld* w,uint32_t offset,uint32_t count){
     if(!w->world_source)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->world->file+offset);
-    if(w->input_source!=w->world_source||w->input_offset!=offset||w->input_length!=count){w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
+    if(w->input_source!=w->world_source||w->input_offset!=offset||w->input_length!=count){w->read_target=CX_READ_WORLD;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
     return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->input);
 }
 static int flush_tile(CxWorld* w){

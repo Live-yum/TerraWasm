@@ -40,6 +40,7 @@ typedef struct Model {
     uint32_t transaction_begins, commits, rollbacks, trips, smokes;
     uint32_t hit_count, fail_hit;
     uint32_t random_samples[4], random_count;
+    uint32_t order_calls,order_begins,order_ready;
     uint32_t inspect_gate_origin, external_trips, gate_trips, expected_gate[4];
 } Model;
 
@@ -442,7 +443,24 @@ static void deterministic_candidate_order(void) {
     }
 }
 
+static int32_t external_order_yield(void* context,TerraVmGateRef* events,uint32_t count,uint32_t begin){
+    Model* m=context;(void)events;(void)count;++m->order_calls;if(begin)++m->order_begins;
+    return m->order_ready?0:TERRA_VM_ORDER_EXTERNAL_YIELD;
+}
+static void external_yield_is_immediate(void){
+    for(uint32_t cancel=0;cancel<2;cancel++){
+        Model* m=calloc(1,sizeof(*m));assert(m);TerraVmCallbacks cb=callbacks;cb.order_candidates=external_order_yield;
+        TerraCircuitVm* vm=NULL;assert(terra_vm_create(NETS,0,&cb,m,&vm)==0);m->vm=vm;uint32_t seed=0;
+        assert(terra_vm_begin(vm,&seed,1)==TERRA_VM_MORE);
+        for(uint32_t i=1;i<=3;i++){assert(terra_vm_step(vm,UINT32_MAX)==TERRA_VM_MORE);assert(m->order_calls==i&&m->order_begins==1&&m->hit_count==1&&m->trips==0&&m->commits==0&&m->trip_open);}
+        if(cancel){assert(terra_vm_cancel(vm)==0);assert(m->rollbacks==1&&!m->trip_open&&!m->wave_open);assert(terra_vm_step(vm,UINT32_MAX)==0);assert(m->order_calls==3);}
+        else{m->order_ready=1;assert(terra_vm_step(vm,UINT32_MAX)==0);assert(m->order_calls==4&&m->order_begins==1&&m->hit_count==1&&m->trips==1&&m->commits==1&&!m->rollbacks);}
+        clean(vm);free(m);
+    }
+}
+
 int main(void) {
+    external_yield_is_immediate();
     smoke_and_repeat(); full_wave_before_condition(); colours_and_canonical_identity();
     pixel_trip_boundary(); cancel_and_callback_failure(); large_wave_and_oom(); argument_contract();
     batch_atomicity(); batch_budget_and_failed_begin();

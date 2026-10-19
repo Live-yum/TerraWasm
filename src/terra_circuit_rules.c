@@ -43,20 +43,29 @@ int cx_set_override(CxWorld* w,uint32_t gate,uint32_t x,uint32_t y,uint32_t valu
 int cx_general_lamp_value(CxWorld* w,const CxGeneralLamp* l){
     int value=l->initial^cx_override_value(w,0,l->x,l->y);for(uint32_t c=0;c<4;c++)if(l->nets[c])value^=terra_vm_parity(w->vm,l->nets[c]-1u);return value;
 }
-static uint32_t member_gate(CxWorld* w,const CxAction* a,TerraVmGateRef ref){
+static uint32_t member_gate_counted(CxWorld* w,const CxAction* a,TerraVmGateRef ref,uint32_t* records){
     uint32_t at=a->code,member=a->members,gate=0;
     if(w->eval_valid&&w->eval_group==ref.group&&w->eval_offset<=ref.offset){at=a->code+w->eval_offset;member=w->eval_member;gate=w->eval_gate;}
     uint32_t target=a->code+ref.offset;
-    while(at<target){gate+=cx_var_read(&w->members,&member);at=record_end(w,at);}
-    gate+=cx_var_read(&w->members,&member);
+    while(at<target){if(records)++*records;gate+=cx_var_read(&w->members,&member);at=record_end(w,at);}
+    if(records)++*records;gate+=cx_var_read(&w->members,&member);
     w->eval_group=ref.group;w->eval_offset=record_end(w,target)-a->code;w->eval_member=member;w->eval_gate=gate;w->eval_valid=1;return gate;
 }
-uint32_t cx_order_event_rank(CxWorld* w,TerraVmGateRef event){
-    if(event.group==CX_NONE)return UINT32_MAX;uint32_t index=cx_action_index(w,event.group);if(index==CX_NONE)return UINT32_MAX;CxAction* a=w->actions+index;
-    if(event.offset>=a->length)return UINT32_MAX;uint32_t at=a->code+event.offset;uint8_t h=cx_bytes_get(&w->code,at++);uint32_t x,y;
-    if(h&128u){uint32_t id=cx_var_read(&w->code,&at);if(id>=w->lamp_count)return UINT32_MAX;x=w->lamps[id].x;y=w->lamps[id].y;}
-    else {uint32_t gate=member_gate(w,a,event);if(!cx_order_gate_position(w,gate,&x,&y)||y<2u)return UINT32_MAX;y-=2u;}
-    return cx_order_rank(w,x,y,event.group);
+static uint32_t member_gate(CxWorld* w,const CxAction* a,TerraVmGateRef event){return member_gate_counted(w,a,event,NULL);}
+/* Caller retains this parsed item until ready/error/cancel. No repeated member
+ * scan after geometry yield, and no shared eval-cursor rewinding. */
+int cx_order_candidate_step(CxWorld* w,TerraVmGateRef event,CxOrderCandidate* out){
+    if(!out)return -1;
+    if(!out->parsed){
+        memset(out,0,sizeof(*out));out->parsed=1;out->group=event.group;out->offset=event.offset;
+        if(event.group==CX_NONE)return 0;uint32_t index=cx_action_index(w,event.group);if(index==CX_NONE)return 0;CxAction* a=w->actions+index;
+        if(event.offset>=a->length)return 0;uint32_t at=a->code+event.offset;uint8_t h=cx_bytes_get(&w->code,at++);
+        if(h&128u){uint32_t id=cx_var_read(&w->code,&at);if(id>=w->lamp_count)return 0;out->x=w->lamps[id].x;out->y=w->lamps[id].y;memcpy(out->nets,w->lamps[id].nets,sizeof(out->nets));out->direct=out->valid=1;}
+        else out->gate=member_gate_counted(w,a,event,&out->member_records);
+    }else if(out->group!=event.group||out->offset!=event.offset)return -1;
+    if(out->direct||!out->gate)return 0;
+    uint32_t x,y;int s=cx_order_gate_position_step(w,out->gate,&x,&y);if(s)return s==CX_ORDER_GATE_ABSENT?0:s;
+    if(y<2u)return 0;out->x=x;out->y=y-2u;out->valid=1;return 0;
 }
 static int32_t evaluate(void* context,TerraVmGateRef event,const TerraCircuitVm* vm,TerraVmGateResult* out){
     CxWorld* w=(CxWorld*)context;if(event.group==CX_NONE)return 0;uint32_t index=cx_action_index(w,event.group);if(index==CX_NONE)return -1;CxAction* a=w->actions+index;
