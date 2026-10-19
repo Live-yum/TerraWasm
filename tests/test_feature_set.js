@@ -35,8 +35,8 @@ const EXPECTED_FEATURES = {
   plr: ["plr-read-write"],
 };
 
-// The viewer WLD Web artifact exposes only APIs used by the current browser
-// application. Node WLD keeps the broader compatibility/test surface.
+// WLD and combined Web artifacts expose the existing buffer-only viewer
+// profiles. Node keeps the broader compatibility/test surface.
 const WLD_WEB_TRIMMED_EXPORTS = [
   "_terra_abi_version",
   "_terra_capabilities",
@@ -59,7 +59,7 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.deepEqual(capabilities.features, EXPECTED_FEATURES[featureSet]);
   assert.equal(identity.featureSet, featureSet);
   assert.equal(identity.viewerWebProfile, false, "Node is not a Web profile");
-  assert.equal(manifest.build.viewerWebProfile, featureSet === "wld",
+  assert.equal(manifest.build.viewerWebProfile, featureSet !== "plr",
     "the compiled Web profile follows feature selection without another switch");
 
   const hasWld = featureSet !== "plr";
@@ -67,17 +67,18 @@ test("compiled capabilities, manifest, identity, and exports agree on the featur
   assert.equal(typeof M._terra_world_open_from_buffer, hasWld ? "function" : "undefined");
   assert.equal(typeof M._terra_plr_open_from_buffer, hasPlr ? "function" : "undefined");
   assert.equal(manifest.targets.node.exports.includes("_terra_world_open_from_buffer"), hasWld);
-  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), featureSet === "all");
+  assert.equal(manifest.targets.web.exports.includes("_terra_world_open_from_buffer"), false);
   assert.equal(manifest.targets.node.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
   assert.equal(manifest.targets.web.exports.includes("_terra_plr_open_from_buffer"), hasPlr);
 
-  if (featureSet === "wld") {
+  if (hasWld) {
     for (const name of WLD_WEB_TRIMMED_EXPORTS) {
       assert.equal(manifest.targets.node.exports.includes(name), true, `${name} must remain available to Node WLD builds`);
       assert.equal(manifest.targets.web.exports.includes(name), false, `${name} must not be exported by the viewer WLD Web build`);
     }
-    const configured = fs.readFileSync(path.join(ROOT, "exports.wld.web.txt"), "utf8").trim().split(/\r?\n/).filter(Boolean).sort();
-    assert.deepEqual([...manifest.targets.web.exports].sort(), configured, "verified WLD Web artifact must match the complete declared export profile");
+    const exportsFile = featureSet === "all" ? "exports.viewer.txt" : "exports.wld.web.txt";
+    const configured = fs.readFileSync(path.join(ROOT, exportsFile), "utf8").trim().split(/\r?\n/).filter(Boolean).sort();
+    assert.deepEqual([...manifest.targets.web.exports].sort(), configured, "verified Web artifact must match the complete declared export profile");
     for (const name of ["_txw_set_map_runtime", "_txw_use_builtin_map_runtime"]) {
       assert.equal(manifest.targets.web.exports.includes(name), true, `${name} must support shared local map resources`);
     }

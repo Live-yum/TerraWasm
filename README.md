@@ -141,6 +141,8 @@ WLD Web 使用 `-Oz + LTO` 压缩格式与管理代码，电路遍历、网络�
 
 新增的 [file-backed circuit world ABI v1](docs/CIRCUIT_WORLD_ABI_V1.md) 在 WLD/all 中实现整图网络预编译、紧凑状态、原生门/像素规则与流式 WLD/TWLD 读写。原有稀疏 traversal ABI 继续服务临时小电路。独立 PLR 不编入这些功能。
 
+现有 `VIEWPORT` 调用已优化未接线 RLE 段、复用有界源文件窗口，并通过列索引直接读取静态墙层。ABI、采样精度、接线顺序和仿真状态语义保持不变。实现边界、实际 Web Wasm 基准与复现命令见 [电路视口性能说明](docs/CIRCUIT_VIEWPORT_PERFORMANCE.md)。
+
 <!-- circuit-size:start -->
 | 功能集合 | 本轮 Web Wasm 测量 | Wasm 功能预算 |
 |---|---:|---:|

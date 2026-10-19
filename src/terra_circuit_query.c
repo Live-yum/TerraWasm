@@ -26,7 +26,10 @@ static uint32_t trigger_net(CxWorld* w,const CxBinding* b,uint32_t colour){
 static void seek_checkpoint(CxWorld* w,uint32_t x){
     CxCheckpoint* c=w->checkpoint_index+x/CX_CHECK_COLUMNS;w->x=c->column;w->cursor=c->source_offset;w->map_cursor=c->map_offset;w->map_previous=c->map_previous;w->label_cursor=c->label_count;w->gate_cursor=c->gate_count;
     uint32_t at=c->offset;for(uint32_t colour=0;colour<4;colour++){uint32_t y=0;while(y<w->height){uint32_t run=cx_var_read(&w->checkpoints,&at),value=cx_var_read(&w->checkpoints,&at);for(uint32_t i=0;i<run;i++)w->front[(y+i)*4u+colour]=value;y+=run;}}
-    w->y=0;w->col_stage=0;w->col_colour=w->col_row=0;w->input_length=0;w->emit_y=0;
+    /* Immutable source bytes survive a viewport seek. This is the existing
+     * one-MiB window, not another cache; input_source prevents aliasing a TWLD
+     * read at the same numeric offset with WLD bytes. */
+    w->y=0;w->col_stage=0;w->col_colour=w->col_row=0;w->emit_y=0;
 }
 static int reserve_result(CxWorld* w,uint32_t count){
     if(count<=w->result_capacity)return TCW_OK;if((uint64_t)count*16u>TERRA_CIRCUIT_WORLD_WINDOW)return TCW_INVALID;
@@ -34,9 +37,16 @@ static int reserve_result(CxWorld* w,uint32_t count){
 }
 #include "terra_circuit_fragments.inc"
 int cx_query_begin(CxWorld* w){
-    w->point_index=0;w->query_point=0;w->result_count=0;w->trigger_count=0;
+    w->point_index=0;w->query_point=0;w->result_count=0;w->trigger_count=0;w->query_wall_direct=0;
     if(w->command.kind==TCW_VIEWPORT){w->query_x0=w->command.x;w->query_x1=w->command.x+w->command.width;w->query_y0=w->command.y;w->query_y1=w->command.y+w->command.height;w->query_stride=w->command.stride?w->command.stride:1u;
         uint64_t count=((uint64_t)w->command.width+w->query_stride-1u)/w->query_stride*(((uint64_t)w->command.height+w->query_stride-1u)/w->query_stride);if(count>65536u)return TCW_INVALID;int s=reserve_result(w,(uint32_t)count);if(s)return s;
+        if((w->command.flags&2u)&&w->world_source&&w->world->stream_columns){
+            /* Walls are immutable under this simulation ABI. The world-open
+             * task already validated this column index and every RLE record;
+             * reconstructing four wire networks cannot change a wall sample. */
+            w->query_wall_direct=1;w->x=w->query_x0;w->y=0;w->query_run_end=0;
+            w->emit_y=w->query_y0;w->cursor=w->world->stream_columns[w->x];w->phase=CX_QUERY;return TCW_OK;
+        }
     }else{
         if(!w->point_count)return cx_command_complete(w);
         w->query_x0=w->points[0].x;w->query_x1=w->points[w->point_count-1u].x+1u;w->query_y0=0;w->query_y1=w->height;w->query_stride=1;
@@ -46,13 +56,41 @@ int cx_query_begin(CxWorld* w){
     }
     seek_checkpoint(w,w->query_x0);w->phase=CX_QUERY;return TCW_OK;
 }
+static void pack_wall(const TxTile* t,uint32_t x,uint32_t y,uint32_t* out){
+    uint32_t flags=(t->wall?1u:0u)|32u|(t->invisible_wall?64u:0u)|(t->fullbright_wall?128u:0u);
+    out[0]=x;out[1]=y;out[2]=t->wall|(flags<<16);out[3]=t->wall_color;
+}
 static void pack_cell(CxWorld* w,uint32_t x,uint32_t y,uint32_t* out){
-    if(w->command.flags&2u){const TxTile* t=w->column+y;uint32_t flags=(t->wall?1u:0u)|32u|(t->invisible_wall?64u:0u)|(t->fullbright_wall?128u:0u);out[0]=x;out[1]=y;out[2]=t->wall|(flags<<16);out[3]=t->wall_color;return;}
+    if(w->command.flags&2u){pack_wall(w->column+y,x,y,out);return;}
     TxTile t=w->column[y];uint32_t gate=point_gate(w,y);cx_current_tile(w,x,y,gate,&t,w->ids+y*4u);
     uint32_t flags=t.active|(t.actuator<<1)|(t.inactive<<2)|(t.wall?16u:0u);if(t.type==0xfffeu)flags|=8u;
     out[0]=x;out[1]=y;out[2]=t.type|(flags<<16)|(cx_wire_mask(&t)<<24);out[3]=(uint16_t)t.frame_x|((uint32_t)(uint16_t)t.frame_y<<16);
 }
+static int query_walls_step(CxWorld* w,uint32_t* work){
+    while(*work&&w->x<w->query_x1){
+        if(w->emit_y>=w->query_y1){
+            /* Advance with subtraction so even a legal UINT32_MAX stride
+             * cannot wrap a small world coordinate back into the viewport. */
+            if(w->query_stride>=w->query_x1-w->x){w->x=w->query_x1;break;}
+            w->x+=w->query_stride;w->y=0;w->query_run_end=0;w->emit_y=w->query_y0;
+            w->cursor=w->world->stream_columns[w->x];
+        }
+        if(w->emit_y>=w->query_run_end){
+            int s=cx_world_tile(w,&w->query_tile);if(s)return s;
+            uint32_t run=(uint32_t)w->query_tile.same+1u;
+            if(run>w->height-w->y||w->cursor>w->world->stream_columns[w->x+1u])return cx_fail(w,TCW_FORMAT,"circuit wall run crosses its indexed column");
+            w->query_run_end=w->y+run;w->y=w->query_run_end;--*work;
+            continue;
+        }
+        if(w->result_count>=w->result_capacity)return TCW_INVALID;
+        pack_wall(&w->query_tile,w->x,w->emit_y,w->result+w->result_count*4u);++w->result_count;
+        if(w->query_stride>=w->query_y1-w->emit_y)w->emit_y=w->query_y1;else w->emit_y+=w->query_stride;
+        --*work;
+    }
+    return w->x<w->query_x1?TCW_CONTINUE:cx_command_complete(w);
+}
 int cx_query_step(CxWorld* w,uint32_t* work){
+    if(w->query_wall_direct)return query_walls_step(w,work);
     while(*work&&w->x<w->query_x1){int status=cx_scan_step(w,work);if(status<0||w->event.kind)return status;if(status!=2)return TCW_CONTINUE;
         if(w->x>=w->query_x0){
             if(w->command.kind==TCW_VIEWPORT){
@@ -124,7 +162,7 @@ int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldComma
 }
 static int copy_source(CxWorld* w,uint32_t offset,uint32_t count){
     if(!w->world_source)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->world->file+offset);
-    if(w->input_offset!=offset||w->input_length!=count){w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
+    if(w->input_source!=w->world_source||w->input_offset!=offset||w->input_length!=count){w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
     return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->input);
 }
 static int flush_tile(CxWorld* w){

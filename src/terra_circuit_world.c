@@ -87,7 +87,7 @@ int cx_world_tile(CxWorld* w,TxTile* out){
     if(w->cursor>=w->tile_end)return cx_fail(w,TCW_FORMAT,"circuit tile stream ended before the world columns");
     if(!w->world_source){uint32_t p=w->cursor;if(!read_tile_at(w->world,&p,w->tile_end,out))return cx_fail(w,TCW_FORMAT,"invalid circuit tile record");w->cursor=p;return TCW_OK;}
     uint32_t need=w->tile_end-w->cursor;if(need>32u)need=32u;
-    if(w->cursor<w->input_offset||w->cursor-w->input_offset>w->input_length||need>w->input_length-(w->cursor-w->input_offset)){
+    if(w->input_source!=w->world_source||w->cursor<w->input_offset||w->cursor-w->input_offset>w->input_length||need>w->input_length-(w->cursor-w->input_offset)){
         uint32_t n=w->tile_end-w->cursor;if(n>TERRA_CIRCUIT_WORLD_WINDOW)n=TERRA_CIRCUIT_WORLD_WINDOW;
         w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,w->cursor,n,NULL);
     }
@@ -179,7 +179,7 @@ int32_t terra_circuit_world_supply(uint32_t handle,uint32_t source_id,uint32_t o
     if(!tx_bridge_range_is_valid((uint32_t)(uintptr_t)data,length))return TCW_INVALID;
 #endif
     if(w->read_target==1){memcpy(w->cache+w->read_slot*CX_PAGE_SIZE,data,length);}
-    else{memcpy(w->input,data,length);w->input_offset=offset;w->input_length=length;}
+    else{memcpy(w->input,data,length);w->input_offset=offset;w->input_length=length;w->input_source=source_id;}
     memset(&w->event,0,sizeof(w->event));return TCW_OK;
 }
 int32_t terra_circuit_world_ack(uint32_t handle){

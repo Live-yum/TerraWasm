@@ -22,6 +22,9 @@ test('streamed sources above 200 MB retain a bounded metadata image and signed W
   return out;
  }
  const M=await require('../build/terrax_world_wasm_web.js')({wasmBinary:fs.readFileSync(require.resolve('../build/terrax_world_wasm_web.wasm'))});
+ const initialBytes=M.HEAPU8.byteLength;
+ const manifest=JSON.parse(fs.readFileSync(require.resolve('../build/terra.manifest.json'),'utf8'));
+ assert.equal(initialBytes,manifest.targets.web.memory.initialBytes);
  const hp=M._tx_malloc(4),ep=M._tx_malloc(48),input=M._tx_malloc(1048576);assert.ok(hp&&ep&&input);
  let task=0,world=0,maxRead=0,totalRead=0;
  try{
@@ -37,7 +40,7 @@ test('streamed sources above 200 MB retain a bounded metadata image and signed W
    assert.equal(M._terra_world_stream_supply_source(task,1,e[3],input,e[4]),0);
   }
   assert.equal(M._terra_world_stream_adopt(task,1,hp),0);world=M.HEAPU32[hp/4];
-  assert.equal(M.HEAPU8.byteLength,64*1024*1024,'opening a large source does not allocate the file in Wasm');
+  assert.equal(M.HEAPU8.byteLength,initialBytes,'opening a large source does not grow Wasm memory');
   assert.ok(maxRead<=1048576,'each tile-index or metadata read stays within one MiB');
   assert.ok(totalRead>=tileBytes&&totalRead<=size+3*1048576,'the column index scans the source without retaining its tile bytes');
  }finally{
@@ -52,7 +55,10 @@ test('Web heap growth is admitted before allocation and capped without overgrowt
  const wasmBinary=fs.readFileSync(require.resolve('../build/terrax_world_wasm_web.wasm'));
  let limit=70*1024*1024,calls=0;
  const M=await factory({wasmBinary,memoryGrowthLimit:()=>{calls++;return limit;}});
- assert.equal(M._tx_malloc(80*1024*1024),0);assert.ok(calls>0);assert.equal(M.HEAPU8.length,64*1024*1024);
+ const initialBytes=M.HEAPU8.byteLength;
+ const manifest=JSON.parse(fs.readFileSync(require.resolve('../build/terra.manifest.json'),'utf8'));
+ assert.equal(initialBytes,manifest.targets.web.memory.initialBytes);
+ assert.equal(M._tx_malloc(80*1024*1024),0);assert.ok(calls>0);assert.equal(M.HEAPU8.length,initialBytes);
  limit=90*1024*1024;const p=M._tx_malloc(80*1024*1024);assert.ok(p);assert.ok(M.HEAPU8.length<=limit);M._tx_free(p);
 });
 test('bounded source open, replay rejection, cancellation and repeated pixel adoption',async()=>{

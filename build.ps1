@@ -128,6 +128,7 @@ if ($Test) {
         "tests/circuit/projectile-contract.cjs",
         "tests/circuit/pixelbox-contract.cjs",
         "tests/test_circuit_world.js",
+        "tests/test_circuit_viewport.js",
         "tests/test_circuit_fragments_supports.js",
         "tests/test_hello_display.js",
         "tests/test_memory_lifecycle.js",
