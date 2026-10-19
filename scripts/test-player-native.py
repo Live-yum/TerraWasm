@@ -9,13 +9,16 @@ base=['gcc','-std=gnu17','-O1','-g','-fno-pie','-DTERRAX_STATIC','-DTERRAX_TESTI
 objects=[]
 for name in ['terra_mem','terra_reader','terra_abi','terra_plr']:
  out=build/(name+'.o');subprocess.run(base+(['-fno-tree-loop-distribute-patterns'] if name=='terra_mem' else [])+['-c','src/'+name+'.c','-o',str(out)],check=True);objects.append(str(out))
-for name in ['plr_contract','plr_workspace_contract','plr_workspace_differential']:
+for name in ['plr_contract','plr_workspace_contract','plr_workspace_differential','plr_preview_contract']:
  out=build/name
- subprocess.run(base+['-no-pie','-DTERRAWASM_PLR_JSON_FIXTURE_PATH="'+str(Path('tests/fixtures/minimal-player.json').resolve())+'"','tests/'+name+'.c',*objects,'-lm','-o',str(out)],check=True)
+ subprocess.run(base+['-no-pie','-DTERRAWASM_PLR_JSON_FIXTURE_PATH="'+Path('tests/fixtures/minimal-player.json').resolve().as_posix()+'"','tests/'+name+'.c',*objects,'-lm','-o',str(out)],check=True)
  if name == 'plr_workspace_differential':
   result=subprocess.check_output([str(out)])
   expected='cbd7b51b0e149e578a0b500ae45048ba3a2a421c5e4bc9b9074e6e81d1f529c2'
   actual=hashlib.sha256(result).hexdigest()
   if actual != expected: raise RuntimeError('Pre-workspace codec golden differs: '+actual)
   print('PLR codec golden: 256 batches, 256 rollbacks, 16 encrypted exports;',len(result),'bytes SHA-256',actual)
+ elif name == 'plr_preview_contract':
+  corpus = next((Path(arg.split('=',1)[1]).resolve() for arg in sys.argv if arg.startswith('--preview-corpus=')), Path('tests/files').resolve())
+  subprocess.run([str(out), *[str(file) for file in sorted(corpus.rglob('*.plr'))]],check=True)
  else: subprocess.run([str(out)],check=True)

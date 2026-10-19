@@ -3,7 +3,14 @@
 #define main existing_plr_contract_main
 #include "plr_contract.c"
 #undef main
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 int main(void) {
+#ifdef _WIN32
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
   char *fixture=read_json_fixture();uint32_t h=0;
   CHECK(fixture&&terra_plr_open_json(fixture,&h)==0,"differential open");free(fixture);
   uint32_t seed=0x243f6a88u;

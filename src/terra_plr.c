@@ -1546,8 +1546,8 @@ static void plr_aes_decrypt_block(const uint8_t input[16], uint8_t output[16], c
     memcpy(output, state, 16u);
 }
 
-static uint8_t *plr_decrypt(
-    const uint8_t *encrypted, uint32_t encrypted_length, uint32_t *out_length) {
+static uint8_t *plr_decrypt_mode(
+    const uint8_t *encrypted, uint32_t encrypted_length, uint32_t *out_length, int padding_none) {
     if (out_length) *out_length = 0u;
     if (!encrypted || encrypted_length < 16u ||
         (encrypted_length & 15u) != 0u || encrypted_length > PLR_MAX_FILE_BYTES)
@@ -1563,6 +1563,10 @@ static uint8_t *plr_decrypt(
         plr_aes_decrypt_block(encrypted + offset, block, expanded);
         for (uint32_t i = 0u; i < 16u; i++) plain_padded[offset + i] = block[i] ^ previous[i];
         memcpy(previous, encrypted + offset, 16u);
+    }
+    if (padding_none) {
+        if (out_length) *out_length = encrypted_length;
+        return plain_padded;
     }
     uint8_t padding = plain_padded[encrypted_length - 1u];
     if (padding == 0u || padding > 16u || padding > encrypted_length) {
@@ -1589,6 +1593,10 @@ static uint8_t *plr_decrypt(
     free(plain_padded);
     if (out_length) *out_length = length;
     return plain;
+}
+
+static uint8_t *plr_decrypt(const uint8_t *encrypted, uint32_t length, uint32_t *out_length) {
+    return plr_decrypt_mode(encrypted, length, out_length, 0);
 }
 
 static uint8_t *plr_encrypt(
@@ -1915,7 +1923,7 @@ static PlrJsonValue *plr_read_i32_array(PlrReader *reader, uint32_t count) {
     return array;
 }
 
-static PlrJsonValue *plr_read_spawn_points(PlrReader *reader) {
+static PlrJsonValue *plr_read_spawn_points(PlrReader *reader, int game_compatible) {
     PlrJsonValue *array = plr_json_array();
     if (!array) return NULL;
     for (uint32_t i = 0u; i < PLR_MAX_SPAWN_POINTS; i++) {
@@ -1951,7 +1959,8 @@ static PlrJsonValue *plr_read_spawn_points(PlrReader *reader) {
             plr_json_free(array); return NULL;
         }
     }
-    reader->ok = 0; /* a bounded spawn list must have a -1 sentinel */
+    if (game_compatible && reader->ok) return array; /* Player.Deserialize stops at 200 without a sentinel. */
+    reader->ok = 0; /* editable documents require a canonical sentinel */
     plr_json_free(array);
     return NULL;
 }
@@ -2128,8 +2137,8 @@ static int plr_root_take(
     return plr_root_put(root, key, owned);
 }
 
-static PlrJsonValue *plr_parse_plain(
-    const uint8_t *plain, uint32_t plain_length) {
+static PlrJsonValue *plr_parse_plain_mode(
+    const uint8_t *plain, uint32_t plain_length, int allow_trailing) {
     PlrReader reader = {plain, plain_length, 0u, 1};
     int32_t version = plr_read_i32(&reader);
     if (!reader.ok || !plr_version_supported(version)) return NULL;
@@ -2370,7 +2379,7 @@ static PlrJsonValue *plr_parse_plain(
     if (!buffs || !plr_root_take(root, "buffs", &buffs)) {
         plr_json_free(buffs); plr_json_free(root); return NULL;
     }
-    PlrJsonValue *spawn_points = plr_read_spawn_points(&reader);
+    PlrJsonValue *spawn_points = plr_read_spawn_points(&reader, allow_trailing);
     if (!spawn_points || !plr_root_take(root, "spawnPoints", &spawn_points)) {
         plr_json_free(spawn_points); plr_json_free(root); return NULL;
     }
@@ -2511,7 +2520,7 @@ static PlrJsonValue *plr_parse_plain(
         plr_json_free(pending); plr_json_free(dialogues); plr_json_free(layout);
         plr_json_free(root); return NULL;
     }
-    if (!reader.ok || reader.offset != reader.length) {
+    if (!reader.ok || (!allow_trailing && reader.offset != reader.length)) {
         plr_json_free(root); return NULL;
     }
     return root;
@@ -3712,7 +3721,7 @@ static terrax_world_status plr_open_from_encrypted(
     if (plain_length >= 4u) detected_version = (int32_t)(
         (uint32_t)plain[0] | ((uint32_t)plain[1] << 8u) |
         ((uint32_t)plain[2] << 16u) | ((uint32_t)plain[3] << 24u));
-    PlrJsonValue *root = plr_parse_plain(plain, plain_length);
+    PlrJsonValue *root = plr_parse_plain_mode(plain, plain_length, 0);
     free(plain);
     if (!root) {
         free(original);
@@ -3905,6 +3914,25 @@ static int plr_write_file(
     int ok = written == length && fflush(file) == 0;
     if (fclose(file) != 0) ok = 0;
     return ok;
+}
+
+/* Preview matches Player.LoadPlayer: PaddingMode.None and unread capacity are
+ * legal, but every versioned field must parse. No editable handle is exposed. */
+terrax_world_status terra_plr_preview_json_from_buffer(
+    const uint8_t *buffer, uint32_t buffer_len, char *output,
+    uint64_t output_size, uint32_t *required_size) {
+    g_plr_oom = 0;
+    if (!required_size) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    *required_size = 0u;
+    uint32_t length = 0u;
+    uint8_t *plain = plr_decrypt_mode(buffer, buffer_len, &length, 1);
+    if (!plain) return plr_parse_error();
+    PlrJsonValue *root = plr_parse_plain_mode(plain, length, 1);
+    free(plain);
+    if (!root) return plr_parse_error();
+    terrax_world_status status = plr_copy_json_result(root, output, output_size, required_size);
+    plr_json_free(root);
+    return status;
 }
 
 terrax_world_status terra_plr_open_from_buffer(

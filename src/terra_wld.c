@@ -855,7 +855,7 @@ int parse_header(TxWorld *w){
     }
     return 0;
 }
-/* ==================================================================== * read_tile_at -- Stream one tile from the binary * ==================================================================== */int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t){
+/* ==================================================================== * read_tile_at -- Stream one tile from the binary * ==================================================================== */static int read_tile_at_mode(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t,int normalize_timer){
     w->tile_decode_calls++;
     uint8_t *p=w->file;
     uint32_t len=w->file_len;
@@ -902,15 +902,15 @@ int parse_header(TxWorld *w){
     if (f1&1u)TILE_U8(f2);
     if (f2&1u)TILE_U8(f3);
     if (f3&1u)TILE_U8(f4);
-    if (tx_world_is_future(w) && ((f4&0xe1u) || (f2&0x80u))) return 0;
+    if ((!normalize_timer || tx_world_is_future(w)) && ((f4&0xe1u) || (f2&0x80u))) return 0;
     t->active=(f1>>1)&1u;
     if (t->active){
         if (f1&32u)TILE_U16(t->type); else TILE_U8(t->type);
-        if (tx_world_is_future(w) && t->type>=w->tile_type_count) return 0;
+        if ((!normalize_timer || tx_world_is_future(w)) && t->type>=w->tile_type_count) return 0;
         if (tile_important(w,t->type)){
             TILE_U16(t->frame_x);
             TILE_U16(t->frame_y);
-            if (t->type==144u)t->frame_y=0;
+            if (normalize_timer && t->type==144u)t->frame_y=0;
             }
         else {t->frame_x=-1;t->frame_y=-1;}
         if (f3&8u)TILE_U8(t->tile_color);
@@ -948,6 +948,62 @@ int parse_header(TxWorld *w){
 #undef TILE_U16
     return *off<=end;
     }
+int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t) {
+    return read_tile_at_mode(w,off,end,t,1);
+}
+
+/* Read-only browser region preview: caller owns bytes, column index and output.
+ * Reuse the native decoder without normalizing saved timer frames. */
+static int preview_world(TxWorld *w,const uint8_t *bytes,uint32_t length,uint32_t width,uint32_t height) {
+    if (!bytes || length>64u*1024u*1024u || !width || width>10000u || !height || height>6000u || (uint64_t)width*height>24000000u) return 0;
+    memset(w,0,sizeof(*w)); w->file=(uint8_t*)bytes; w->file_len=length;
+    uint32_t offset=0u;
+    if(length<4u || rd_u32le(bytes,length,&offset)<269u) return 0;
+    return parse_format(w) && w->version<=326u && w->pointer_count>=11u;
+}
+terrax_world_status terra_world_preview_index(const uint8_t *bytes,uint32_t length,uint32_t width,uint32_t height,uint32_t *columns,uint32_t count) {
+    TxWorld world;
+    if(!columns || count!=width+1u) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    if(!preview_world(&world,bytes,length,width,height)) return TERRAX_WORLD_STATUS_PARSE_ERROR;
+    uint32_t offset=world.starts[1],end=world.ends[1]; TxTile tile;
+    for(uint32_t x=0;x<width;x++) {
+        columns[x]=offset;
+        for(uint32_t y=0;y<height;) {
+            if(!read_tile_at_mode(&world,&offset,end,&tile,0) || tile.same>=height-y) return TERRAX_WORLD_STATUS_PARSE_ERROR;
+            y+=tile.same+1u;
+        }
+    }
+    columns[width]=offset;
+    return offset==end?TERRAX_WORLD_STATUS_OK:TERRAX_WORLD_STATUS_PARSE_ERROR;
+}
+terrax_world_status terra_world_preview_read_rect(const uint8_t *bytes,uint32_t length,uint32_t width,uint32_t height,const uint32_t *columns,
+    uint32_t x,uint32_t y,uint32_t rw,uint32_t rh,uint32_t *output,uint32_t words) {
+    TxWorld world;
+    if(!columns || !output || !rw || !rh || rw>512u || rh>512u || (uint64_t)rw*rh>262144u || x>width || rw>width-x || y>height || rh>height-y
+        || (uint64_t)rw*rh*8u!=words) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
+    if(!preview_world(&world,bytes,length,width,height)) return TERRAX_WORLD_STATUS_PARSE_ERROR;
+    for(uint32_t dx=0;dx<rw;dx++) {
+        uint32_t offset=columns[x+dx],end=columns[x+dx+1u]; TxTile tile;
+        if(offset<world.starts[1] || offset>=end || end>world.ends[1]) return TERRAX_WORLD_STATUS_PARSE_ERROR;
+        for(uint32_t row=0;row<y+rh;) {
+            if(!read_tile_at_mode(&world,&offset,end,&tile,0) || tile.same>=height-row) return TERRAX_WORLD_STATUS_PARSE_ERROR;
+            uint32_t stop=row+tile.same+1u;
+            for(uint32_t yy=row>y?row:y;yy<stop && yy<y+rh;yy++) {
+                uint32_t *out=output+(dx*rh+yy-y)*8u;
+                uint32_t flags=tile.active|(tile.actuator<<1u)|(tile.inactive<<2u)|(tile.invisible_block<<3u)|(tile.invisible_wall<<4u)|(tile.fullbright_block<<5u)|(tile.fullbright_wall<<6u);
+                out[0]=dx; out[1]=yy-y; out[2]=tile.type|(flags<<16u);
+                out[3]=tile.active?((uint16_t)tile.frame_x|((uint32_t)(uint16_t)tile.frame_y<<16u)):UINT32_MAX;
+                out[4]=tile.wall|((uint32_t)tile.tile_color<<16u)|((uint32_t)tile.wall_color<<24u);
+                out[5]=tile.liquid_amount|((uint32_t)(tile.liquid_amount?tile.liquid_type:0)<<8u)|((uint32_t)tile.brick_style<<16u)
+                    |((uint32_t)(tile.wire_red|(tile.wire_blue<<1u)|(tile.wire_green<<2u)|(tile.wire_yellow<<3u))<<24u);
+                out[6]=out[7]=0;
+            }
+            row=stop;
+        }
+    }
+    return TERRAX_WORLD_STATUS_OK;
+}
+
 /* WorldFile.LoadWorld_Version1: mirror its byte widths and optional flags. */
 static TX_COLD_PARSER void write_legacy_tile(TxWorld *w,TxBuf *b,const TxTile *t,uint32_t same){
     uint32_t v=w->version;

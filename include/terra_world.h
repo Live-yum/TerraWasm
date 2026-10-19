@@ -41,6 +41,18 @@ terrax_world_status terra_world_open_from_buffer(
     uint32_t buffer_len,
     uint32_t* out_handle);
 
+/* Read-only WLD 269..326 preview, independent of mutable document handles.
+ * Caller retains immutable bytes and width+1 column offsets from index().
+ * Rect output is column-major Tile32: eight uint32 words per local cell.
+ * No input, index or output pointer is retained by either call. */
+terrax_world_status terra_world_preview_index(
+    const uint8_t* bytes, uint32_t length, uint32_t width, uint32_t height,
+    uint32_t* columns, uint32_t column_count);
+terrax_world_status terra_world_preview_read_rect(
+    const uint8_t* bytes, uint32_t length, uint32_t width, uint32_t height,
+    const uint32_t* columns, uint32_t x, uint32_t y, uint32_t rect_width,
+    uint32_t rect_height, uint32_t* output, uint32_t output_words);
+
 /* One idle-owner transaction; rollback/commit allocate nothing. The token
  * protects this exact handle, rejects nesting and cannot outlive the world. */
 uint32_t terra_world_workspace_abi_version(void);

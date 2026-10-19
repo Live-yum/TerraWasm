@@ -17,6 +17,11 @@
 extern "C" {
 #endif
 
+/* Read-only game-compatible load; no document handle or edits. */
+terrax_world_status terra_plr_preview_json_from_buffer(
+    const uint8_t* buffer, uint32_t buffer_len, char* output,
+    uint64_t output_size, uint32_t* required_size);
+
 /* Buffer/document lifecycle. */
 terrax_world_status terra_plr_open_from_buffer(
     const uint8_t* buffer,

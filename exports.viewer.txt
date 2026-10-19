@@ -1,4 +1,5 @@
 _terra_plr_open_from_buffer
+_terra_plr_preview_json_from_buffer
 _terra_plr_open_json
 _terra_plr_get_json
 _terra_plr_save_to_buffer
@@ -10,6 +11,8 @@ _terra_plr_set_many
 _terra_plr_replace_json
 _terra_plr_release_caches
 _terra_build_info_json
+_terra_world_preview_index
+_terra_world_preview_read_rect
 _terra_world_open_begin
 _terra_world_open_step
 _terra_world_open_finish
