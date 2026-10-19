@@ -53,6 +53,7 @@ test('Web heap growth is admitted before allocation and capped without overgrowt
  const wasmBinary=fs.readFileSync(require.resolve('../build/terrax_world_wasm_web.wasm'));
  let limit=70*1024*1024,calls=0;
  const M=await factory({wasmBinary,memoryGrowthLimit:()=>{calls++;return limit;}});
+ assert.equal(M.HEAPU8.byteLength,initialBytes);
  assert.equal(M._tx_malloc(80*1024*1024),0);assert.ok(calls>0);assert.equal(M.HEAPU8.length,initialBytes);
  limit=90*1024*1024;const p=M._tx_malloc(80*1024*1024);assert.ok(p);assert.ok(M.HEAPU8.length<=limit);M._tx_free(p);
 });

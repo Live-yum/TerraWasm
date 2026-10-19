@@ -319,6 +319,8 @@ test("Web PLR ABI round-trips buffers and enforces its declared filesystem profi
     if (identity.viewerWebProfile) {
       assert.equal(module.FS, undefined, "the shared viewer artifact is buffer-only");
       assert.equal(module._terra_plr_open, undefined, "path APIs must not leak into the viewer profile");
+      assert.equal(module._terra_plr_save, undefined);
+      assert.ok(identity.targetFlagsText.includes("-sFILESYSTEM=0"));
     } else {
     module.FS.writeFile("/input.plr", source);
     const inputPath = allocString(module, "/input.plr");

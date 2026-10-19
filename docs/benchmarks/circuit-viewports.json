@@ -1,0 +1,1845 @@
+{
+  "schemaVersion": 1,
+  "description": "Three sequential base/candidate rounds; same real input; timings are diagnostic Node-hosted Web Wasm data, not device FPS.",
+  "implementation": {
+    "baseCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+    "sourcePatchSha256": "0ec3c1c306c3d5f95c9ca0ac936e3a8cd734ce449cf3d50b418b426bd366cac3",
+    "changedSources": [
+      "src/terra_circuit_compile.c",
+      "src/terra_circuit_query.c",
+      "src/terra_circuit_twld_session.c",
+      "src/terra_circuit_world.c",
+      "src/terra_circuit_world_internal.h"
+    ],
+    "candidateIdentity": "The measured candidate is a dirty diagnostic build at baseCommit; publishable artifacts must be rebuilt at the final remote commit with dirty=false."
+  },
+  "build": {
+    "emscriptenVersion": "5.0.7",
+    "featureSet": "all",
+    "optimization": "-Oz + LTO",
+    "webInitialMemoryBytes": 16777216,
+    "webMaximumMemoryBytes": 167772160
+  },
+  "allResultHashesEqual": true,
+  "allCircuitCountsEqual": true,
+  "comparison": [
+    {
+      "name": "first-foreground",
+      "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07",
+      "baseline": {
+        "medianOfRoundMedianMs": 14.308,
+        "roundMedianMs": [
+          14.308,
+          11.621,
+          15.975
+        ],
+        "steps": 267,
+        "sourceReads": 1,
+        "sourceBytes": 1048576,
+        "resultBytes": 65536,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 5.006,
+        "roundMedianMs": [
+          5.006,
+          4.42,
+          80.283
+        ],
+        "steps": 37,
+        "sourceReads": 1,
+        "sourceBytes": 1048576,
+        "resultBytes": 65536,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 2.858
+    },
+    {
+      "name": "repeat-foreground",
+      "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8",
+      "baseline": {
+        "medianOfRoundMedianMs": 12.091,
+        "roundMedianMs": [
+          10.359,
+          12.091,
+          19.169
+        ],
+        "steps": 5340,
+        "sourceReads": 20,
+        "sourceBytes": 20971520,
+        "resultBytes": 1310720,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 3.088,
+        "roundMedianMs": [
+          3.088,
+          2.838,
+          5.84
+        ],
+        "steps": 720,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "resultBytes": 1310720,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 3.915
+    },
+    {
+      "name": "pan-x-foreground",
+      "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e",
+      "baseline": {
+        "medianOfRoundMedianMs": 11.185,
+        "roundMedianMs": [
+          10.162,
+          11.185,
+          17.56
+        ],
+        "steps": 5910,
+        "sourceReads": 20,
+        "sourceBytes": 20971520,
+        "resultBytes": 1310720,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 3.467,
+        "roundMedianMs": [
+          3.467,
+          3.423,
+          4.312
+        ],
+        "steps": 799,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "resultBytes": 1310720,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 3.226
+    },
+    {
+      "name": "pan-y-foreground",
+      "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5",
+      "baseline": {
+        "medianOfRoundMedianMs": 11.305,
+        "roundMedianMs": [
+          11.305,
+          9.935,
+          15.568
+        ],
+        "steps": 5340,
+        "sourceReads": 20,
+        "sourceBytes": 20971520,
+        "resultBytes": 1310720,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 3.159,
+        "roundMedianMs": [
+          3.159,
+          2.711,
+          3.985
+        ],
+        "steps": 720,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "resultBytes": 1310720,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 3.579
+    },
+    {
+      "name": "repeat-walls",
+      "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22",
+      "baseline": {
+        "medianOfRoundMedianMs": 14.134,
+        "roundMedianMs": [
+          14.134,
+          10.279,
+          17.918
+        ],
+        "steps": 5340,
+        "sourceReads": 20,
+        "sourceBytes": 20971520,
+        "resultBytes": 1310720,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 0.246,
+        "roundMedianMs": [
+          0.273,
+          0.219,
+          0.246
+        ],
+        "steps": 80,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "resultBytes": 1310720,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 57.455
+    },
+    {
+      "name": "pan-x-walls",
+      "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526",
+      "baseline": {
+        "medianOfRoundMedianMs": 20.243,
+        "roundMedianMs": [
+          20.243,
+          11.747,
+          21.325
+        ],
+        "steps": 5910,
+        "sourceReads": 20,
+        "sourceBytes": 20971520,
+        "resultBytes": 1310720,
+        "activeBytes": 19942651,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 0.227,
+        "roundMedianMs": [
+          0.265,
+          0.199,
+          0.227
+        ],
+        "steps": 80,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "resultBytes": 1310720,
+        "activeBytes": 19942699,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 89.176
+    },
+    {
+      "name": "overview-foreground",
+      "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1",
+      "baseline": {
+        "medianOfRoundMedianMs": 1297.609,
+        "roundMedianMs": [
+          1652.365,
+          1078.023,
+          1297.609
+        ],
+        "steps": 25292,
+        "sourceReads": 12,
+        "sourceBytes": 11957444,
+        "resultBytes": 80256,
+        "activeBytes": 19957371,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 484.319,
+        "roundMedianMs": [
+          322.278,
+          696.076,
+          484.319
+        ],
+        "steps": 4061,
+        "sourceReads": 12,
+        "sourceBytes": 11957444,
+        "resultBytes": 80256,
+        "activeBytes": 19957419,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 2.679
+    },
+    {
+      "name": "overview-walls",
+      "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab",
+      "baseline": {
+        "medianOfRoundMedianMs": 1147.054,
+        "roundMedianMs": [
+          1143.607,
+          1355.362,
+          1147.054
+        ],
+        "steps": 25292,
+        "sourceReads": 12,
+        "sourceBytes": 11957444,
+        "resultBytes": 80256,
+        "activeBytes": 19957371,
+        "peakBytes": 25345260,
+        "linearMemoryBytes": 32899072
+      },
+      "candidate": {
+        "medianOfRoundMedianMs": 8.158,
+        "roundMedianMs": [
+          4.741,
+          10.347,
+          8.158
+        ],
+        "steps": 18,
+        "sourceReads": 11,
+        "sourceBytes": 11534336,
+        "resultBytes": 80256,
+        "activeBytes": 19957419,
+        "peakBytes": 25345308,
+        "linearMemoryBytes": 32899072
+      },
+      "medianRatio": 140.605
+    }
+  ],
+  "rounds": [
+    {
+      "baseline": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": false,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "c8ceb7d6d57b0f6151c77af40fecad2af983e1fdd313373975604ad271dbafe5"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 9261.92,
+          "cpuMs": 9235.248,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877059,
+          "peakBytes": 25345260
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 14.312,
+            "cpuMs": 14.471,
+            "medianMs": 14.308,
+            "p95Ms": 14.308,
+            "maxMs": 14.308,
+            "steps": 267,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 254.601,
+            "cpuMs": 273.851,
+            "medianMs": 10.359,
+            "p95Ms": 23.533,
+            "maxMs": 29.474,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 209.375,
+            "cpuMs": 214.288,
+            "medianMs": 10.162,
+            "p95Ms": 12.06,
+            "maxMs": 13.436,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 278.083,
+            "cpuMs": 284.064,
+            "medianMs": 11.305,
+            "p95Ms": 29.457,
+            "maxMs": 41.215,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 339.714,
+            "cpuMs": 339.868,
+            "medianMs": 14.134,
+            "p95Ms": 35.297,
+            "maxMs": 37.763,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 391.43,
+            "cpuMs": 397.45,
+            "medianMs": 20.243,
+            "p95Ms": 23.888,
+            "maxMs": 23.911,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1652.371,
+            "cpuMs": 1652.381,
+            "medianMs": 1652.365,
+            "p95Ms": 1652.365,
+            "maxMs": 1652.365,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1143.614,
+            "cpuMs": 1141.073,
+            "medianMs": 1143.607,
+            "p95Ms": 1143.607,
+            "maxMs": 1143.607,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      },
+      "candidate": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": true,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "ce26c3fbd61b500ec144da1d88781227d4916ab41833b53e9872cadae3ab40c6"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 1857.04,
+          "cpuMs": 2106.784,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877107,
+          "peakBytes": 25345308
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 5.01,
+            "cpuMs": 5.535,
+            "medianMs": 5.006,
+            "p95Ms": 5.006,
+            "maxMs": 5.006,
+            "steps": 37,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 67.083,
+            "cpuMs": 70.65,
+            "medianMs": 3.088,
+            "p95Ms": 4.258,
+            "maxMs": 7.69,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 71.435,
+            "cpuMs": 71.584,
+            "medianMs": 3.467,
+            "p95Ms": 4.68,
+            "maxMs": 6.307,
+            "steps": 799,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 72.622,
+            "cpuMs": 72.975,
+            "medianMs": 3.159,
+            "p95Ms": 6.21,
+            "maxMs": 7.755,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 5.726,
+            "cpuMs": 6.116,
+            "medianMs": 0.273,
+            "p95Ms": 0.409,
+            "maxMs": 0.64,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 5.829,
+            "cpuMs": 5.847,
+            "medianMs": 0.265,
+            "p95Ms": 0.568,
+            "maxMs": 0.641,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 322.301,
+            "cpuMs": 363.282,
+            "medianMs": 322.278,
+            "p95Ms": 322.278,
+            "maxMs": 322.278,
+            "steps": 4061,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 4.744,
+            "cpuMs": 4.82,
+            "medianMs": 4.741,
+            "p95Ms": 4.741,
+            "maxMs": 4.741,
+            "steps": 18,
+            "sourceReads": 11,
+            "sourceBytes": 11534336,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      }
+    },
+    {
+      "baseline": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": false,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "c8ceb7d6d57b0f6151c77af40fecad2af983e1fdd313373975604ad271dbafe5"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 5495.939,
+          "cpuMs": 5859.277,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877059,
+          "peakBytes": 25345260
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 11.626,
+            "cpuMs": 11.781,
+            "medianMs": 11.621,
+            "p95Ms": 11.621,
+            "maxMs": 11.621,
+            "steps": 267,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 252.818,
+            "cpuMs": 263.034,
+            "medianMs": 12.091,
+            "p95Ms": 16.449,
+            "maxMs": 18.486,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 255.324,
+            "cpuMs": 260.627,
+            "medianMs": 11.185,
+            "p95Ms": 17.248,
+            "maxMs": 19.473,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 218.404,
+            "cpuMs": 224.157,
+            "medianMs": 9.935,
+            "p95Ms": 15.155,
+            "maxMs": 16.302,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 209.309,
+            "cpuMs": 209.494,
+            "medianMs": 10.279,
+            "p95Ms": 12.061,
+            "maxMs": 14.311,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 248.054,
+            "cpuMs": 248.121,
+            "medianMs": 11.747,
+            "p95Ms": 19.972,
+            "maxMs": 20.471,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1078.029,
+            "cpuMs": 1061.529,
+            "medianMs": 1078.023,
+            "p95Ms": 1078.023,
+            "maxMs": 1078.023,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1355.369,
+            "cpuMs": 1348.051,
+            "medianMs": 1355.362,
+            "p95Ms": 1355.362,
+            "maxMs": 1355.362,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      },
+      "candidate": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": true,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "ce26c3fbd61b500ec144da1d88781227d4916ab41833b53e9872cadae3ab40c6"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 1697.048,
+          "cpuMs": 1851.066,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877107,
+          "peakBytes": 25345308
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 4.424,
+            "cpuMs": 7.876,
+            "medianMs": 4.42,
+            "p95Ms": 4.42,
+            "maxMs": 4.42,
+            "steps": 37,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 60.648,
+            "cpuMs": 67.652,
+            "medianMs": 2.838,
+            "p95Ms": 3.71,
+            "maxMs": 5.961,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 121.134,
+            "cpuMs": 121.251,
+            "medianMs": 3.423,
+            "p95Ms": 6.265,
+            "maxMs": 52.007,
+            "steps": 799,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 59.447,
+            "cpuMs": 59.488,
+            "medianMs": 2.711,
+            "p95Ms": 4.167,
+            "maxMs": 4.373,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 6.023,
+            "cpuMs": 6.911,
+            "medianMs": 0.219,
+            "p95Ms": 0.739,
+            "maxMs": 0.956,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 4.803,
+            "cpuMs": 4.817,
+            "medianMs": 0.199,
+            "p95Ms": 0.474,
+            "maxMs": 0.604,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 696.084,
+            "cpuMs": 744.198,
+            "medianMs": 696.076,
+            "p95Ms": 696.076,
+            "maxMs": 696.076,
+            "steps": 4061,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 10.35,
+            "cpuMs": 10.375,
+            "medianMs": 10.347,
+            "p95Ms": 10.347,
+            "maxMs": 10.347,
+            "steps": 18,
+            "sourceReads": 11,
+            "sourceBytes": 11534336,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      }
+    },
+    {
+      "baseline": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": false,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "c8ceb7d6d57b0f6151c77af40fecad2af983e1fdd313373975604ad271dbafe5"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 8301.553,
+          "cpuMs": 8392.505,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877059,
+          "peakBytes": 25345260
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 15.98,
+            "cpuMs": 16.16,
+            "medianMs": 15.975,
+            "p95Ms": 15.975,
+            "maxMs": 15.975,
+            "steps": 267,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 414.522,
+            "cpuMs": 422.552,
+            "medianMs": 19.169,
+            "p95Ms": 33.524,
+            "maxMs": 40.57,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 350.624,
+            "cpuMs": 357.819,
+            "medianMs": 17.56,
+            "p95Ms": 20.544,
+            "maxMs": 21.142,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 331.314,
+            "cpuMs": 339.793,
+            "medianMs": 15.568,
+            "p95Ms": 21.266,
+            "maxMs": 23.42,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 346.769,
+            "cpuMs": 346.908,
+            "medianMs": 17.918,
+            "p95Ms": 21.431,
+            "maxMs": 24.368,
+            "steps": 5340,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 589.914,
+            "cpuMs": 580.789,
+            "medianMs": 21.325,
+            "p95Ms": 71.182,
+            "maxMs": 73.212,
+            "steps": 5910,
+            "sourceReads": 20,
+            "sourceBytes": 20971520,
+            "resultBytes": 1310720,
+            "activeBytes": 19942651,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1297.615,
+            "cpuMs": 1297.574,
+            "medianMs": 1297.609,
+            "p95Ms": 1297.609,
+            "maxMs": 1297.609,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 1147.061,
+            "cpuMs": 1141.851,
+            "medianMs": 1147.054,
+            "p95Ms": 1147.054,
+            "maxMs": 1147.054,
+            "steps": 25292,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957371,
+            "peakBytes": 25345260,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      },
+      "candidate": {
+        "schemaVersion": 1,
+        "runtime": {
+          "node": "v24.19.0",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "artifact": {
+          "sourceCommit": "0a9e6dcb3c31148441b22d631c878ea7cf9d5fd2",
+          "dirty": true,
+          "featureSet": "all",
+          "compiler": "emscripten",
+          "wasmSha256": "ce26c3fbd61b500ec144da1d88781227d4916ab41833b53e9872cadae3ab40c6"
+        },
+        "source": {
+          "sha256": "730d558ca2dd46a7d0409efac44961a2eec79746f6f31536b8e4f1bd7c317c62",
+          "sizeBytes": 12178361,
+          "width": 8400,
+          "height": 2400
+        },
+        "parameters": {
+          "repeat": 20,
+          "workUnits": 4096,
+          "maximumBytes": 134217728
+        },
+        "openAndCompile": {
+          "wallMs": 3348.156,
+          "cpuMs": 3603.968,
+          "wireCells": 186514,
+          "devices": 11563,
+          "gates": 0,
+          "networks": 3667,
+          "activeBytes": 19877107,
+          "peakBytes": 25345308
+        },
+        "results": [
+          {
+            "name": "first-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 80.443,
+            "cpuMs": 102.436,
+            "medianMs": 80.283,
+            "p95Ms": 80.283,
+            "maxMs": 80.283,
+            "steps": 37,
+            "sourceReads": 1,
+            "sourceBytes": 1048576,
+            "resultBytes": 65536,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "d83dea3854b707616a2cf201ada0cb7ac59314ac1a3409e628a0efffb1d95d07"
+          },
+          {
+            "name": "repeat-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 154.552,
+            "cpuMs": 171.584,
+            "medianMs": 5.84,
+            "p95Ms": 16.705,
+            "maxMs": 31.971,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "0b4b42e2e4027560e63ba72331f19cd3d5128005ad261bed84644972977e89c8"
+          },
+          {
+            "name": "pan-x-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 91.86,
+            "cpuMs": 91.978,
+            "medianMs": 4.312,
+            "p95Ms": 5.932,
+            "maxMs": 7.656,
+            "steps": 799,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "551c09bd8c4fb8bace2d2f3c3bd9e57f02307b681bd80d048cb91631b443e39e"
+          },
+          {
+            "name": "pan-y-foreground",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 0
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 1,
+            "wallMs": 80.471,
+            "cpuMs": 80.517,
+            "medianMs": 3.985,
+            "p95Ms": 5.103,
+            "maxMs": 6.522,
+            "steps": 720,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "6843e319f1d826131e3f3757033cab3d2403f67364ea9076f2a84b592593f3c5"
+          },
+          {
+            "name": "repeat-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 6.237,
+            "cpuMs": 7.269,
+            "medianMs": 0.246,
+            "p95Ms": 0.593,
+            "maxMs": 0.894,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "bcd2d17b81e184fb06f5b54585fd8db7dd448fa2d8218ad62be8022ec64c7a22"
+          },
+          {
+            "name": "pan-x-walls",
+            "request": {
+              "x": 6488,
+              "y": 766,
+              "width": 64,
+              "height": 64,
+              "stride": 1,
+              "flags": 2
+            },
+            "count": 20,
+            "dx": 1,
+            "dy": 0,
+            "wallMs": 5.092,
+            "cpuMs": 5.104,
+            "medianMs": 0.227,
+            "p95Ms": 0.567,
+            "maxMs": 0.577,
+            "steps": 80,
+            "sourceReads": 0,
+            "sourceBytes": 0,
+            "resultBytes": 1310720,
+            "activeBytes": 19942699,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "64570bfe247e356ed9158cf9d71cc590516bbec57b27ca2594c7bff336ae9526"
+          },
+          {
+            "name": "overview-foreground",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 0
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 484.327,
+            "cpuMs": 498.625,
+            "medianMs": 484.319,
+            "p95Ms": 484.319,
+            "maxMs": 484.319,
+            "steps": 4061,
+            "sourceReads": 12,
+            "sourceBytes": 11957444,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "07b33dcc8a5074ebd00e180562f94fe3072e49c9494929d59194cafa64da11b1"
+          },
+          {
+            "name": "overview-walls",
+            "request": {
+              "x": 0,
+              "y": 0,
+              "width": 8400,
+              "height": 2400,
+              "stride": 64,
+              "flags": 2
+            },
+            "count": 1,
+            "dx": 0,
+            "dy": 0,
+            "wallMs": 8.161,
+            "cpuMs": 8.186,
+            "medianMs": 8.158,
+            "p95Ms": 8.158,
+            "maxMs": 8.158,
+            "steps": 18,
+            "sourceReads": 11,
+            "sourceBytes": 11534336,
+            "resultBytes": 80256,
+            "activeBytes": 19957419,
+            "peakBytes": 25345308,
+            "linearMemoryBytes": 32899072,
+            "resultSha256": "39ebc15a197628d011c342c88f87bf2f00f879c66005364c603a89f71a6a7dab"
+          }
+        ],
+        "note": "Node-hosted Web Wasm with synchronous in-memory source reads and SHA-256 result consumption; no WeChat filesystem, rendering, IPC, device FPS, or process RSS claim."
+      }
+    }
+  ]
+}

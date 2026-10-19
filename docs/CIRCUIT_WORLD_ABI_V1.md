@@ -177,6 +177,13 @@ invisible wall `64`, and fullbright wall `128`. The wire mask is zero. Wall
 sampling reads the original wall ID and paint, and does not change simulation
 state. The host may cache the static wall layer separately from animated wiring.
 
+Samples are emitted in column-major order (x outer loop, y inner loop). The
+file-backed wall path uses the validated source column index directly; repeated
+and nearby queries can reuse the existing bounded immutable-source window.
+Foreground queries continue to apply current simulation state to source tiles.
+See [viewport performance and regression coverage](CIRCUIT_VIEWPORT_PERFORMANCE.md)
+for the implementation, measurement method and remaining rendering limits.
+
 ### 2: TRIGGER
 
 With `flags = 0`, pulse the given rectangle and selected wire `mask`. This is a

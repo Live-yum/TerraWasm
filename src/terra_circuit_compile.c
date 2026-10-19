@@ -65,10 +65,27 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
         if(w->phase==CX_TOPOLOGY){uint32_t wires=cx_wire_mask(&t);if(wires){w->wire_cells+=run;if(w->x<w->min_x)w->min_x=w->x;if(w->x>w->max_x)w->max_x=w->x;if(w->y<w->min_y)w->min_y=w->y;if(w->y+run-1u>w->max_y)w->max_y=w->y+run-1u;}
             if(important_tile(&t))w->devices_count+=run;
         }
-        w->y+=run;--*work;if(w->y==w->height){int s=cx_mod_column(w);if(s)return s;memset(w->pixel_at_y,0,w->height*4u);if(w->phase==CX_COUNT){s=cx_devices_column(w);if(s)return s;}w->col_stage=2;w->col_colour=0;w->col_row=0;w->up=0;}
+        w->y+=run;--*work;if(w->y==w->height){int s=cx_mod_column(w);if(s)return s;memset(w->pixel_at_y,0,w->height*4u);if(w->phase==CX_COUNT){s=cx_devices_column(w);if(s)return s;}
+            /* Keep the previous column's frontier intact while visiting this
+             * column. Empty wire runs then need no per-cell routing or writes.
+             * The bounded output arrays are cleared once and published to the
+             * frontier after all four colours, preserving label/FIFO order. */
+            memset(w->ids,0,w->height*16u);memset(w->seed_ids,0,w->height*16u);memset(w->opposite_ids,0,w->height*16u);
+            w->col_stage=2;w->col_colour=0;w->col_row=0;w->up=0;}
     }
     while(*work&&w->col_stage==2){
         uint32_t c=w->col_colour,y=w->col_row;TxTile* t=w->column+y;
+        uint32_t advance=1;
+        if(!(cx_wire_mask(t)&(1u<<c))){
+            /* An unwired colour is unchanged throughout the source RLE run.
+             * TWLD replaces tile type/frames, never these source wire bits.
+             * Every such jump starts at its record boundary: wired runs still
+             * advance one cell at a time, including resumptions after a yield. */
+            advance=(uint32_t)t->same+1u;
+            if(advance>w->height-y)return cx_fail(w,TCW_FORMAT,"circuit empty wire run crosses a world column");
+            w->up=0;
+            goto routed;
+        }
         uint32_t left=w->front[y*4u+c],up=w->up,right=0,down=0,seed=0,opposite=0;
         if(cx_inside_wiring(w,w->x,y)&&(cx_wire_mask(t)&(1u<<c))){
             if(t->active&&(t->type==424u||(t->type==445u&&!w->twld_state)||t->type==0xfffeu)){
@@ -80,15 +97,22 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
             }else opposite=seed=right=down=join(w,left,up);
         }
         if(w->error)return -(int)w->error;
-        w->front[y*4u+c]=right;w->up=down;w->ids[y*4u+c]=right;w->seed_ids[y*4u+c]=seed;w->opposite_ids[y*4u+c]=opposite;
+        w->up=down;w->ids[y*4u+c]=right;w->seed_ids[y*4u+c]=seed;w->opposite_ids[y*4u+c]=opposite;
         if(w->phase==CX_COUNT&&w->pixel_at_y[y])cx_pixel_ports(w,y,c,right,down);
-        --*work;if(++w->col_row==w->height){w->col_row=0;w->up=0;if(++w->col_colour==4u){w->col_stage=3;w->col_row=0;
+routed:
+        --*work;w->col_row+=advance;if(w->col_row==w->height){w->col_row=0;w->up=0;if(++w->col_colour==4u){
+            memcpy(w->front,w->ids,w->height*16u);memset(w->gate_at_y,0,w->height*4u);w->col_stage=3;w->col_row=0;
             if(w->phase==CX_TOPOLOGY)w->column_gates[w->x]=w->gate_cursor;
             else w->gate_cursor=w->column_gates[w->x];
         }}
     }
-    while(*work&&w->col_stage==3){uint32_t y=w->col_row++;w->gate_at_y[y]=0;
+    while(*work&&w->col_stage==3){uint32_t y=w->col_row,advance=1;
         if(w->column[y].active&&w->column[y].type==420u)w->gate_at_y[y]=++w->gate_cursor;
+        /* A mod pixel can replace a gate inside an original RLE record, so
+         * retain cell-by-cell gate scanning for that uncommon source profile. */
+        else if(!w->mod_count)advance=(uint32_t)w->column[y].same+1u;
+        if(advance>w->height-y)return cx_fail(w,TCW_FORMAT,"circuit empty gate run crosses a world column");
+        w->col_row+=advance;
         --*work;if(w->col_row==w->height){if(w->phase==CX_COUNT){cx_devices_bind_column(w);int s=cx_order_capture_column(w);if(s)return s;}w->col_stage=4;w->emit_y=0;w->emit_colour=0;w->emit_phase=0;}
     }
     return w->col_stage==4?2:TCW_CONTINUE;
