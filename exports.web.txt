@@ -1,6 +1,8 @@
 _terra_abi_version
 _terra_capabilities
 _terra_build_info_json
+_terra_world_preview_index
+_terra_world_preview_read_rect
 _terra_world_open_begin
 _terra_world_open_step
 _terra_world_open_finish
@@ -52,6 +54,7 @@ _terra_sha256_update
 _terra_sha256_final
 _terra_sha256_destroy
 _terra_plr_open_from_buffer
+_terra_plr_preview_json_from_buffer
 _terra_plr_open
 _terra_plr_open_json
 _terra_plr_close

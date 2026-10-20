@@ -603,6 +603,19 @@ else()
             file(TO_CMAKE_PATH
                 "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
                 TERRAWASM_PLR_REAL_FIXTURE_DEFINE)
+            # Preview is read-only and uses both existing external compatibility fixtures.
+            add_executable(terra_plr_preview_contract tests/plr_preview_contract.c)
+            target_link_libraries(terra_plr_preview_contract PRIVATE terrax_world_static)
+            target_compile_definitions(terra_plr_preview_contract PRIVATE TERRAX_STATIC)
+            target_compile_options(terra_plr_preview_contract PRIVATE -UNDEBUG)
+            if(TERRAWASM_SANITIZERS)
+                target_compile_options(terra_plr_preview_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(terra_plr_preview_contract PRIVATE -fsanitize=address,undefined)
+            endif()
+            add_test(NAME terra_plr_preview_contract COMMAND terra_plr_preview_contract
+                "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/灼眼半夏.plr")
+
             add_terra_contract(terra_plr_real_fixture_contract tests/plr_real_fixture_contract.c)
             target_compile_definitions(terra_plr_real_fixture_contract PRIVATE
                 TERRAWASM_PLR_REAL_FIXTURE_PATH="${TERRAWASM_PLR_REAL_FIXTURE_DEFINE}"

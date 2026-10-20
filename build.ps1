@@ -166,6 +166,17 @@ if ($Test) {
         & node bench/map_8400x2400.js 2>&1
         if ($LASTEXITCODE -ne 0) { $GateFailures += "8400x2400 MAP benchmark failed" }
     }
+    $previewTargets = @("node")
+    if ($Target -eq "all") { $previewTargets += "web" }
+    $previewProfiles = @()
+    if ($Features -ne "plr") { $previewProfiles += "wld" }
+    if ($Features -ne "wld") { $previewProfiles += "plr" }
+    foreach ($previewTarget in $previewTargets) {
+        foreach ($previewProfile in $previewProfiles) {
+            & node tests/test_preview_abi.mjs $previewProfile $BuildDir $previewTarget 2>&1
+            if ($LASTEXITCODE -ne 0) { $GateFailures += "$previewProfile $previewTarget preview ABI failed" }
+        }
+    }
     Pop-Location
 }
 

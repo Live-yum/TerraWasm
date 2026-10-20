@@ -13,6 +13,7 @@ _tx_native_heap_peak
 _tx_reset_heap
 _tx_memory_used
 _terra_plr_open_from_buffer
+_terra_plr_preview_json_from_buffer
 _terra_plr_open
 _terra_plr_open_json
 _terra_plr_close
