@@ -113,6 +113,7 @@ if ($Test) {
         "tests/test_manifest_contract.js",
         "tests/test_artifact_size_contract.js",
         "tests/test_feature_set.js",
+        "tests/test_basic_runtime_history.mjs",
         "tests/test_stream_abi_manifest.mjs"
     )
     $wldTests = @(
