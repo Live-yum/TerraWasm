@@ -47,4 +47,31 @@ static void run(const char* file) {
     }
     assert(rejected&&committed);printf("candidate commit: %u failures retain old owner, %u replacements succeed\n",rejected,committed);
 }
-int main(int argc,char**argv){assert(argc==3&&terra_world_commit_abi_version()==1);run(argv[1]);run(argv[2]);return 0;}
+extern uint8_t* tx_alloc(uint32_t);
+extern int set_section_override_data(TxWorld*,int,uint8_t*,uint32_t);
+static void corrupt_candidates(const char* file) {
+    for(unsigned workspace=0;workspace<2;workspace++)for(unsigned corruption=0;corruption<4;corruption++) {
+        uint32_t h=0,next=99,size=0,token=0,budget=0;
+        assert(terra_world_open(file,&h)==0);TxWorld* w=tx_get_world(h);
+        uint32_t original_size=w->file_len;uint8_t* original=malloc(original_size);assert(original);
+        memcpy(original,w->file,original_size);
+        if(workspace){assert(terra_world_workspace_checkpoint_size(h,&budget)==0);assert(terra_world_workspace_begin(h,budget,&token)==0);}
+        unsigned section=corruption==3?w->pointer_count-1:1;
+        uint32_t length=w->ends[section]-w->starts[section]+(corruption==2);
+        uint8_t* bytes=tx_alloc(length);assert(bytes);memcpy(bytes,w->file+w->starts[section],length-(corruption==2));
+        if(corruption==0){bytes[0]=0x22;bytes[1]=0xff;bytes[2]=0xff;}
+        if(corruption==1){bytes[0]=0x80;bytes[1]=0xff;bytes[2]=0x7f;}
+        if(corruption==2)bytes[length-1]=0;
+        if(corruption==3)bytes[0]=0;
+        assert(set_section_override_data(w,section,bytes,length));
+        int status=workspace?terra_world_workspace_save_to_buffer(h,NULL,0,&size):terra_world_commit_to_buffer(h,NULL,0,&size,&next);
+        assert(status==0&&size);uint8_t* output=malloc(size);assert(output);
+        status=workspace?terra_world_workspace_save_to_buffer(h,output,size,&size):terra_world_commit_to_buffer(h,output,size,&size,&next);
+        assert(status==TERRAX_WORLD_STATUS_PARSE_ERROR&&tx_get_world(h)==w);
+        assert(workspace||next==0);assert(!memcmp(w->file,original,original_size));
+        if(workspace){assert(terra_world_workspace_rollback(h,token)==0);assert(terra_world_save_to_buffer(h,output,size,&size)==0);assert(size==original_size&&!memcmp(output,original,size));}
+        free(output);free(original);assert(terra_world_close(h)==0);assert(tx_native_heap_used()==0);
+    }
+    puts("candidate validation: invalid tile types, RLE, trailing tile bytes and footer rejected by both save paths");
+}
+int main(int argc,char**argv){assert(argc==3&&terra_world_commit_abi_version()==1);run(argv[1]);run(argv[2]);corrupt_candidates(argv[1]);return 0;}

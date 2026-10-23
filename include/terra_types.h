@@ -482,6 +482,8 @@ int tx_world_is_future(const TxWorld* world);
 int tx_world_require_writable(const TxWorld* world);
 int tx_validate_future_sections(TxWorld* world);
 int tx_validate_future_tiles(TxWorld* world);
+int tx_validate_tiles(TxWorld* world);
+int tx_validate_footer(TxWorld* world);
 
 /* ---------- Pixel art color mapping entry (12 bytes, matches JS DataView layout) ---------- */
 

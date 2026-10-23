@@ -192,6 +192,11 @@ static void tile_rule_validation_contract(const char*path){
    }
   }
  }
+ for(unsigned streaming=0;streaming<2;streaming++){
+  snprintf(request,sizeof(request),"{\"rules\":[{\"patch\":{\"type\":%u}}]}",tx_get_world(world)->tile_type_count);
+  reject_tile_rule(request,streaming);rejected++;
+  reject_tile_rule("{\"rules\":[{\"patch\":{\"type\":65535}}]}",streaming);rejected++;
+ }
  // Rejected edits leave the exported world byte-identical, including a valid
  // first rule followed by an invalid second rule in the same transaction.
  uint32_t saved_size=0;

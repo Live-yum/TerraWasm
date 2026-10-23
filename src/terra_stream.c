@@ -171,7 +171,7 @@ static int read_length(const uint8_t* bytes,uint32_t* offset,uint32_t end,uint32
     for(uint32_t shift=0;shift<35;shift+=7){if(*offset>=end)return 0;uint8_t b=bytes[(*offset)++];if(shift==28&&(b&240))return 0;value|=(uint32_t)(b&127)<<shift;if(!(b&128)){*length=value;return value<=end-*offset;}}
     return 0;
 }
-static int validate_footer(TxWorld* w){
+int tx_validate_footer(TxWorld* w){
     uint32_t index=w->version>=220?10:w->version>=210?9:w->version>=189?8:w->version>=170?7:w->version>=116?6:5;
     if(index>=w->pointer_count)return fail("TERRAX_BAD_FOOTER","world footer section is missing");
     uint32_t off=w->starts[index],end=w->ends[index],header=w->starts[0],name_len,header_len;
@@ -308,7 +308,7 @@ oom:
 static int finish_compact_open(StreamTask* t){
     TxWorld* w=t->candidate;uint32_t table=u32(w->file)>=135?26:6,count=u16(w->file+table-2);
     for(uint32_t i=2;i<count;i++)put32(w->file+table+i*4,u32(w->file+table+i*4)-(t->original_end-t->original_start));
-    if(!parse_format(w)||!parse_header(w)||w->maxTilesX<=0||w->maxTilesY<=0||(uint32_t)w->maxTilesX>METADATA_LIMIT/4-1||validate_footer(w)<0)return -1;
+    if(!parse_format(w)||!parse_header(w)||w->maxTilesX<=0||w->maxTilesY<=0||(uint32_t)w->maxTilesX>METADATA_LIMIT/4-1||tx_validate_footer(w)<0)return -1;
     w->stream_source_id=t->source_id;w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
     w->stream_columns=(uint32_t*)tx_persistent_alloc(((uint32_t)w->maxTilesX+1)*4);
     if(!w->stream_columns)return fail("TERRAX_WASM_OOM","column index allocation failed");
@@ -333,7 +333,7 @@ static int compact_metadata(StreamTask* t,const char* operation,const char* requ
         memset(&w->section_overrides[i],0,sizeof(w->section_overrides[i]));
     }
     if(w->important_override){tx_internal_free(w->important_override);w->important_override=NULL;}
-    if(!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return 0;
+    if(!parse_format(w)||!parse_header(w)||tx_validate_footer(w)<0)return 0;
     if(w->maxTilesX!=t->source->maxTilesX||w->maxTilesY!=t->source->maxTilesY){
         fail("TERRAX_INVALID_ARGUMENT","streaming header patch cannot resize world dimensions");return 0;
     }
@@ -735,7 +735,7 @@ static int finish_write_tiles(StreamTask* t){
     w->stream_columns[t->x]=t->output_offset+t->output.len;
     w->stream_tile_start=t->prefix_length;w->stream_tile_end=t->output_offset+t->output.len;
     if(w->prepared_output)tx_output_stream_finish(w);
-    if((w->pixel_art_indexed&&!tx_stream_metadata_finish(w,&t->metadata))||!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return -1;
+    if((w->pixel_art_indexed&&!tx_stream_metadata_finish(w,&t->metadata))||!parse_format(w)||!parse_header(w)||tx_validate_footer(w)<0)return -1;
     t->suffix_offset=w->starts[2];t->stage=WRITE_SUFFIX;return 0;
 }
 static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){

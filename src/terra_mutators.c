@@ -1,5 +1,6 @@
 /* Verified WLD section encoders used by explicit mutating operations. */
 #include "terra_types.h"
+#include <string.h>
 #include "terra_header.h"
 #include <float.h>
 #include <limits.h>
@@ -26,9 +27,6 @@ extern void buf_cstr(TxBuf *b,const char *s);
 extern void json_u32(TxBuf *b,uint32_t v);
 extern int set_result_buf(TxBuf *b);
 extern int set_section_override_data(TxWorld *w,int idx,uint8_t *data,uint32_t len);
-extern void *memcpy(void *dst,const void *src,unsigned long n);
-extern void *memset(void *dst,int value,unsigned long n);
-extern int memcmp(const void *a,const void *b,unsigned long n);
 extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t rd_7bit(const uint8_t *p,uint32_t len,uint32_t *off,int *ok);

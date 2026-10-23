@@ -38,7 +38,7 @@ static terrax_world_status tx_commit_prepare_candidate(const uint8_t* bytes,uint
     if(!candidate->file){tx_set_error("TERRAX_WASM_OOM","replacement world allocation failed; old world retained");return TERRAX_WORLD_STATUS_INTERNAL_ERROR;}
     memcpy(candidate->file,bytes,length);candidate->file_len=length;candidate->stream_owned=1u;
     uint32_t mark=tx_mark();
-    int valid=parse_format(candidate)&&parse_header(candidate)&&tx_validate_future_tiles(candidate);
+    int valid=parse_format(candidate)&&parse_header(candidate)&&tx_validate_tiles(candidate)&&(candidate->legacy_wld||tx_validate_footer(candidate)==0);
     if(valid&&candidate->legacy_wld) {
         valid=candidate->important&&candidate->important_len<=legacy_bytes;
         if(valid){memcpy(candidate->file+length,candidate->important,candidate->important_len);candidate->important=candidate->file+length;}
@@ -111,7 +111,7 @@ terrax_world_status terra_world_workspace_save_to_buffer(uint32_t handle, uint8_
     uint32_t mark = tx_mark();
     TxWorld candidate = {0};
     candidate.file = output; candidate.file_len = *out_required;
-    int valid = parse_format(&candidate) && parse_header(&candidate) && tx_validate_future_tiles(&candidate);
+    int valid = parse_format(&candidate) && parse_header(&candidate) && tx_validate_tiles(&candidate) && (candidate.legacy_wld || tx_validate_footer(&candidate)==0);
     tx_rewind(mark);
     return valid ? TERRAX_WORLD_STATUS_OK : TERRAX_WORLD_STATUS_PARSE_ERROR;
 }

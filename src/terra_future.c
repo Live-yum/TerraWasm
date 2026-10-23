@@ -9,7 +9,7 @@
 #include <limits.h>
 
 extern void tx_set_error(const char*, const char*);
-extern int read_tile_at(TxWorld*, uint32_t*, uint32_t, TxTile*);
+extern int tx_read_tile_strict(TxWorld*, uint32_t*, uint32_t, TxTile*);
 
 int tx_world_is_future(const TxWorld* w) {
     return w && (w->original_version > TX_CURRENT_KNOWN_VERSION ||
@@ -131,15 +131,18 @@ int tx_validate_future_sections(TxWorld* w) {
     return 1;
 }
 
-int tx_validate_future_tiles(TxWorld* w) {
-    if (!tx_world_is_future(w)) return 1;
+int tx_validate_tiles(TxWorld* w) {
     uint32_t off=w->starts[1],end=w->ends[1];
     for(uint32_t x=0;x<(uint32_t)w->maxTilesX;x++)for(uint32_t y=0;y<(uint32_t)w->maxTilesY;) {
         TxTile t;
-        if(!read_tile_at(w,&off,end,&t)||(uint32_t)t.same+1u>(uint32_t)w->maxTilesY-y)
-            return bad("tile record or RLE exceeds the attempted world layout");
+        if(!tx_read_tile_strict(w,&off,end,&t)||(t.active && t.type>=w->tile_type_count)||(uint32_t)t.same+1u>(uint32_t)w->maxTilesY-y)
+            { tx_set_error("TERRAX_BAD_TILE_STREAM","invalid tile type, record or RLE in world candidate"); return 0; }
         y+=(uint32_t)t.same+1u;
     }
-    if(off!=end)return bad("tile section was not consumed exactly");
+    if(off!=end) { tx_set_error("TERRAX_BAD_TILE_STREAM","tile section was not consumed exactly"); return 0; }
     return 1;
+}
+
+int tx_validate_future_tiles(TxWorld* w) {
+    return !tx_world_is_future(w) || tx_validate_tiles(w);
 }

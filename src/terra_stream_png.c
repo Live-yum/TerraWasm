@@ -1,7 +1,6 @@
 #include "terra_stream_png.h"
 #include "terra_output.h"
-extern void* memset(void*, int, unsigned long);
-extern void* memcpy(void*, const void*, unsigned long);
+#include <string.h>
 extern void buf_u8(TxBuf*, uint8_t);
 extern void buf_bytes(TxBuf*, const void*, uint32_t);
 extern void buf_u32be(TxBuf*, uint32_t);

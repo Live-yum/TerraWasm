@@ -893,6 +893,11 @@ int tx_stream_parse_tile_rules(TxWorld* w, const char* request, int jlen, TxTile
                 TRY_PATCH_BOOL(patch_inactive, "inactive")
                 #undef TRY_PATCH_BOOL
             }
+            if (rules[r].patch_type >= 0 && (uint32_t)rules[r].patch_type >= w->tile_type_count) {
+                tx_internal_free(rules);
+                tx_set_error("TERRAX_VALIDATION_ERROR", "patch.type exceeds the world tile type table");
+                return -1;
+            }
             if (where_pos >= 0) {
                 int where_end = json_skip_value(request, jlen, where_pos);
                 int mp = json_find_key(request + where_pos, where_end - where_pos, "material");

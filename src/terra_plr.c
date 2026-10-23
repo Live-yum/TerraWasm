@@ -22,16 +22,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #else
 #include <unistd.h>
 #endif
 
-extern void *memcpy(void *dst, const void *src, unsigned long n);
-extern void *memset(void *dst, int value, unsigned long n);
 extern uint8_t *tx_persistent_alloc(uint32_t size);
 extern void tx_persistent_free(void *ptr);
 extern void *tx_persistent_realloc(void *ptr, uint32_t size);
@@ -3967,7 +3969,16 @@ static int plr_write_file(const char *path, const uint8_t *data, uint32_t length
     FILE *file = NULL;
     for (unsigned attempt = 0; attempt < 128; ++attempt) {
         snprintf(candidate, n + 80u, "%s.tmp.%lu.%lu", path, pid, (unsigned long)++sequence);
+#ifdef _WIN32
+        /* MSVCRT does not support fopen's C11 exclusive-create mode. */
+        int fd = _open(candidate, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+        if (fd >= 0) {
+            file = _fdopen(fd, "wb");
+            if (!file) { _close(fd); remove(candidate); break; }
+        }
+#else
         file = fopen(candidate, "wbx");
+#endif
         if (file || errno != EEXIST) break;
     }
     if (!file) { free(candidate); return 0; }
