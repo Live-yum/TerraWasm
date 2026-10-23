@@ -1,5 +1,8 @@
 * text=auto
 
+# This exported fixture has an exact producer SHA-256 contract.
+tests/fixtures/circuit-hello.json text eol=lf
+
 # Generated lookup databases and world fixtures are binary assets.
 *.txci filter=lfs diff=lfs merge=lfs -text
 *.gz filter=lfs diff=lfs merge=lfs -text

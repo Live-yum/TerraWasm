@@ -1165,7 +1165,11 @@ function makeEntityWorld(customCells, options = {}) {
   const tileStart=format.length+header.length, tileEnd=tileStart+data.length;
   for(let i=0;i<sections;i++) format.writeUInt32LE(i===0?format.length:i===1?tileStart:tileEnd,pointerOffset+i*4);
   format.writeUInt16LE(700,pointerOffset+sections*4); important.copy(format,pointerOffset+sections*4+2);
-  return Buffer.concat([format,header,Buffer.from(data)]);
+  // Saved candidates require the same footer identity as real world files.
+  let namePrefix = 0, nameLength = 0, nameShift = 0, nameByte;
+  do { nameByte = header[namePrefix++]; nameLength |= (nameByte & 127) << nameShift; nameShift += 7; } while (nameByte & 128);
+  const footer = Buffer.concat([Buffer.from([1]), header.subarray(0, namePrefix + nameLength), header.subarray(afterName, afterName + 4)]);
+  return Buffer.concat([format,header,Buffer.from(data),footer]);
 }
 
 // Decode fixture tiles independently of the WASM decoder, ignoring RLE grouping.
