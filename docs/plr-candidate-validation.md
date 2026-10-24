@@ -17,6 +17,24 @@ truncation failures prevent replacement. The original remains untouched by these
 pre-publication failures. Normal buffer encoding does not acquire filesystem
 publication responsibilities or run this extra file validation.
 
+On native Windows, the public paths are strict UTF-8. They are converted with
+`MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS)` before use. Opening,
+exclusive candidate creation, readback, replacement and failed-candidate removal
+all use the wide-character APIs; the process ANSI code page cannot redirect them
+to another file. Target and candidate path buffers are acquired before creating
+the candidate, so cleanup does not need another path allocation. Invalid UTF-8
+is rejected. Replacement retains `MOVEFILE_REPLACE_EXISTING` and
+`MOVEFILE_WRITE_THROUGH`, now through `MoveFileExW`.
+
+`terra_plr_file_contract` exercises 16 consecutive cycles using Chinese and emoji
+directory/file names, the same player owner and the same process. It checks
+exact original bytes and the absence of stray candidates after short writes,
+candidate corruption/truncation, allocation failure and a real filesystem
+replacement failure. The Windows CI job also holds an actual file handle that
+denies delete sharing, proves that replacement fails without changing the
+original, then closes the handle and successfully retries. This is platform
+filesystem coverage; it does not imply a managed receipt or crash durability.
+
 The prior implementation returned success when a test changed a candidate byte
 between writing and replacement. The regression now rejects changed, appended
 and truncated candidates. Twelve allocation-fault positions with a warm encoding

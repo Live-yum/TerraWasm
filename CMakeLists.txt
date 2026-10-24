@@ -611,6 +611,9 @@ else()
             add_terra_contract(terra_plr_workspace_contract tests/plr_workspace_contract.c)
             target_compile_definitions(terra_plr_workspace_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
+            add_terra_contract(terra_plr_file_contract tests/plr_file_contract.c)
+            target_compile_definitions(terra_plr_file_contract PRIVATE
+                TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
 
             set(TERRAWASM_PLR_REAL_FIXTURE_PATH
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/烟花.plr"
