@@ -1,3 +1,4 @@
+#include "terra_alignment.h"
 #include "terra_pixel_workspace.h"
 #include "terra_checkpoint.h"
 #include <limits.h>
@@ -26,7 +27,7 @@ typedef struct PxHistory {
 } PxHistory;
 typedef union PxAllocation {
     struct { uint32_t bytes; } value;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 } PxAllocation;
 typedef struct PxWorkspace {
     uint32_t handle, width, height, columns, rows, slot_count;

@@ -51,9 +51,9 @@ jobs:
       - name: Configure native Windows PLR file contract
         run: cmake -S . -B build-windows-plr -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_FEATURE_SET=plr -DTERRAWASM_NATIVE_TESTS=ON
       - name: Build native Windows PLR file contract
-        run: cmake --build build-windows-plr --config Release --target terra_plr_file_contract --parallel
+        run: cmake --build build-windows-plr --config Release --target terra_plr_file_contract terra_allocator_contract terra_native_span_contract --parallel
       - name: Verify Unicode paths and real replacement failures
-        run: ctest --test-dir build-windows-plr --build-config Release --output-on-failure -R "^terra_plr_file_contract$"
+        run: ctest --test-dir build-windows-plr --build-config Release --output-on-failure -R "^terra_(plr_file|allocator|native_span)_contract$"
       - name: Upload Windows filesystem evidence
         if: always()
         uses: actions/upload-artifact@v7

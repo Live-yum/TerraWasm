@@ -1,4 +1,5 @@
 /* Full-column validation with FIFO-only fixed row-block demand cache. */
+#include "terra_alignment.h"
 #include "terra_circuit_geometry.h"
 #include <stddef.h>
 #include <string.h>
@@ -10,7 +11,7 @@ extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
 #define CX_BLOCK_SLOTS (CX_BLOCK_ARENA_BYTES/CX_BLOCK_BYTES)
 /* Round the borrowed tail start up, never into the block prefix. Any alignment
  * padding reduces the returned tail size rather than growing its reservation. */
-#define CX_ORDER_ARENA_ALIGNMENT _Alignof(max_align_t)
+#define CX_ORDER_ARENA_ALIGNMENT _Alignof(TerraMaxAlign)
 #define CX_ORDER_ARENA_OFFSET (((CX_BLOCK_ARENA_BYTES+CX_ORDER_ARENA_ALIGNMENT-1u)/CX_ORDER_ARENA_ALIGNMENT)*CX_ORDER_ARENA_ALIGNMENT)
 _Static_assert(CX_GEOMETRY_ORDER_CACHE_BYTES<CX_GEOMETRY_COLD_BYTES,"order tail must leave block storage");
 _Static_assert(CX_BLOCK_SLOTS>0u,"block arena must contain a slot");

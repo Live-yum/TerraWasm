@@ -4,6 +4,7 @@
  * Metadata is read before a second streaming pass because tileMap can occur after
  * a several-hundred-megabyte tileData array. No expanded world array is retained.
  */
+#include "terra_alignment.h"
 #include "terra_circuit_twld.h"
 #include <limits.h>
 #include <stddef.h>
@@ -26,7 +27,7 @@ enum TwRole { TW_OTHER, TW_ROOT_ROLE, TW_TILES_ROLE, TW_TILE_DATA,
     TW_TILE_MAP, TW_MAP_ENTRY, TW_ENTRY_VALUE, TW_ENTRY_MOD,
     TW_ENTRY_NAME, TW_ENTRY_FRAMED, TW_ENTITY_LIST, TW_ENTITY,
     TW_ENTITY_X, TW_ENTITY_Y };
-typedef union TwAllocation { struct { uint32_t bytes; } value; max_align_t alignment; } TwAllocation;
+typedef union TwAllocation { struct { uint32_t bytes; } value; TerraMaxAlign alignment; } TwAllocation;
 typedef struct TwContainer { uint32_t type, role, remaining, element; } TwContainer;
 
 struct TerraTwld {

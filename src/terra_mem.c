@@ -1,3 +1,4 @@
+#include "terra_alignment.h"
 #include "terra_native_span.h"
 /*
  * terra_mem.c -- Owned allocation domains, TxBuf, toolchain libc.
@@ -64,7 +65,7 @@ union TxAllocHeader {
         TxAllocHeader* next;
         uintptr_t reserved;
     } root;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 };
 
 #ifdef TERRAX_TESTING

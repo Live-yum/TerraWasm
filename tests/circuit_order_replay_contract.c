@@ -2,13 +2,14 @@
  * Build separately, WITHOUT linking terra_circuit_world.c or replay.c:
  * cc -std=c11 -Wall -Wextra -Iinclude -Isrc tests/circuit_order_replay_contract.c -o order-replay-contract
  * This file includes replay.c to inspect per-cell commit atomicity. */
+#include "terra_alignment.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../src/terra_circuit_order_replay.c"
 
-typedef union TestAllocation { max_align_t align; struct {uint32_t size;} v; } TestAllocation;
+typedef union TestAllocation { TerraMaxAlign align; struct {uint32_t size;} v; } TestAllocation;
 static uint32_t live_allocations;
 void* cx_alloc(CxWorld* w,uint32_t n){
     if((uint64_t)w->bytes+n+sizeof(TestAllocation)>w->maximum)return NULL;

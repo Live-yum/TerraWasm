@@ -1,5 +1,6 @@
 /* Native Wiring.HitWire traversal. See docs/CIRCUIT_ABI_V1.md for source pin,
  * interleaving contract, limits, and the host-owned gate/device responsibilities. */
+#include "terra_alignment.h"
 #include "terra_circuit.h"
 #include "terra_checkpoint.h"
 #include <limits.h>
@@ -18,7 +19,7 @@ typedef struct CwCell {
 } CwCell;
 typedef union CwAllocation {
     struct { uint32_t bytes; } value;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 } CwAllocation;
 typedef struct CwWorkspace {
     uint32_t handle, width, height, capacity, count, hash_capacity;

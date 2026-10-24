@@ -1,4 +1,5 @@
 /* Streaming, bounded-memory WLD circuit session. See docs/CIRCUIT_WORLD_ABI_V1.md. */
+#include "terra_alignment.h"
 #include "terra_circuit_world_internal.h"
 #include "terra_circuit_geometry.h"
 #include "terra_owner_guards.h"
@@ -16,7 +17,7 @@ extern void write_tile(TxWorld*,TxBuf*,const TxTile*,uint32_t);
 extern void tx_internal_free(void*);
 extern int tx_bridge_range_is_valid(uint32_t,uint32_t);
 
-typedef union CxAllocation { struct { uint32_t bytes; } v; max_align_t alignment; } CxAllocation;
+typedef union CxAllocation { struct { uint32_t bytes; } v; TerraMaxAlign alignment; } CxAllocation;
 static CxWorld* sessions[4];
 static uint32_t next_session=1;
 int tx_circuit_world_owns_world(uint32_t handle) {

@@ -1,6 +1,7 @@
 /* Candidate G: borrowed order tail never changes geometry ownership or grows
  * F's charged footprint. Run this same contract with cache use both on and off. */
 #define main geometry_existing_contract_main
+#include "terra_alignment.h"
 #include "circuit_geometry_contract.c"
 #undef main
 static void* partition_alloc(CxWorld*,uint32_t);
@@ -31,7 +32,7 @@ static void tail_and_wrap(void){
     Fixture f;init(&f,4,128,0);assert(cx_geometry_create(&f.owner)==TCW_OK);CxOrderGeometry* g=f.owner.geometry;
     uint32_t size=0;uint8_t* tail=cx_geometry_order_cache_arena(&f.owner,&size);
     assert(tail&&size&&size<=CX_GEOMETRY_ORDER_CACHE_BYTES);
-    assert((uintptr_t)tail%_Alignof(max_align_t)==0);
+    assert((uintptr_t)tail%_Alignof(TerraMaxAlign)==0);
     assert(tail==g->cold_bytes+CX_ORDER_ARENA_OFFSET&&tail+size==g->cold_bytes+CX_GEOMETRY_COLD_BYTES);
     assert(CX_BLOCK_SLOTS*CX_BLOCK_BYTES<=CX_BLOCK_ARENA_BYTES&&CX_BLOCK_ARENA_BYTES<=CX_ORDER_ARENA_OFFSET);
     assert(CX_BLOCK_SLOTS==(CX_GEOMETRY_COLD_BYTES-CX_GEOMETRY_ORDER_CACHE_BYTES)/CX_BLOCK_BYTES);
