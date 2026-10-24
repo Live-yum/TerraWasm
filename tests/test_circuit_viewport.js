@@ -124,3 +124,22 @@ test('warm viewport source reuse adds no retained cache and stays coherent acros
     assert.deepEqual(command(d, 1, { x: 9, y: 9, width: 4, height: 4, flags: 2 }).rows, walls);
   } finally { d.dispose(); }
 });
+
+
+test('UINT32_MAX viewport strides retain one sample at positive origins on all source/layer paths', async () => {
+  const bytes = makeCircuitWorld([{ x: 3, y: 2, type: 1, wall: 7 }], 40, 32, 326, { rle: true });
+  for (const memoryBacked of [false, true]) {
+    // Buffer-open is intentionally absent from the minimal Web export profile.
+    const d = await makeDriver(memoryBacked ? 'node' : 'web');
+    try {
+      for (const warm of [false, true]) for (const flags of [0, 2]) for (const quantum of [1, 4096]) {
+        d.open(bytes, 48 * 1024 * 1024, undefined, memoryBacked);
+        if (warm) assert.equal(command(d, 1, { x: 3, y: 2, width: 3, height: 5, flags }, quantum).rows.length, 15);
+        const request = { x: 3, y: 2, width: 3, height: 5, stride: 0xffffffff, flags };
+        const result = command(d, 1, request, quantum);
+        assert.equal(result.rows.length, 1, `source=${memoryBacked ? 'buffer' : 'stream'}, flags=${flags}`);
+        assert.deepEqual(result.rows[0], flags ? [3, 2, 7 | (33 << 16), 0] : [3, 2, 1 | (17 << 16), 0xffffffff]);
+      }
+    } finally { d.dispose(); }
+  }
+});

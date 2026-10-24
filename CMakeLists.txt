@@ -46,6 +46,9 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_circuit_world.c"
     "${SRC_DIR}/terra_circuit_compile.c"
     "${SRC_DIR}/terra_circuit_order.c"
+    "${SRC_DIR}/terra_circuit_geometry.c"
+    "${SRC_DIR}/terra_circuit_order_replay.c"
+    "${SRC_DIR}/terra_circuit_order_cache.c"
     "${SRC_DIR}/terra_circuit_rules.c"
     "${SRC_DIR}/terra_circuit_query.c"
     "${SRC_DIR}/terra_circuit_twld.c"
@@ -298,6 +301,7 @@ if(EMSCRIPTEN)
     set(WEB_IDENTITY_FLAGS ${WEB_LINK_OPTIONS})
     list(REMOVE_AT WEB_IDENTITY_FLAGS 0 1)
     list(PREPEND WEB_IDENTITY_FLAGS "--post-js=memory-growth-limit.js" "-sEXPORTED_FUNCTIONS=@exported_functions_web.json")
+    list(APPEND WEB_IDENTITY_FLAGS "--wrapper-transform=basic-runtime-history-v1")
     string(JOIN " @@ " COMMON_FLAGS_TEXT ${COMMON_MANIFEST_FLAGS})
     string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_IDENTITY_FLAGS})
     string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_IDENTITY_FLAGS})
@@ -334,6 +338,14 @@ if(EMSCRIPTEN)
         ${COMMON_LINK_OPTIONS}
         ${WEB_LINK_OPTIONS}
     )
+    find_program(TERRAX_NODE_EXECUTABLE NAMES node REQUIRED)
+    set(BASIC_HISTORY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/basic-runtime-history.mjs")
+    set_property(TARGET terrax_world_wasm_web APPEND PROPERTY LINK_DEPENDS "${BASIC_HISTORY_SCRIPT}")
+    add_custom_command(TARGET terrax_world_wasm_web POST_BUILD
+        COMMAND "${TERRAX_NODE_EXECUTABLE}" "${BASIC_HISTORY_SCRIPT}" "$<TARGET_FILE:terrax_world_wasm_web>"
+        COMMENT "Instrumenting BASIC memory history and growth fence"
+        VERBATIM)
+
 else()
     set(NATIVE_SOURCES ${SOURCES})
     if(TERRAWASM_ENABLE_WLD)
@@ -347,6 +359,11 @@ else()
     endif()
 
     add_library(terrax_world_static STATIC ${NATIVE_SOURCES})
+    # Keep libm in the public native link interface: Debug builds cannot rely
+    # on the optimizer folding projectile sqrtf calls into instructions.
+    if(UNIX)
+        target_link_libraries(terrax_world_static PUBLIC m)
+    endif()
     configure_terra_identity(terrax_world_static "native" 0 0 "" "")
     target_compile_definitions(terrax_world_static PRIVATE TERRAX_STATIC)
     if(TERRAWASM_SANITIZERS)
@@ -370,12 +387,57 @@ else()
         endfunction()
 
         add_terra_contract(terra_allocator_contract tests/allocator_contract.c)
+        add_terra_contract(terra_native_span_contract tests/native_span_contract.c)
 
         if(TERRAWASM_ENABLE_WLD)
             find_package(ZLIB REQUIRED)
+            add_executable(terra_circuit_order_replay_contract tests/circuit_order_replay_contract.c)
+            target_include_directories(terra_circuit_order_replay_contract PRIVATE "${SRC_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/include")
+            target_compile_options(terra_circuit_order_replay_contract PRIVATE -UNDEBUG)
+            if(TERRAWASM_SANITIZERS)
+                target_compile_options(terra_circuit_order_replay_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(terra_circuit_order_replay_contract PRIVATE -fsanitize=address,undefined)
+            endif()
+            add_test(NAME terra_circuit_order_replay_contract COMMAND terra_circuit_order_replay_contract)
+            add_executable(terra_circuit_order_cache_contract tests/circuit_order_cache_contract.c)
+            target_include_directories(terra_circuit_order_cache_contract PRIVATE "${SRC_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/include")
+            target_compile_options(terra_circuit_order_cache_contract PRIVATE -UNDEBUG)
+            if(TERRAWASM_SANITIZERS)
+                target_compile_options(terra_circuit_order_cache_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(terra_circuit_order_cache_contract PRIVATE -fsanitize=address,undefined)
+            endif()
+            add_test(NAME terra_circuit_order_cache_contract COMMAND terra_circuit_order_cache_contract)
+            add_terra_contract(terra_circuit_order_cache_integration_contract tests/circuit_order_cache_integration_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_order_cache_integration_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_order_cache_integration_off_contract tests/circuit_order_cache_integration_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_order_cache_integration_off_contract PRIVATE "${SRC_DIR}")
+            target_compile_definitions(terra_circuit_order_cache_integration_off_contract PRIVATE CX_ORDER_CACHE_ENABLED=0)
+            add_terra_contract(terra_circuit_geometry_partition_contract tests/circuit_geometry_partition_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_geometry_partition_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_geometry_partition_off_contract tests/circuit_geometry_partition_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_geometry_partition_off_contract PRIVATE "${SRC_DIR}")
+            target_compile_definitions(terra_circuit_geometry_partition_off_contract PRIVATE CX_ORDER_CACHE_ENABLED=0)
+            add_terra_contract(terra_circuit_order_empty_colour_contract tests/circuit_order_empty_colour_contract.c ZLIB::ZLIB)
+            target_sources(terra_circuit_order_empty_colour_contract PRIVATE tests/order_reference.c)
+            target_include_directories(terra_circuit_order_empty_colour_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_order_geometry_contract tests/circuit_order_geometry_contract.c ZLIB::ZLIB)
+            target_sources(terra_circuit_order_geometry_contract PRIVATE tests/order_reference.c)
+            target_include_directories(terra_circuit_order_geometry_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_geometry_cold_contract tests/circuit_geometry_cold_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_circuit_geometry_block_contract tests/circuit_geometry_block_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_geometry_block_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_geometry_palette_contract tests/circuit_geometry_palette_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_geometry_palette_contract PRIVATE "${SRC_DIR}")
+            target_include_directories(terra_circuit_geometry_cold_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_geometry_contract tests/circuit_geometry_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_geometry_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_circuit_contract tests/circuit_contract.c)
+            add_terra_contract(terra_circuit_binding_index_contract tests/circuit_binding_index_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_binding_index_contract PRIVATE "${SRC_DIR}")
             target_compile_definitions(terra_circuit_contract PRIVATE TERRAX_TESTING)
             add_terra_contract(terra_circuit_vm_contract tests/circuit_vm_contract.c)
+            add_terra_contract(terra_circuit_twld_routing_contract tests/circuit_twld_routing_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_circuit_twld_routing_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_circuit_twld_unit tests/circuit_twld_unit.c ZLIB::ZLIB)
             add_terra_contract(terra_circuit_actuation_contract tests/circuit_actuation_contract.c)
             target_include_directories(terra_circuit_actuation_contract PRIVATE "${SRC_DIR}")
@@ -405,54 +467,103 @@ else()
                     DEPENDS tests/generate-header-string-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/legacy-world.js
                     VERBATIM)
                 add_custom_target(terra_header_string_fixtures DEPENDS "${HEADER_STRING_FIXTURES}/padded-original.wld")
+                add_terra_contract(terra_header_json_contract tests/header_json_contract.c ZLIB::ZLIB)
+                target_compile_definitions(terra_header_json_contract PRIVATE TERRAX_HEADER_STRING_FIXTURE_DIR="${HEADER_STRING_FIXTURES}")
+                add_dependencies(terra_header_json_contract terra_header_string_fixtures)
                 add_terra_contract(terra_header_string_contract tests/header_string_contract.c ZLIB::ZLIB)
                 target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_FIXTURE_DIR="${HEADER_STRING_FIXTURES}")
                 add_dependencies(terra_header_string_contract terra_header_string_fixtures)
-                if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT TERRAWASM_SANITIZERS)
-                    target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_STREAM_TESTS)
-                    target_compile_options(terra_header_string_contract PRIVATE -fno-pie)
-                    target_link_options(terra_header_string_contract PRIVATE -no-pie)
-                endif()
+                target_compile_definitions(terra_header_string_contract PRIVATE TERRAX_HEADER_STRING_STREAM_TESTS)
             endif()
             add_terra_contract(terra_marker_color_index_contract tests/marker_color_index_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_marker_rows_contract tests/marker_rows_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_stream_png_chest_cache_contract tests/stream_png_chest_cache_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_map_icon_cache_contract tests/map_icon_cache_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_map_runtime_contract tests/map_runtime_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_pixel_foreign_checkpoint_contract tests/pixel_foreign_checkpoint_contract.c ZLIB::ZLIB)
+            add_terra_contract(terra_circuit_world_lease_contract tests/circuit_world_lease_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_world_checkpoint_contract tests/world_checkpoint_contract.c ZLIB::ZLIB)
             target_compile_definitions(terra_world_checkpoint_contract PRIVATE TERRAX_TESTING)
+            set(TERRAWASM_REAL_WORLD_FIXTURE "" CACHE FILEPATH "Private real-world fixture (never copied into artifacts)")
+            if(TERRAWASM_REAL_WORLD_FIXTURE)
+                if(NOT EXISTS "${TERRAWASM_REAL_WORLD_FIXTURE}")
+                    message(FATAL_ERROR "TERRAWASM_REAL_WORLD_FIXTURE does not exist")
+                endif()
+                add_test(NAME terra_world_checkpoint_real_file COMMAND terra_world_checkpoint_contract "${TERRAWASM_REAL_WORLD_FIXTURE}")
+            endif()
             add_terra_contract(terra_pixel_workspace_contract tests/pixel_workspace_contract.c)
             target_compile_definitions(terra_pixel_workspace_contract PRIVATE TERRAX_TESTING)
 
-            # The public stream bridge uses Wasm32 pointers. LP64 ASan reserves
-            # high addresses, so run this bridge contract in the native job;
-            # the existing parser/renderer contracts still run under ASan.
-            if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT TERRAWASM_SANITIZERS)
-                find_program(TERRAX_NODE_EXECUTABLE node)
-                if(TERRAX_NODE_EXECUTABLE)
-                    set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
-                    add_custom_command(
-                        OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                               "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
-                               "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                               "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
-                        COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
-                        DEPENDS tests/generate-stream-fixtures.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
-                        VERBATIM)
-                    add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
-                        "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
-                        "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
-                        "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
-                    add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
-                    target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG -fno-pie)
-                    target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
-                    target_link_options(terra_stream_boundary_contract PRIVATE -no-pie)
-                    target_link_libraries(terra_stream_boundary_contract PRIVATE terrax_world_static ZLIB::ZLIB)
-                    add_dependencies(terra_stream_boundary_contract terra_stream_fixtures)
-                    add_test(NAME terra_stream_boundary_contract COMMAND terra_stream_boundary_contract "${STREAM_FIXTURES}")
-                else()
-                    message(STATUS "Stream boundary fixture generation needs Node; contract not enabled")
+            # Pointer-span native adapters allow PIE and sanitizer allocations.
+            find_program(TERRAX_NODE_EXECUTABLE node)
+            if(TERRAX_NODE_EXECUTABLE)
+                set(STREAM_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/stream-fixtures")
+                add_custom_command(
+                    OUTPUT "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                           "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
+                           "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
+                           "${STREAM_FIXTURES}/commit-legacy87.wld" "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob"
+                    COMMAND ${TERRAX_NODE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate-stream-fixtures.js" "${STREAM_FIXTURES}"
+                    DEPENDS tests/generate-stream-fixtures.js tests/helpers/legacy-world.js tests/helpers/sectioned-world.js tests/helpers/circuit-world.js tests/helpers/circuit-objects.js
+                    VERBATIM)
+                add_custom_target(terra_stream_fixtures DEPENDS "${STREAM_FIXTURES}/high.wld" "${STREAM_FIXTURES}/noise.wld"
+                    "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/markers.wld" "${STREAM_FIXTURES}/short-columns.wld" "${STREAM_FIXTURES}/marker-wide.wld" "${STREAM_FIXTURES}/marker-narrow.wld" "${STREAM_FIXTURES}/circuit-fragments.wld"
+                    "${STREAM_FIXTURES}/circuit-objects.wld" "${STREAM_FIXTURES}/circuit-objects-old.wld"
+                    "${STREAM_FIXTURES}/commit-legacy87.wld" "${STREAM_FIXTURES}/circuit-objects.geometry" "${STREAM_FIXTURES}/circuit-objects.cob")
+                add_executable(terra_stream_boundary_contract tests/stream_boundary_contract.c)
+                target_compile_options(terra_stream_boundary_contract PRIVATE -UNDEBUG)
+                target_compile_definitions(terra_stream_boundary_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_link_libraries(terra_stream_boundary_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_stream_boundary_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_stream_boundary_contract PRIVATE -fsanitize=address,undefined)
                 endif()
+                add_dependencies(terra_stream_boundary_contract terra_stream_fixtures)
+                add_test(NAME terra_stream_boundary_contract COMMAND terra_stream_boundary_contract "${STREAM_FIXTURES}")
+                add_executable(terra_op_atomic_response_contract tests/op_atomic_response_contract.c)
+                target_compile_definitions(terra_op_atomic_response_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_op_atomic_response_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_op_atomic_response_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_op_atomic_response_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_op_atomic_response_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_op_atomic_response_contract terra_stream_fixtures)
+                add_test(NAME terra_op_atomic_response_contract COMMAND terra_op_atomic_response_contract "${STREAM_FIXTURES}/small.wld")
+                add_executable(terra_world_outcome_contract tests/world_outcome_contract.c)
+                target_compile_definitions(terra_world_outcome_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_world_outcome_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_world_outcome_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_world_outcome_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_world_outcome_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_world_outcome_contract terra_stream_fixtures)
+                add_test(NAME terra_world_outcome_contract COMMAND terra_world_outcome_contract "${STREAM_FIXTURES}/small.wld")
+                add_executable(terra_owned_cleanup_pressure_contract tests/owned_cleanup_pressure_contract.c)
+                target_compile_definitions(terra_owned_cleanup_pressure_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_owned_cleanup_pressure_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_owned_cleanup_pressure_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_owned_cleanup_pressure_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_owned_cleanup_pressure_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_owned_cleanup_pressure_contract terra_stream_fixtures)
+                add_test(NAME terra_owned_cleanup_pressure_contract COMMAND terra_owned_cleanup_pressure_contract "${STREAM_FIXTURES}/small.wld")
+                add_executable(terra_world_commit_candidate_contract tests/world_commit_candidate_contract.c)
+                target_compile_definitions(terra_world_commit_candidate_contract PRIVATE TERRAX_STATIC TERRAX_TESTING)
+                target_compile_options(terra_world_commit_candidate_contract PRIVATE -UNDEBUG)
+                target_link_libraries(terra_world_commit_candidate_contract PRIVATE terrax_world_static ZLIB::ZLIB)
+                if(TERRAWASM_SANITIZERS)
+                    target_compile_options(terra_world_commit_candidate_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                    target_link_options(terra_world_commit_candidate_contract PRIVATE -fsanitize=address,undefined)
+                endif()
+                add_dependencies(terra_world_commit_candidate_contract terra_stream_fixtures)
+                add_test(NAME terra_world_commit_candidate_contract COMMAND terra_world_commit_candidate_contract "${STREAM_FIXTURES}/small.wld" "${STREAM_FIXTURES}/commit-legacy87.wld")
+                add_dependencies(terra_world_checkpoint_contract terra_stream_fixtures)
+                add_test(NAME terra_world_checkpoint_generated_file COMMAND terra_world_checkpoint_contract "${STREAM_FIXTURES}/small.wld")
+            else()
+                message(STATUS "Stream boundary fixture generation needs Node; contract not enabled")
             endif()
 
 
@@ -491,8 +602,17 @@ else()
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}"
             )
 
+            if(TERRAWASM_ENABLE_WLD)
+                add_terra_contract(terra_foreign_owner_checkpoint_contract tests/foreign_owner_checkpoint_contract.c ZLIB::ZLIB)
+                target_compile_definitions(terra_foreign_owner_checkpoint_contract PRIVATE
+                    TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
+            endif()
+
             add_terra_contract(terra_plr_workspace_contract tests/plr_workspace_contract.c)
             target_compile_definitions(terra_plr_workspace_contract PRIVATE
+                TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
+            add_terra_contract(terra_plr_file_contract tests/plr_file_contract.c)
+            target_compile_definitions(terra_plr_file_contract PRIVATE
                 TERRAWASM_PLR_JSON_FIXTURE_PATH="${TERRAWASM_PLR_JSON_FIXTURE_DEFINE}")
 
             set(TERRAWASM_PLR_REAL_FIXTURE_PATH
@@ -505,6 +625,19 @@ else()
             file(TO_CMAKE_PATH
                 "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
                 TERRAWASM_PLR_REAL_FIXTURE_DEFINE)
+            # Preview is read-only and uses both existing external compatibility fixtures.
+            add_executable(terra_plr_preview_contract tests/plr_preview_contract.c)
+            target_link_libraries(terra_plr_preview_contract PRIVATE terrax_world_static)
+            target_compile_definitions(terra_plr_preview_contract PRIVATE TERRAX_STATIC)
+            target_compile_options(terra_plr_preview_contract PRIVATE -UNDEBUG)
+            if(TERRAWASM_SANITIZERS)
+                target_compile_options(terra_plr_preview_contract PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+                target_link_options(terra_plr_preview_contract PRIVATE -fsanitize=address,undefined)
+            endif()
+            add_test(NAME terra_plr_preview_contract COMMAND terra_plr_preview_contract
+                "${TERRAWASM_PLR_REAL_FIXTURE_PATH}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/灼眼半夏.plr")
+
             add_terra_contract(terra_plr_real_fixture_contract tests/plr_real_fixture_contract.c)
             target_compile_definitions(terra_plr_real_fixture_contract PRIVATE
                 TERRAWASM_PLR_REAL_FIXTURE_PATH="${TERRAWASM_PLR_REAL_FIXTURE_DEFINE}"

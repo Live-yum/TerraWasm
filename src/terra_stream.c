@@ -1,3 +1,4 @@
+#include "terra_owner_guards.h"
 /* Cooperative file-backed WLD reader/writer. No whole tile or output buffer. */
 #include "terra_stream.h"
 #include "terra_checkpoint.h"
@@ -76,6 +77,7 @@ typedef struct EditRuleGroup {
 typedef struct StreamTask {
     uint32_t id, stage, is_write, old_handle;
     TxStreamEvent event;
+    const uint8_t* event_data;
     TxStreamInputLease lease;
     TxStreamStats stats;
     TxWorld* candidate;
@@ -159,7 +161,7 @@ uint32_t txw_test_stream_begin_for_runtime(void) {
 #endif
 
 static int fail(const char* code,const char* message) { tx_set_error(code,message);return -1; }
-static int valid_range(const void* ptr,uint32_t bytes) { return ptr&&tx_bridge_range_is_valid((uint32_t)(uintptr_t)ptr,bytes); }
+static int valid_range(const void* ptr,uint32_t bytes) { return ptr&&tx_bridge_contains_native(ptr,bytes); }
 static uint32_t u16(const uint8_t* p){return (uint32_t)p[0]|((uint32_t)p[1]<<8);}
 static uint32_t u32(const uint8_t* p){return u16(p)|(u16(p+2)<<16);}
 static void put16(uint8_t* p,uint32_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
@@ -169,7 +171,7 @@ static int read_length(const uint8_t* bytes,uint32_t* offset,uint32_t end,uint32
     for(uint32_t shift=0;shift<35;shift+=7){if(*offset>=end)return 0;uint8_t b=bytes[(*offset)++];if(shift==28&&(b&240))return 0;value|=(uint32_t)(b&127)<<shift;if(!(b&128)){*length=value;return value<=end-*offset;}}
     return 0;
 }
-static int validate_footer(TxWorld* w){
+int tx_validate_footer(TxWorld* w){
     uint32_t index=w->version>=220?10:w->version>=210?9:w->version>=189?8:w->version>=170?7:w->version>=116?6:5;
     if(index>=w->pointer_count)return fail("TERRAX_BAD_FOOTER","world footer section is missing");
     uint32_t off=w->starts[index],end=w->ends[index],header=w->starts[0],name_len,header_len;
@@ -180,11 +182,11 @@ static int validate_footer(TxWorld* w){
 }
 int tx_stream_has_task(void) { return current != NULL; }
 static StreamTask* task(uint32_t id){return current&&current->id==id&&current->stage!=CANCELLED?current:NULL;}
-static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;}
+static void clear_event(StreamTask* t){memset(&t->event,0,sizeof(t->event));t->event.abi_version=1;t->event_data=NULL;}
 static void event(StreamTask* t,uint32_t kind,uint32_t offset,uint32_t length,const void* data){
     if(kind==TX_STREAM_NEED_SOURCE)counter_add(&t->stats.source_requests,1);
     clear_event(t);t->event.kind=kind;t->event.source_id=t->source_id;t->event.offset=offset;
-    t->event.length=length;t->event.data_ptr=(uint32_t)(uintptr_t)data;
+    t->event.length=length;t->event_data=(const uint8_t*)data;
     t->event.completed_columns=t->x;t->event.total_columns=t->candidate?(uint32_t)t->candidate->maxTilesX:0;
 }
 void tx_stream_release_world(TxWorld* w){
@@ -214,7 +216,7 @@ extern void* tx_region_stream_begin(TxWorld*,TxTileRule*,uint32_t);
 extern int tx_region_stream_run(TxWorld*,void*,uint32_t,uint32_t,TxTile*,uint32_t);
 extern void tx_region_stream_finish(TxWorld*,void*);
 extern void tx_region_stream_free(void*);
-extern uint32_t tx_last_ptr,tx_last_len;
+extern uint8_t* tx_last_ptr; extern uint32_t tx_last_len;
 static char* copy_bridge_string(const char* p,uint32_t maximum){
     if(!valid_range(p,1))return NULL;
     uint32_t n=0;while(n<maximum&&valid_range(p+n,1)&&p[n])n++;
@@ -306,7 +308,7 @@ oom:
 static int finish_compact_open(StreamTask* t){
     TxWorld* w=t->candidate;uint32_t table=u32(w->file)>=135?26:6,count=u16(w->file+table-2);
     for(uint32_t i=2;i<count;i++)put32(w->file+table+i*4,u32(w->file+table+i*4)-(t->original_end-t->original_start));
-    if(!parse_format(w)||!parse_header(w)||w->maxTilesX<=0||w->maxTilesY<=0||(uint32_t)w->maxTilesX>METADATA_LIMIT/4-1||validate_footer(w)<0)return -1;
+    if(!parse_format(w)||!parse_header(w)||w->maxTilesX<=0||w->maxTilesY<=0||(uint32_t)w->maxTilesX>METADATA_LIMIT/4-1||tx_validate_footer(w)<0)return -1;
     w->stream_source_id=t->source_id;w->stream_source_size=t->source_size;w->stream_tile_start=t->original_start;w->stream_tile_end=t->original_end;
     w->stream_columns=(uint32_t*)tx_persistent_alloc(((uint32_t)w->maxTilesX+1)*4);
     if(!w->stream_columns)return fail("TERRAX_WASM_OOM","column index allocation failed");
@@ -320,7 +322,7 @@ static int same_tile_format(const TxWorld* a,const TxWorld* b){
 static int compact_metadata(StreamTask* t,const char* operation,const char* request){
     TxWorld* w=t->candidate;TxBuf response={0};buf_init(&response,256);
     int ok=op_execute_json(w,operation,request,&response);
-    if(response.data)tx_internal_free(response.data);tx_last_ptr=tx_last_len=0;
+    if(response.data)tx_internal_free(response.data);tx_last_ptr = NULL; tx_last_len=0;
     if(ok<0)return 0;
     TxWorld compact={0};if(!compact_copy(&compact,w)){
         if(compact.file)tx_internal_free(compact.file);return 0;
@@ -331,7 +333,7 @@ static int compact_metadata(StreamTask* t,const char* operation,const char* requ
         memset(&w->section_overrides[i],0,sizeof(w->section_overrides[i]));
     }
     if(w->important_override){tx_internal_free(w->important_override);w->important_override=NULL;}
-    if(!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return 0;
+    if(!parse_format(w)||!parse_header(w)||tx_validate_footer(w)<0)return 0;
     if(w->maxTilesX!=t->source->maxTilesX||w->maxTilesY!=t->source->maxTilesY){
         fail("TERRAX_INVALID_ARGUMENT","streaming header patch cannot resize world dimensions");return 0;
     }
@@ -395,7 +397,7 @@ static int apply_write_rules(StreamTask* t,TxTile* tile,uint32_t run){
             /* Each operation observes what the previous WLD encode/decode
              * would retain (e.g. an inactive tile no longer carries type).
              * Preserve operation-local material matching's original tile. */
-            uint8_t bytes[TILE_MAX_BYTES];TxBuf b={bytes,0,sizeof(bytes),1};write_tile(w,&b,tile,0);
+            uint8_t bytes[TILE_MAX_BYTES];TxBuf b={bytes,0,sizeof(bytes),1,TX_BUF_FIXED};write_tile(w,&b,tile,0);
             if(!b.ok)return 0;
             uint8_t* saved=w->file;uint32_t saved_len=w->file_len,off=0;
             w->file=bytes;w->file_len=b.len;int ok=read_tile_at(w,&off,b.len,tile);w->file=saved;w->file_len=saved_len;
@@ -570,16 +572,25 @@ int32_t terra_world_stream_supply_source(uint32_t id,uint32_t source_id,uint32_t
         return fail("TERRAX_INVALID_ARGUMENT","source event/range mismatch or leased input");
     return consume_source(t,offset,bytes,length);
 }
-int32_t terra_world_stream_acquire_input(uint32_t id,TxStreamInputLease* out){
+static int32_t acquire_input_impl(uint32_t id,TxStreamInputLease* out,TerraMutableSpan* native_span){
     StreamTask* t=task(id);
     if(!t||!valid_range(out,sizeof(*out))||t->event.kind!=TX_STREAM_NEED_SOURCE||t->lease.lease_id)
         return fail("TERRAX_STATE_ERROR","source input is not available for a lease");
+    uint8_t* destination=input_destination(t);uint32_t offset=0;
+    if(!destination||(!native_span&&!tx_wasm_span32(destination,t->event.length,&offset)))
+        return fail("TERRAX_STATE_ERROR","input pointer requires the native span adapter");
     memset(&t->lease,0,sizeof(t->lease));t->lease.abi_version=2;
     t->lease.lease_id=lease_generation++;if(!t->lease.lease_id)t->lease.lease_id=lease_generation++;
     t->lease.source_id=t->event.source_id;t->lease.offset=t->event.offset;
     t->lease.length=t->lease.capacity=t->event.length;
-    t->lease.data_ptr=(uint32_t)(uintptr_t)input_destination(t);
+    t->lease.data_ptr=offset;
+    if(native_span)*native_span=(TerraMutableSpan){destination,t->event.length,t->event.length};
     t->lease.memory_bytes=lease_memory_bytes();*out=t->lease;return 0;
+}
+int32_t terra_world_stream_acquire_input(uint32_t id,TxStreamInputLease* out){return acquire_input_impl(id,out,NULL);}
+int32_t terra_world_stream_acquire_input_native(uint32_t id,TxStreamInputLease* out,TerraMutableSpan* span){
+    if(!span)return fail("TERRAX_INVALID_ARGUMENT","native input span is required");
+    return acquire_input_impl(id,out,span);
 }
 int32_t terra_world_stream_commit_input(uint32_t id,uint32_t lease_id,uint32_t source_id,uint32_t offset,uint32_t length){
     StreamTask* t=task(id);
@@ -724,7 +735,7 @@ static int finish_write_tiles(StreamTask* t){
     w->stream_columns[t->x]=t->output_offset+t->output.len;
     w->stream_tile_start=t->prefix_length;w->stream_tile_end=t->output_offset+t->output.len;
     if(w->prepared_output)tx_output_stream_finish(w);
-    if((w->pixel_art_indexed&&!tx_stream_metadata_finish(w,&t->metadata))||!parse_format(w)||!parse_header(w)||validate_footer(w)<0)return -1;
+    if((w->pixel_art_indexed&&!tx_stream_metadata_finish(w,&t->metadata))||!parse_format(w)||!parse_header(w)||tx_validate_footer(w)<0)return -1;
     t->suffix_offset=w->starts[2];t->stage=WRITE_SUFFIX;return 0;
 }
 static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
@@ -779,7 +790,7 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
                 }
                 TxBuf response={0};buf_init(&response,256);int ok=op_execute_json(w,t->operation,t->request,&response);
                 if(ok<0){if(response.data)tx_internal_free(response.data);return -1;}
-                t->result=(uint8_t*)(uintptr_t)tx_last_ptr;t->result_length=tx_last_len;
+                t->result=tx_last_ptr;t->result_length=tx_last_len;
                 if(response.data&&response.data!=t->result)tx_internal_free(response.data);
                 t->stage=OP_RESULT;continue;
             }
@@ -953,7 +964,7 @@ static int32_t stream_step_impl(uint32_t id,uint32_t units,TxStreamEvent* out){
     }
     *out=t->event;return 0;
 }
-int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+static int32_t stream_step_dispatch(uint32_t id,uint32_t units,TxStreamEvent* out){
     int32_t result=stream_step_impl(id,units,out);
     if(result<0&&current&&current->id==id&&current->stamp&&
        current->stage!=CANCELLED&&current->stage!=ADOPTED){
@@ -966,9 +977,23 @@ int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
     }
     return result;
 }
+int32_t terra_world_stream_step(uint32_t id,uint32_t units,TxStreamEvent* out){
+    int32_t status=stream_step_dispatch(id,units,out);
+    if(status>=0&&current&&current->id==id&&!tx_wasm_span32(current->event_data,out->kind==TX_STREAM_OUTPUT?out->length:0,&out->data_ptr))
+        return fail("TERRAX_STATE_ERROR","output pointer requires the native span adapter");
+    return status;
+}
+int32_t terra_world_stream_step_native(uint32_t id,uint32_t units,TxStreamEvent* out,TerraConstSpan* span){
+    if(!span)return fail("TERRAX_INVALID_ARGUMENT","native output span is required");
+    *span=(TerraConstSpan){0};
+    int32_t status=stream_step_dispatch(id,units,out);
+    if(status>=0&&current&&current->id==id){out->data_ptr=0;span->data=current->event_data;span->length=span->data?out->length:0;}
+    return status;
+}
 int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     StreamTask* t=task(id);if(out&&valid_range(out,4))*out=0;
     if(!t||t->stage!=DONE||t->result_kind||t->event.kind!=TX_STREAM_READY||!source_id||!valid_range(out,4))return fail("TERRAX_STATE_ERROR","candidate is not ready for adoption");
+    if(!tx_world_can_activate_stream())return -1;
     TxWorld* w=t->candidate;
     memset(&w->marker_color_index,0,sizeof(w->marker_color_index));memset(&w->icon_atlas,0,sizeof(w->icon_atlas));
     if(w->region_mask){tx_internal_free(w->region_mask);w->region_mask=NULL;}w->surface_sand_split=0;
@@ -978,7 +1003,8 @@ int32_t terra_world_stream_adopt(uint32_t id,uint32_t source_id,uint32_t* out){
     w->pixel_art_indexed=0;w->pixel_art_map_count=0;w->stream_source_id=source_id;
     for(uint32_t g=0;g<t->group_count;g++)if(t->groups[g].rules){tx_internal_free(t->groups[g].rules);t->groups[g].rules=NULL;}
     t->group_count=0;
-    tx_stream_activate_world(w,out);tx_internal_free(w);t->candidate=NULL;t->stage=ADOPTED;t->old_handle=0;tx_clear_error();return 0;
+    if(!tx_stream_activate_world(w,out))return -1;
+    tx_internal_free(w);t->candidate=NULL;t->stage=ADOPTED;t->old_handle=0;tx_clear_error();return 0;
 }
 int32_t terra_world_stream_cancel(uint32_t id){
     StreamTask* t=current&&current->id==id?current:NULL;if(!t||t->stage==ADOPTED)return fail("TERRAX_STATE_ERROR","task cannot be cancelled");

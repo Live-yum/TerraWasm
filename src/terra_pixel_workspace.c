@@ -1,4 +1,6 @@
+#include "terra_alignment.h"
 #include "terra_pixel_workspace.h"
+#include "terra_checkpoint.h"
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,7 +27,7 @@ typedef struct PxHistory {
 } PxHistory;
 typedef union PxAllocation {
     struct { uint32_t bytes; } value;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 } PxAllocation;
 typedef struct PxWorkspace {
     uint32_t handle, width, height, columns, rows, slot_count;
@@ -218,10 +220,13 @@ static void px_history_remove(PxWorkspace* workspace, PxHistory* item) {
     workspace->history_bytes -= item->bytes;
     px_free(workspace, item);
 }
+/* World allocator checkpoints cannot own pixel state. Reject mutation admission
+ * before validation/px_fail, preserving any independent pixel transaction. */
 uint32_t terra_pixel_workspace_abi_version(void) { return TERRA_PIXEL_WORKSPACE_ABI; }
 int32_t terra_pixel_workspace_create(uint32_t width, uint32_t height, uint32_t max_bytes,
         uint32_t history_bytes, uint32_t palette_limit, uint32_t* out_handle) {
     if (out_handle) *out_handle = 0;
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     if (!out_handle || !width || !height || width > TERRA_PIXEL_MAX_DIMENSION
         || height > TERRA_PIXEL_MAX_DIMENSION || !max_bytes || max_bytes > PX_MAX_BYTES
         || history_bytes > max_bytes || !palette_limit || palette_limit > 65536u) return TERRA_PIXEL_INVALID;
@@ -257,6 +262,7 @@ int32_t terra_pixel_workspace_create(uint32_t width, uint32_t height, uint32_t m
     return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_close(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     px_drop_snapshots(workspace);
@@ -281,6 +287,7 @@ int32_t terra_pixel_workspace_stats(uint32_t handle, TerraPixelWorkspaceStats* o
     return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_tx_begin(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (workspace->in_transaction) return TERRA_PIXEL_TRANSACTION;
@@ -289,12 +296,14 @@ int32_t terra_pixel_workspace_tx_begin(uint32_t handle) {
     return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_tx_rollback(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!workspace->in_transaction) return TERRA_PIXEL_TRANSACTION;
     px_rollback(workspace); return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_tx_commit(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!workspace->in_transaction) return TERRA_PIXEL_TRANSACTION;
@@ -348,6 +357,7 @@ int32_t terra_pixel_workspace_tx_commit(uint32_t handle) {
     return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_palette_add(uint32_t handle, uint32_t rgb, uint32_t* out_index) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!out_index || rgb > 0xffffffu) return px_fail(workspace, TERRA_PIXEL_INVALID);
@@ -486,6 +496,7 @@ int32_t terra_pixel_workspace_match_colors(const TerraPixelCandidate* candidates
     tx_persistent_free(scratch); return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_cells(uint32_t handle, const TerraPixelCell* cells, uint32_t count) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (count > TERRA_PIXEL_BATCH_CELLS || (count && !cells)) return px_fail(workspace, TERRA_PIXEL_INVALID);
@@ -511,6 +522,7 @@ static int32_t px_brush(PxWorkspace* workspace, int32_t x, int32_t y, uint16_t i
 }
 int32_t terra_pixel_workspace_stroke(uint32_t handle, const TerraPixelPoint* points, uint32_t count,
         uint32_t index, uint32_t brush_size) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!count || count > TERRA_PIXEL_BATCH_POINTS || !points || !brush_size || brush_size > 64u)
@@ -558,6 +570,7 @@ static int32_t px_stack_push(PxWorkspace* workspace, uint32_t** stack, uint32_t*
     (*stack)[(*count)++] = cell; return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_fill(uint32_t handle, int32_t x, int32_t y, uint32_t index) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!px_coordinate(workspace, x, y)) return px_fail(workspace, TERRA_PIXEL_BOUNDS);
@@ -596,6 +609,7 @@ int32_t terra_pixel_workspace_fill(uint32_t handle, int32_t x, int32_t y, uint32
     return status ? px_fail(workspace, status) : TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_replace(uint32_t handle, uint32_t from_index, uint32_t to_index) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (from_index >= workspace->palette_count || to_index >= workspace->palette_count)
@@ -621,6 +635,7 @@ static int32_t px_swap(PxWorkspace* workspace, uint32_t ax, uint32_t ay, uint32_
 }
 int32_t terra_pixel_workspace_transform(uint32_t handle, int32_t x, int32_t y,
         uint32_t width, uint32_t height, uint32_t kind) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!px_rect(workspace, x, y, width, height)) return px_fail(workspace, TERRA_PIXEL_BOUNDS);
@@ -658,6 +673,7 @@ int32_t terra_pixel_workspace_transform(uint32_t handle, int32_t x, int32_t y,
 static uint32_t px_quantize(uint32_t component) { return ((component * 31u + 127u) / 255u) * 255u / 31u; }
 int32_t terra_pixel_workspace_import_rgba(uint32_t handle, int32_t x, int32_t y,
         uint32_t width, uint32_t height, const uint8_t* rgba, uint32_t byte_length, uint32_t stride) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (!px_rect(workspace, x, y, width, height)) return px_fail(workspace, TERRA_PIXEL_BOUNDS);
@@ -773,12 +789,15 @@ static int32_t px_history_apply(PxWorkspace* workspace, int redo) {
     return TERRA_PIXEL_OK;
 }
 int32_t terra_pixel_workspace_undo(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle); return workspace ? px_history_apply(workspace, 0) : TERRA_PIXEL_HANDLE;
 }
 int32_t terra_pixel_workspace_redo(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle); return workspace ? px_history_apply(workspace, 1) : TERRA_PIXEL_HANDLE;
 }
 int32_t terra_pixel_workspace_checkpoint(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (workspace->in_transaction) return TERRA_PIXEL_TRANSACTION;
@@ -786,6 +805,7 @@ int32_t terra_pixel_workspace_checkpoint(uint32_t handle) {
 }
 
 int32_t terra_pixel_workspace_clear_history(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_PIXEL_TRANSACTION;
     PxWorkspace* workspace = px_lookup(handle);
     if (!workspace) return TERRA_PIXEL_HANDLE;
     if (workspace->in_transaction) return TERRA_PIXEL_TRANSACTION;

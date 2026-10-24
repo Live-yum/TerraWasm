@@ -9,18 +9,51 @@ extern int same_tile(const TxTile*,const TxTile*);
 static int is_standard(const CxWorld* w,uint32_t y){if(!(y>=2u&&y<w->height&&w->column[y].active&&w->column[y].type==420u&&w->column[y].frame_x==36&&w->column[y-1].active&&w->column[y-1].type==419u&&w->column[y-1].frame_x!=36&&w->column[y-2].active&&w->column[y-2].type==419u&&w->column[y-2].frame_x==36))return 0;uint32_t row=y-2u;while(row){TxTile* t=w->column+--row;if(!t->active||t->type!=419u)break;if(t->frame_x==36)return 0;}return 1;}
 static uint32_t point_gate(CxWorld* w,uint32_t y){if(w->column[y].type==420u)return w->gate_at_y[y];if(w->column[y].type==419u){if(y+1u<w->height&&is_standard(w,y+1u))return w->gate_at_y[y+1u];if(y+2u<w->height&&w->column[y].frame_x==36&&is_standard(w,y+2u))return w->gate_at_y[y+2u];}return 0;}
 static int compare_points(const void* a,const void* b){const CxInputPoint* x=(const CxInputPoint*)a;const CxInputPoint* y=(const CxInputPoint*)b;if(x->x!=y->x)return x->x<y->x?-1:1;if(x->y!=y->y)return x->y<y->y?-1:1;return x->index<y->index?-1:x->index>y->index;}
-static CxBinding* find_binding(CxWorld* w,uint32_t x,uint32_t y){for(uint32_t i=0;i<w->binding_count;i++)if(w->bindings[i].x==x&&w->bindings[i].y==y)return w->bindings+i;return NULL;}
+static uint32_t binding_hash(uint32_t x,uint32_t y) {
+    uint32_t h=x*0x9e3779b1u ^ y*0x85ebca6bu; h^=h>>16; return h;
+}
+CxBinding* cx_find_binding(CxWorld* w,uint32_t x,uint32_t y) {
+    if (!w->binding_index_capacity) return NULL;
+    uint32_t mask=w->binding_index_capacity-1u, slot=binding_hash(x,y)&mask;
+    while(w->binding_index[slot]) {
+        CxBinding* b=w->bindings+w->binding_index[slot]-1u;
+        if(b->x==x&&b->y==y)return b;
+        slot=(slot+1u)&mask;
+    }
+    return NULL;
+}
+/* Rehash before appending; the existing index remains usable on OOM. */
+static int reserve_binding_index(CxWorld* w) {
+    if(w->binding_count+1u <= w->binding_index_capacity/2u)return 1;
+    uint32_t capacity=w->binding_index_capacity?w->binding_index_capacity*2u:256u;
+    if(capacity<w->binding_index_capacity || capacity>UINT32_MAX/sizeof(uint32_t))return 0;
+    uint32_t* index=(uint32_t*)cx_alloc(w,capacity*sizeof(uint32_t));
+    if(!index)return 0;
+    memset(index,0,capacity*sizeof(uint32_t));
+    for(uint32_t i=0;i<w->binding_count;i++) {
+        uint32_t slot=binding_hash(w->bindings[i].x,w->bindings[i].y)&(capacity-1u);
+        while(index[slot])slot=(slot+1u)&(capacity-1u);
+        index[slot]=i+1u;
+    }
+    cx_free(w,w->binding_index);w->binding_index=index;w->binding_index_capacity=capacity;
+    return 1;
+}
 static CxBinding* bind_point(CxWorld* w,uint32_t y){
-    CxBinding* b=find_binding(w,w->x,y);if(b)return b;
+    CxBinding* b=cx_find_binding(w,w->x,y);if(b)return b;
+    if(!reserve_binding_index(w))return NULL;
     if(w->binding_count==w->binding_capacity){uint32_t n=w->binding_capacity?w->binding_capacity*2u:128u;if(n<w->binding_capacity||(uint64_t)n*sizeof(CxBinding)>UINT32_MAX)return NULL;CxBinding* p=(CxBinding*)cx_alloc(w,n*sizeof(CxBinding));if(!p)return NULL;if(w->binding_count)memcpy(p,w->bindings,w->binding_count*sizeof(CxBinding));cx_free(w,w->bindings);w->bindings=p;w->binding_capacity=n;}
-    b=w->bindings+w->binding_count++;memset(b,0,sizeof(*b));b->x=w->x;b->y=y;b->tile=w->column[y];b->gate=point_gate(w,y);for(uint32_t c=0;c<4;c++){b->nets[c]=w->seed_ids[y*4u+c];b->opposite[c]=w->opposite_ids[y*4u+c];}return b;
+    b=w->bindings+w->binding_count++;memset(b,0,sizeof(*b));b->x=w->x;b->y=y;b->tile=w->column[y];
+    uint32_t slot=binding_hash(b->x,b->y)&(w->binding_index_capacity-1u);
+    while(w->binding_index[slot])slot=(slot+1u)&(w->binding_index_capacity-1u);
+    w->binding_index[slot]=w->binding_count;
+    b->gate=point_gate(w,y);for(uint32_t c=0;c<4;c++){b->nets[c]=w->seed_ids[y*4u+c];b->opposite[c]=w->opposite_ids[y*4u+c];}return b;
 }
 static int routing(CxWorld* w,const TxTile* t){if(!t->active)return -1;if(t->type==424u){int r=t->frame_x/18;return r>=0&&r<=2?r:-1;}if(t->type==0xfffeu||(t->type==445u&&!w->twld_state))return 0;return -1;}
 static uint32_t entering_net(CxWorld* w,const CxBinding* b,uint32_t colour,uint32_t direction){int r=routing(w,&b->tile);int other=r==0?direction>=2u:r==1?(direction==1u||direction==3u):r==2?(direction==1u||direction==2u):0;return other?b->opposite[colour]:b->nets[colour];}
 static uint32_t trigger_net(CxWorld* w,const CxBinding* b,uint32_t colour){
     if(!(cx_wire_mask(&b->tile)&(1u<<colour)))return 0;if(cx_inside_wiring(w,b->x,b->y))return b->nets[colour];
     const int dx[4]={0,0,1,-1},dy[4]={1,-1,0,0};int r=routing(w,&b->tile);
-    for(uint32_t d=0;d<4u;d++){if(r>=0&&d!=(r==1?3u:r==2?2u:0u))continue;int64_t x=(int64_t)b->x+dx[d],y=(int64_t)b->y+dy[d];if(x<0||y<0||!cx_inside_wiring(w,(uint32_t)x,(uint32_t)y))continue;CxBinding* inside=find_binding(w,(uint32_t)x,(uint32_t)y);if(inside)return entering_net(w,inside,colour,d);}
+    for(uint32_t d=0;d<4u;d++){if(r>=0&&d!=(r==1?3u:r==2?2u:0u))continue;int64_t x=(int64_t)b->x+dx[d],y=(int64_t)b->y+dy[d];if(x<0||y<0||!cx_inside_wiring(w,(uint32_t)x,(uint32_t)y))continue;CxBinding* inside=cx_find_binding(w,(uint32_t)x,(uint32_t)y);if(inside)return entering_net(w,inside,colour,d);}
     return 0;
 }
 static void seek_checkpoint(CxWorld* w,uint32_t x){
@@ -50,7 +83,7 @@ int cx_query_begin(CxWorld* w){
     }else{
         if(!w->point_count)return cx_command_complete(w);
         w->query_x0=w->points[0].x;w->query_x1=w->points[w->point_count-1u].x+1u;w->query_y0=0;w->query_y1=w->height;w->query_stride=1;
-        int cached=1;for(uint32_t i=0;i<w->point_count;i++)if(!find_binding(w,w->points[i].x,w->points[i].y)){cached=0;break;}
+        int cached=1;for(uint32_t i=0;i<w->point_count;i++)if(!cx_find_binding(w,w->points[i].x,w->points[i].y)){cached=0;break;}
         if(cached)return cx_command_complete(w);
         if(w->command.kind==TCW_READ_LAMPS){int s=reserve_result(w,w->point_count);if(s)return s;}
     }
@@ -94,7 +127,7 @@ int cx_query_step(CxWorld* w,uint32_t* work){
     while(*work&&w->x<w->query_x1){int status=cx_scan_step(w,work);if(status<0||w->event.kind)return status;if(status!=2)return TCW_CONTINUE;
         if(w->x>=w->query_x0){
             if(w->command.kind==TCW_VIEWPORT){
-                if((w->x-w->query_x0)%w->query_stride==0){if(w->emit_y<w->query_y0)w->emit_y=w->query_y0;while(*work&&w->emit_y<w->query_y1){if(w->result_count>=w->result_capacity)return TCW_INVALID;pack_cell(w,w->x,w->emit_y,w->result+w->result_count*4u);++w->result_count;w->emit_y+=w->query_stride;--*work;}if(w->emit_y<w->query_y1)return TCW_CONTINUE;}
+                if((w->x-w->query_x0)%w->query_stride==0){if(w->emit_y<w->query_y0)w->emit_y=w->query_y0;while(*work&&w->emit_y<w->query_y1){if(w->result_count>=w->result_capacity)return TCW_INVALID;pack_cell(w,w->x,w->emit_y,w->result+w->result_count*4u);++w->result_count;if(w->query_stride>=w->query_y1-w->emit_y)w->emit_y=w->query_y1;else w->emit_y+=w->query_stride;--*work;}if(w->emit_y<w->query_y1)return TCW_CONTINUE;}
             }else{
                 while(w->point_index<w->point_count&&w->points[w->point_index].x<w->x)++w->point_index;
                 while(*work&&w->point_index<w->point_count&&w->points[w->point_index].x==w->x){if(!bind_point(w,w->points[w->point_index].y))return TCW_MEMORY;++w->point_index;--*work;}
@@ -108,28 +141,28 @@ int cx_query_step(CxWorld* w,uint32_t* work){
 int cx_command_complete(CxWorld* w){
     if(w->command.kind==TCW_VIEWPORT){cx_emit(w,TCW_RESULT,0,0,w->result_count*16u,w->result);w->event.result_kind=TCW_VIEWPORT;w->event.result_count=w->result_count;return TCW_CONTINUE;}
     if(w->command.kind==TCW_READ_LAMPS){int s=reserve_result(w,w->point_count);if(s)return s;
-        for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;CxBinding* b=find_binding(w,p->x,p->y);if(!b)return TCW_STATE;uint32_t* out=w->result+p->index*4u;out[0]=p->x;out[1]=p->y;out[2]=cx_true_lamp(w,b);out[3]=b->tile.type;}
+        for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;CxBinding* b=cx_find_binding(w,p->x,p->y);if(!b)return TCW_STATE;uint32_t* out=w->result+p->index*4u;out[0]=p->x;out[1]=p->y;out[2]=cx_true_lamp(w,b);out[3]=b->tile.type;}
         w->result_count=w->point_count;cx_emit(w,TCW_RESULT,0,0,w->result_count*16u,w->result);w->event.result_kind=TCW_READ_LAMPS;w->event.result_count=w->result_count;return TCW_CONTINUE;
     }
     if(w->command.kind==TCW_WRITE_LAMPS){
         /* Validate the full batch before its first mutation. */
-        for(uint32_t i=0;i<w->point_count;i++){CxBinding* b=find_binding(w,w->points[i].x,w->points[i].y);if(!b||!b->tile.active||b->tile.type!=419u||b->tile.frame_x==36)return cx_fail(w,TCW_INVALID,"lamp writes require ordinary logic lamps at every requested coordinate");}
+        for(uint32_t i=0;i<w->point_count;i++){CxBinding* b=cx_find_binding(w,w->points[i].x,w->points[i].y);if(!b||!b->tile.active||b->tile.type!=419u||b->tile.frame_x==36)return cx_fail(w,TCW_INVALID,"lamp writes require ordinary logic lamps at every requested coordinate");}
         /* Reserve for every requested lamp so a later allocation cannot produce
          * a partially acknowledged program load. */
         uint64_t needed=(uint64_t)w->override_count+w->point_count;if(needed>UINT32_MAX/sizeof(CxOverride))return TCW_MEMORY;
         if(needed>w->override_capacity){CxOverride* p=(CxOverride*)cx_alloc(w,(uint32_t)needed*sizeof(CxOverride));if(!p)return TCW_MEMORY;if(w->override_count)memcpy(p,w->overrides,w->override_count*sizeof(CxOverride));cx_free(w,w->overrides);w->overrides=p;w->override_capacity=(uint32_t)needed;}
-        for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;CxBinding* b=find_binding(w,p->x,p->y);uint32_t value=p->value^(b->tile.frame_x==18);for(uint32_t c=0;c<4;c++)if(b->nets[c])value^=(uint32_t)terra_vm_parity(w->vm,b->nets[c]-1u);int s=cx_set_override(w,b->gate,b->x,b->y,value);if(s)return s;}
+        for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;CxBinding* b=cx_find_binding(w,p->x,p->y);uint32_t value=p->value^(b->tile.frame_x==18);for(uint32_t c=0;c<4;c++)if(b->nets[c])value^=(uint32_t)terra_vm_parity(w->vm,b->nets[c]-1u);int s=cx_set_override(w,b->gate,b->x,b->y,value);if(s)return s;}
         w->phase=CX_IDLE;return TCW_OK;
     }
     if(w->command.kind==TCW_TRIGGER){
         if(w->phase==CX_RUN){cx_operation_commit(w);w->phase=CX_IDLE;return TCW_OK;}
         if((uint64_t)w->point_count*4u>UINT32_MAX)return TCW_MEMORY;int reserve=cx_seed_reserve(w,w->point_count*4u);if(reserve)return reserve;
-        w->seed_lamps=0;uint32_t lazy=0;for(uint32_t i=0;i<w->point_count;i++){if(w->points[i].value)continue;CxBinding* b=find_binding(w,w->points[i].x,w->points[i].y);if(!b)return TCW_STATE;if(b->tile.type==419u)++w->seed_lamps;if(cx_lazy_toggle(&b->tile)){++lazy;++w->seed_lamps;}}
+        w->seed_lamps=0;uint32_t lazy=0;for(uint32_t i=0;i<w->point_count;i++){if(w->points[i].value)continue;CxBinding* b=cx_find_binding(w,w->points[i].x,w->points[i].y);if(!b)return TCW_STATE;if(b->tile.type==419u)++w->seed_lamps;if(cx_lazy_toggle(&b->tile)){++lazy;++w->seed_lamps;}}
         if((uint64_t)w->override_count+lazy>UINT32_MAX)return TCW_MEMORY;reserve=cx_override_reserve(w,w->override_count+lazy);if(reserve)return reserve;
         w->trigger_count=0;
         CxDevice* device=(w->command.flags&1u)?cx_device_find(w,w->command.x,w->command.y):NULL;
-        if(device&&device->tile.type==144u){CxBinding* b=find_binding(w,device->x,device->y);if(!b)return TCW_STATE;for(uint32_t c=0;c<4;c++)device->pulse_nets[c]=trigger_net(w,b,c);}
-        if(!device||device->tile.type!=144u)for(uint32_t c=0;c<4;c++)if(w->command.mask&(1u<<c))for(uint32_t i=0;i<w->point_count;i++){if(w->points[i].value)continue;CxBinding* b=find_binding(w,w->points[i].x,w->points[i].y);if(!b)return TCW_STATE;uint32_t net=trigger_net(w,b,c);if(net)w->trigger_nets[w->trigger_count++]=net-1u;}
+        if(device&&device->tile.type==144u){CxBinding* b=cx_find_binding(w,device->x,device->y);if(!b)return TCW_STATE;for(uint32_t c=0;c<4;c++)device->pulse_nets[c]=trigger_net(w,b,c);}
+        if(!device||device->tile.type!=144u)for(uint32_t c=0;c<4;c++)if(w->command.mask&(1u<<c))for(uint32_t i=0;i<w->point_count;i++){if(w->points[i].value)continue;CxBinding* b=cx_find_binding(w,w->points[i].x,w->points[i].y);if(!b)return TCW_STATE;uint32_t net=trigger_net(w,b,c);if(net)w->trigger_nets[w->trigger_count++]=net-1u;}
         w->trigger_remaining=w->command.count?w->command.count:1u;w->seed_x=w->command.x;w->seed_y=w->command.y;w->seed_width=w->command.width;w->seed_height=w->command.height;
         int s=cx_operation_begin(w);if(s)return s;w->interaction_pending=(w->command.flags&1u)!=0;
         s=terra_vm_begin(w->vm,w->trigger_nets,w->trigger_count);if(s<0){cx_operation_rollback(w);return s==TERRA_VM_OOM||s==TERRA_VM_LIMIT?TCW_MEMORY:TCW_STATE;}w->phase=CX_RUN;return TCW_OK;
@@ -137,37 +170,50 @@ int cx_command_complete(CxWorld* w){
     if(w->command.kind==TCW_TICKS){int s=cx_seed_reserve(w,4u);if(s)return s;s=cx_operation_begin(w);if(s)return s;w->tick_remaining=w->command.count;w->tick_stage=0;w->phase=CX_TICKS;return TCW_OK;}
     w->phase=CX_IDLE;return TCW_OK;
 }
-int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
+static int32_t circuit_world_command_impl(uint32_t handle,const TerraCircuitWorldCommand* input,const uint8_t* command_data){
     CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;if(!input)return TCW_INVALID;if(w->phase!=CX_IDLE||w->event.kind)return TCW_STATE;
-    TerraCircuitWorldCommand cmd=*input;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
+    TerraCircuitWorldCommand cmd=*input;cmd.data_ptr=0;if(cmd.abi_version!=1||cmd.kind<TCW_VIEWPORT||cmd.kind>TCW_EXTRACT||cmd.reserved1||cmd.reserved2||(cmd.flags&~(cmd.kind==TCW_TRIGGER||cmd.kind==TCW_EXTRACT?1u:cmd.kind==TCW_VIEWPORT?2u:0u)))return TCW_INVALID;
     /* A rejected bounded query must not poison SAVE's earlier dispatch path. */
     w->error=0;
-    if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd);
+    if(cmd.kind==TCW_FRAGMENTS||cmd.kind==TCW_EXTRACT)return cx_fragments_begin(w,&cmd,command_data);
     if(cmd.kind==TCW_TRIGGER&&(cmd.flags&1u)){int s=cx_interaction_rect(w,&cmd);if(s<0)return TCW_INVALID;if(!s){w->command=cmd;return TCW_OK;}}
     if((cmd.kind==TCW_VIEWPORT||cmd.kind==TCW_TRIGGER)&&(!cmd.width||!cmd.height||cmd.x>=w->width||cmd.y>=w->height||cmd.width>w->width-cmd.x||cmd.height>w->height-cmd.y))return TCW_INVALID;
     if(cmd.kind==TCW_TRIGGER&&(cmd.mask>15u||!cmd.mask))return TCW_INVALID;
     if(cmd.kind==TCW_SAVE){if(!cmd.source_id||cmd.source_id==w->world_source||cmd.source_id==w->scratch_source||cmd.source_id==w->twld_source)return TCW_INVALID;if(w->twld&&(!cmd.aux_source_id||cmd.aux_source_id==cmd.source_id||cmd.aux_source_id==w->world_source||cmd.aux_source_id==w->scratch_source||cmd.aux_source_id==w->twld_source))return TCW_INVALID;w->command=cmd;w->output_source=cmd.source_id;w->output_offset=0;w->output_length=0;w->save_cursor=0;w->twld_saved_size=0;w->phase=CX_SAVE_PREFIX;w->input_length=0;return TCW_OK;}
     uint32_t count=0,allocated_count=0;
-    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){if(cmd.data_count>65536u||(!cmd.data_ptr&&cmd.data_count))return TCW_INVALID;count=cmd.data_count;
+    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){if(cmd.data_count>65536u||(!command_data&&cmd.data_count))return TCW_INVALID;count=cmd.data_count;
 #ifdef __wasm__
-        if(count&&!tx_bridge_range_is_valid(cmd.data_ptr,count*16u))return TCW_INVALID;
+        if(count&&!tx_bridge_contains_native(command_data,count*16u))return TCW_INVALID;
 #endif
     }else if(cmd.kind==TCW_TRIGGER){uint64_t n=(uint64_t)cmd.width*cmd.height;if(n>UINT32_MAX/(2u*sizeof(CxInputPoint)))return TCW_MEMORY;count=(uint32_t)n;allocated_count=count*2u;}
     if(!allocated_count)allocated_count=count;CxInputPoint* points=NULL;if(allocated_count){points=(CxInputPoint*)cx_alloc(w,allocated_count*sizeof(CxInputPoint));if(!points)return TCW_MEMORY;}
-    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){const uint32_t* data=(const uint32_t*)(uintptr_t)cmd.data_ptr;for(uint32_t i=0;i<count;i++){uint32_t x=data[i*4u],y=data[i*4u+1u],value=data[i*4u+2u];if(x>=w->width||y>=w->height||(cmd.kind==TCW_WRITE_LAMPS&&value>1u)||data[i*4u+3u]){cx_free(w,points);return TCW_INVALID;}points[i]=(CxInputPoint){x,y,value,i};}}
+    if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){const uint32_t* data=(const uint32_t*)command_data;for(uint32_t i=0;i<count;i++){uint32_t x=data[i*4u],y=data[i*4u+1u],value=data[i*4u+2u];if(x>=w->width||y>=w->height||(cmd.kind==TCW_WRITE_LAMPS&&value>1u)||data[i*4u+3u]){cx_free(w,points);return TCW_INVALID;}points[i]=(CxInputPoint){x,y,value,i};}}
     else if(cmd.kind==TCW_TRIGGER){uint32_t i=0;for(uint32_t x=cmd.x;x<cmd.x+cmd.width;x++)for(uint32_t y=cmd.y;y<cmd.y+cmd.height;y++){points[i]=(CxInputPoint){x,y,0,i};++i;if(!cx_inside_wiring(w,x,y)){const int dx[4]={0,0,1,-1},dy[4]={1,-1,0,0};for(uint32_t d=0;d<4;d++){int64_t a=(int64_t)x+dx[d],b=(int64_t)y+dy[d];if(a>=0&&b>=0&&cx_inside_wiring(w,(uint32_t)a,(uint32_t)b)){if(i>=allocated_count){cx_free(w,points);return TCW_MEMORY;}points[i]=(CxInputPoint){(uint32_t)a,(uint32_t)b,1,i};++i;}}}}count=i;}
     if(count)qsort(points,count,sizeof(CxInputPoint),compare_points);
     cx_free(w,w->points);w->points=points;w->point_count=count;w->command=cmd;w->error=0;
     int status=cmd.kind==TCW_TICKS?cx_command_complete(w):cx_query_begin(w);if(status<0){cx_operation_rollback(w);w->phase=CX_IDLE;}return status;
 }
+int32_t terra_circuit_world_command(uint32_t handle,const TerraCircuitWorldCommand* input){
+    CxWorld* w=cx_lookup(handle);
+    if(w&&input&&w->phase==CX_IDLE&&!w->event.kind&&input->data_count&&
+       (input->kind==TCW_FRAGMENTS||input->kind==TCW_READ_LAMPS||input->kind==TCW_WRITE_LAMPS)) {
+        if(input->data_count>65536u||!tx_bridge_range_is_valid(input->data_ptr,input->data_count*16u))return TCW_INVALID;
+    }
+    return circuit_world_command_impl(handle,input,input?(const uint8_t*)(uintptr_t)input->data_ptr:NULL);
+}
+int32_t terra_circuit_world_command_native(uint32_t handle,const TerraCircuitWorldCommand* input,TerraConstSpan data){
+    if(!input||input->data_ptr||input->data_count>65536u||data.length!=(size_t)input->data_count*16u||
+       (data.length&&(!data.data||((uintptr_t)data.data%_Alignof(uint32_t)))))return TCW_INVALID;
+    return circuit_world_command_impl(handle,input,data.data);
+}
 static int copy_source(CxWorld* w,uint32_t offset,uint32_t count){
     if(!w->world_source)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->world->file+offset);
-    if(w->input_source!=w->world_source||w->input_offset!=offset||w->input_length!=count){w->read_target=0;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
+    if(w->input_source!=w->world_source||w->input_offset!=offset||w->input_length!=count){w->read_target=CX_READ_WORLD;return cx_emit(w,TCW_READ,w->world_source,offset,count,NULL);}
     return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,count,w->input);
 }
 static int flush_tile(CxWorld* w){
     if(!w->save_previous_valid)return TCW_OK;if(w->output_length>w->output_capacity-64u)return cx_emit(w,TCW_WRITE,w->output_source,w->output_offset,w->output_length,w->output);
-    TxBuf b={w->output,w->output_length,w->output_capacity,1};write_tile(w->world,&b,&w->save_previous,w->save_repeat);if(!b.ok||b.data!=w->output)return cx_fail(w,TCW_MEMORY,"streaming WLD circuit output buffer overflow");w->output_length=b.len;w->save_previous_valid=0;return TCW_OK;
+    TxBuf b={w->output,w->output_length,w->output_capacity,1,TX_BUF_FIXED};write_tile(w->world,&b,&w->save_previous,w->save_repeat);if(!b.ok||b.data!=w->output)return cx_fail(w,TCW_MEMORY,"streaming WLD circuit output buffer overflow");w->output_length=b.len;w->save_previous_valid=0;return TCW_OK;
 }
 int cx_save_step(CxWorld* w,uint32_t* work){
     if(w->phase==CX_SAVE_PREFIX){

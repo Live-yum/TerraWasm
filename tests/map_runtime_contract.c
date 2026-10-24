@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "terra_map_runtime.h"
+#include "terra_world.h"
 #include "terra_stream_png.h"
 #include "terra_stream.h"
 #include "terra_task.h"
@@ -128,7 +129,29 @@ static void test_rle_colors(TxWorld* world, const TxTile* tile, int foreground) 
     world->file_len = 0u;
 }
 
+static void checkpoint_palette_ownership(void) {
+    uint32_t length=0,world=0,token=0;uint8_t* bytes=make_runtime(&length);
+    for(int installed=0;installed<2;installed++) {
+        if(installed)assert(txw_set_map_runtime_from_buffer(bytes,length)==0);
+        assert(terra_world_create(&world)==0);
+        assert(terra_world_workspace_begin(world,UINT32_MAX,&token)==0);
+        const TxMapRuntimeLayout* previous=tx_map_runtime_layout();
+        assert(txw_set_map_runtime_from_buffer(bytes,length)==-1);
+        assert(txw_set_map_runtime_from_buffer(NULL,0)==-1);
+        assert(txw_use_builtin_map_runtime()==-1);
+        assert(tx_map_runtime_layout()==previous&&tx_map_runtime_is_set()==installed);
+        assert(terra_world_workspace_rollback(world,token)==0);
+        assert(tx_map_runtime_layout()==previous&&tx_map_runtime_is_set()==installed);
+        assert(terra_world_close(world)==0);
+        assert(txw_set_map_runtime_from_buffer(bytes,length)==0);
+        assert(tx_map_runtime_is_set());
+        assert(txw_use_builtin_map_runtime()==0);
+    }
+    free(bytes);
+}
+
 int main(int argc, char** argv) {
+    checkpoint_palette_ownership();
     uint32_t len;
     uint8_t* data = make_runtime(&len);
     uint8_t* changed = malloc(len);

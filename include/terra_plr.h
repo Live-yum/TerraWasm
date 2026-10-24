@@ -11,6 +11,9 @@
 #define TERRA_PLR_H
 
 #include <stdint.h>
+/* World checkpoints fence player creation/mutation/close and filesystem save.
+ * Pure reads and buffer encoding remain available using scoped, nonpublished
+ * scratch when necessary; borrowed pre-existing caches remain unchanged. */
 #include "terra_status.h"
 
 #ifdef __cplusplus
@@ -38,6 +41,9 @@ terrax_world_status terra_plr_open_json(
 
 terrax_world_status terra_plr_close(uint32_t handle);
 
+/* External path: fully parse encoded bytes and verify the completed candidate
+ * before replacement. OK acknowledges replacement, not power-loss durability
+ * or a managed version/receipt transaction. */
 terrax_world_status terra_plr_save(
     uint32_t handle,
     const char* path_utf8);

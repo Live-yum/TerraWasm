@@ -294,8 +294,6 @@ test("header_patch updates editable metadata and format magic through one patch"
       uniqueId: "12345678-1234-4abc-8def-1234567890ab",
       creationTime: "9862443092335741120",
       worldId: beforeHeader.worldId + 1,
-      maxTilesX: beforeHeader.maxTilesX - 1,
-      maxTilesY: beforeHeader.maxTilesY - 1,
       gameMode: beforeHeader.gameMode === 2 ? 1 : 2,
       spawnTileX: Math.min(beforeHeader.maxTilesX - 1, beforeHeader.spawnTileX + 1),
       spawnTileY: Math.min(beforeHeader.maxTilesY - 1, beforeHeader.spawnTileY + 1),
@@ -315,8 +313,8 @@ test("header_patch updates editable metadata and format magic through one patch"
     assert.equal(inMemoryHeader.uniqueId, patch.uniqueId);
     assert.equal(inMemoryHeader.creationTime, Number(patch.creationTime));
     assert.equal(inMemoryHeader.worldId, patch.worldId);
-    assert.equal(inMemoryHeader.maxTilesX, patch.maxTilesX);
-    assert.equal(inMemoryHeader.maxTilesY, patch.maxTilesY);
+    assert.equal(inMemoryHeader.maxTilesX, beforeHeader.maxTilesX);
+    assert.equal(inMemoryHeader.maxTilesY, beforeHeader.maxTilesY);
     assert.equal(inMemoryHeader.gameMode, patch.gameMode);
     assert.equal(inMemoryHeader.spawnTileX, patch.spawnTileX);
     assert.equal(inMemoryHeader.spawnTileY, patch.spawnTileY);
@@ -354,6 +352,8 @@ test("header_patch re-encodes the complete current-version header model without 
     delete patch.creationTimeDate;
     delete patch.lastPlayedDate;
     delete patch.legacySkip;
+    delete patch.maxTilesX;
+    delete patch.maxTilesY;
 
     Object.assign(patch, {
       worldName: "Complete Header 世界",
@@ -385,12 +385,10 @@ test("header_patch re-encodes the complete current-version header model without 
       spawnPoints: [{ x: 10, y: 20 }, { x: -30, y: 40 }],
       manifestJson: '{"source":"header_patch","完整":true}',
       magic: beforeFormat.magic === "relogic" ? "xindong" : "relogic",
-      version: beforeFormat.version + 1,
+      version: beforeFormat.version,
       type: beforeFormat.type,
       revision: beforeFormat.revision + 1,
       favoriteFlags: "3",
-      tileTypeCount: beforeFormat.tileTypeCount,
-      tileFrameImportantBitmap: beforeFormat.tileFrameImportantBitmap,
     });
 
     assert.deepEqual(executeOperation(M, opened.handle, "header_patch", { patch }), {
@@ -412,8 +410,8 @@ test("header_patch re-encodes the complete current-version header model without 
     assert.equal(inMemoryFormat.type, patch.type);
     assert.equal(inMemoryFormat.revision, patch.revision);
     assert.equal(inMemoryFormat.favoriteFlags, Number(patch.favoriteFlags));
-    assert.equal(inMemoryFormat.tileTypeCount, patch.tileTypeCount);
-    assert.deepEqual(inMemoryFormat.tileFrameImportantBitmap, patch.tileFrameImportantBitmap);
+    assert.equal(inMemoryFormat.tileTypeCount, beforeFormat.tileTypeCount);
+    assert.deepEqual(inMemoryFormat.tileFrameImportantBitmap, beforeFormat.tileFrameImportantBitmap);
 
     const saved = saveBytes(M, opened.handle);
     closeBytes(M, opened);
@@ -693,4 +691,20 @@ test("native encoder OOM leaves the active world byte-identical and close reclai
   assert.equal(M._tx_native_heap_used() >>> 0, 0);
   assert.equal(M._tx_bridge_heap_used() >>> 0, 0);
   assert.equal(M._tx_heap_used() >>> 0, baseline);
+});
+
+test("layout patch rejection preserves the complete world before any metadata publication", async () => {
+  const M = await TerraWorldWasm();
+  const opened = openBytes(M, TEST_BYTES);
+  try {
+    const before = saveBytes(M, opened.handle);
+    const format = getSection(M, opened.handle, "format");
+    for (const [field, value] of [["maxTilesX", 1], ["maxTilesY", 1], ["tileTypeCount", 1],
+      ["tileFrameImportantBitmap", "00"], ["version", format.version - 1], ["type", 99]]) {
+      assert.throws(() => executeOperation(M, opened.handle, "header_patch", {
+        patch: { worldName: "must not publish", [field]: value },
+      }));
+      assert.deepEqual(saveBytes(M, opened.handle), before, field + " must not change any output bytes");
+    }
+  } finally { closeBytes(M, opened); }
 });

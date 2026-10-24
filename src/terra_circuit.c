@@ -1,6 +1,8 @@
 /* Native Wiring.HitWire traversal. See docs/CIRCUIT_ABI_V1.md for source pin,
  * interleaving contract, limits, and the host-owned gate/device responsibilities. */
+#include "terra_alignment.h"
 #include "terra_circuit.h"
+#include "terra_checkpoint.h"
 #include <limits.h>
 #include <stddef.h>
 #include <string.h>
@@ -17,7 +19,7 @@ typedef struct CwCell {
 } CwCell;
 typedef union CwAllocation {
     struct { uint32_t bytes; } value;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 } CwAllocation;
 typedef struct CwWorkspace {
     uint32_t handle, width, height, capacity, count, hash_capacity;
@@ -121,6 +123,7 @@ int32_t terra_circuit_create(uint32_t width, uint32_t height, uint32_t max_cells
     uint32_t max_bytes, uint32_t* out_handle) {
     if (!out_handle) return TERRA_CIRCUIT_INVALID;
     *out_handle = 0;
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     if (!width || !height || width > TERRA_CIRCUIT_MAX_DIMENSION || height > TERRA_CIRCUIT_MAX_DIMENSION
         || !max_cells || max_cells > TERRA_CIRCUIT_MAX_CELLS || !max_bytes || max_bytes > TERRA_CIRCUIT_MAX_BYTES)
         return TERRA_CIRCUIT_INVALID;
@@ -147,6 +150,7 @@ int32_t terra_circuit_create(uint32_t width, uint32_t height, uint32_t max_cells
     return TERRA_CIRCUIT_OK;
 }
 int32_t terra_circuit_close(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     for (uint32_t i = 0; i < CW_HANDLES; ++i) if (cw_workspaces[i] == w) { cw_workspaces[i] = NULL; break; }
@@ -162,6 +166,7 @@ int32_t terra_circuit_stats(uint32_t handle, TerraCircuitStats* out) {
     return TERRA_CIRCUIT_OK;
 }
 int32_t terra_circuit_load(uint32_t handle, const TerraCircuitCell* cells, uint32_t count) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     if (w->sealed) return TERRA_CIRCUIT_STATE;
@@ -190,6 +195,7 @@ int32_t terra_circuit_load(uint32_t handle, const TerraCircuitCell* cells, uint3
     return TERRA_CIRCUIT_OK;
 }
 int32_t terra_circuit_compile(uint32_t handle, uint32_t max_cells, uint32_t* out_compiled) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     if (!out_compiled || !max_cells || max_cells > TERRA_CIRCUIT_BATCH) return TERRA_CIRCUIT_INVALID;
@@ -210,6 +216,7 @@ int32_t terra_circuit_compile(uint32_t handle, uint32_t max_cells, uint32_t* out
     return w->ready ? TERRA_CIRCUIT_OK : TERRA_CIRCUIT_MORE;
 }
 int32_t terra_circuit_patch(uint32_t handle, const TerraCircuitCell* cells, uint32_t count) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     if (!w->ready) return TERRA_CIRCUIT_STATE;
@@ -227,6 +234,7 @@ int32_t terra_circuit_patch(uint32_t handle, const TerraCircuitCell* cells, uint
 }
 int32_t terra_circuit_begin(uint32_t handle, const TerraCircuitPoint* seeds, uint32_t count,
     uint32_t colour, uint32_t flags, uint32_t work_limit) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     if (!w->ready || w->active) return TERRA_CIRCUIT_STATE;
@@ -271,6 +279,7 @@ static int32_t cw_expand(CwWorkspace* w) {
 }
 int32_t terra_circuit_step(uint32_t handle, uint32_t max_nodes, TerraCircuitEvent* events,
     uint32_t event_capacity, TerraCircuitStep* out_step) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     if (!out_step || !events || !event_capacity || event_capacity > TERRA_CIRCUIT_BATCH
@@ -314,6 +323,7 @@ int32_t terra_circuit_step(uint32_t handle, uint32_t max_nodes, TerraCircuitEven
     return w->active ? TERRA_CIRCUIT_MORE : TERRA_CIRCUIT_OK;
 }
 int32_t terra_circuit_cancel(uint32_t handle) {
+    if (tx_checkpoint_active()) return TERRA_CIRCUIT_STATE;
     CwWorkspace* w = cw_lookup(handle);
     if (!w) return TERRA_CIRCUIT_HANDLE;
     cw_cancel(w); return TERRA_CIRCUIT_OK;

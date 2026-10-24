@@ -1,3 +1,4 @@
+#include "terra_alignment.h"
 #include "terra_circuit_twld.h"
 #include <assert.h>
 #include <stdint.h>
@@ -6,7 +7,7 @@
 #include <string.h>
 #include <stddef.h>
 
-typedef union Allocation { size_t bytes; max_align_t alignment; } Allocation;
+typedef union Allocation { size_t bytes; TerraMaxAlign alignment; } Allocation;
 static size_t live_bytes, peak_bytes, live_allocations;
 uint8_t* tx_persistent_alloc(uint32_t bytes) {
     Allocation* a = malloc(sizeof(Allocation) + bytes); if (!a) return NULL;

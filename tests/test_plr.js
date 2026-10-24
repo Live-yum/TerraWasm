@@ -12,10 +12,7 @@ const TerraWorldWasmWeb = require(path.join(__dirname, "..", "build", "terrax_wo
 const EXTERNAL_FIXTURE = process.env.TERRAWASM_PLR_FIXTURE || "";
 const MODEL_FIXTURE = path.join(__dirname, "fixtures", "minimal-player.json");
 
-// Both tracked domains are exported by the buffer-only viewer profile.
-function heapUsed(module) {
-  return module._tx_bridge_heap_used() + module._tx_native_heap_used();
-}
+function trackedHeapBytes(module) { return module._tx_native_heap_used() + module._tx_bridge_heap_used(); }
 
 function allocBytes(module, bytes) {
   const value = Buffer.from(bytes);
@@ -75,11 +72,8 @@ function getField(module, handle, pointer) {
 
 function setField(module, handle, pointer, value) {
   const edits = allocString(module, JSON.stringify([{ path: pointer, value }]));
-  try {
-    return module._terra_plr_set_many(handle, edits);
-  } finally {
-    module._tx_free(edits);
-  }
+  try { return module._terra_plr_set_many(handle, edits); }
+  finally { module._tx_free(edits); }
 }
 
 function encode(module, handle) {
@@ -133,9 +127,9 @@ function fixtureBytes(module) {
 
 test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria player", async () => {
   const module = await TerraWorldWasm();
-  const originalHeap = heapUsed(module);
+  const originalHeap = trackedHeapBytes(module);
   const source = fixtureBytes(module);
-  assert.equal(heapUsed(module), originalHeap,
+  assert.equal(trackedHeapBytes(module), originalHeap,
     "building the self-contained PLR fixture leaked allocations");
   let handle = 0;
   let reopened = 0;
@@ -146,7 +140,7 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
 
   try {
     handle = openBuffer(module, source);
-    assert(heapUsed(module) > originalHeap, "PLR allocations are not tracked");
+    assert(trackedHeapBytes(module) > originalHeap, "PLR allocations are not tracked");
 
     const original = twoCallJson(module, module._terra_plr_get_json, [handle]);
     assert.equal(typeof original.name, "string");
@@ -187,7 +181,7 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
       ],
     }));
     try {
-      assert.equal(module._terra_player_apply_patch_json(handle, patch), 0);
+      assert.equal(module._terra_plr_apply_patch_json(handle, patch), 0);
     } finally {
       module._tx_free(patch);
     }
@@ -264,7 +258,7 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
       malformed,
     ];
     for (const candidate of malformedCases) {
-      const beforeFailure = heapUsed(module);
+      const beforeFailure = trackedHeapBytes(module);
       const badInput = allocBytes(module, candidate);
       const badOutput = module._tx_malloc(4);
       try {
@@ -275,7 +269,7 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
         module._tx_free(badOutput);
         module._tx_free(badInput);
       }
-      assert.equal(heapUsed(module), beforeFailure,
+      assert.equal(trackedHeapBytes(module), beforeFailure,
         "failed PLR open leaked native allocations");
     }
   } finally {
@@ -284,10 +278,10 @@ test("Node PLR ABI creates, reads, edits, encrypts, and reopens a Terraria playe
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
-  assert.equal(heapUsed(module), originalHeap, "closing PLR handles must release allocations");
+  assert.equal(trackedHeapBytes(module), originalHeap, "closing PLR handles must release allocations");
 });
 
-test("Web PLR buffer edits and filesystem capability match its compiled profile", async () => {
+test("Web PLR ABI round-trips buffers and enforces its declared filesystem profile", async () => {
   const module = await TerraWorldWasmWeb({
     wasmBinary: fs.readFileSync(path.join(__dirname, "..", "build", "terrax_world_wasm_web.wasm")),
   });
@@ -299,9 +293,9 @@ test("Web PLR buffer edits and filesystem capability match its compiled profile"
     assert(growthProbe, "the player-only Web heap must still grow on demand");
     module._tx_free(growthProbe);
   }
-  const originalHeap = heapUsed(module);
+  const originalHeap = trackedHeapBytes(module);
   const source = fixtureBytes(module);
-  assert.equal(heapUsed(module), originalHeap,
+  assert.equal(trackedHeapBytes(module), originalHeap,
     "building the Web PLR fixture leaked allocations");
   let handle = 0;
   let pathHandle = 0;
@@ -323,35 +317,33 @@ test("Web PLR buffer edits and filesystem capability match its compiled profile"
     assert.equal(module._terra_plr_close(reopened), 0);
 
     if (identity.viewerWebProfile) {
-      assert.equal(module.FS, undefined, 'the combined viewer uses caller-owned buffers');
-      assert.equal(module._terra_plr_open, undefined);
+      assert.equal(module.FS, undefined, "the shared viewer artifact is buffer-only");
+      assert.equal(module._terra_plr_open, undefined, "path APIs must not leak into the viewer profile");
       assert.equal(module._terra_plr_save, undefined);
-      assert.ok(identity.targetFlagsText.includes('-sFILESYSTEM=0'));
+      assert.ok(identity.targetFlagsText.includes("-sFILESYSTEM=0"));
     } else {
-      // Standalone PLR Web and the Node test above retain their filesystem
-      // contract; the combined mini-program profile never shipped these APIs.
-      module.FS.writeFile("/input.plr", source);
-      const inputPath = allocString(module, "/input.plr");
-      const outputPath = allocString(module, "/output.plr");
-      const outputHandle = module._tx_malloc(4);
-      assert(outputHandle);
-      try {
-        assert.equal(module._terra_plr_open(inputPath, outputHandle), 0);
-        pathHandle = module.HEAPU32[outputHandle >>> 2] >>> 0;
-        assert(pathHandle);
-        assert.equal(module._terra_plr_save(pathHandle, outputPath), 0);
-        assert.deepEqual(Buffer.from(module.FS.readFile("/output.plr")), source);
-      } finally {
-        module._tx_free(outputHandle);
-        module._tx_free(outputPath);
-        module._tx_free(inputPath);
-      }
+    module.FS.writeFile("/input.plr", source);
+    const inputPath = allocString(module, "/input.plr");
+    const outputPath = allocString(module, "/output.plr");
+    const outputHandle = module._tx_malloc(4);
+    assert(outputHandle);
+    try {
+      assert.equal(module._terra_plr_open(inputPath, outputHandle), 0);
+      pathHandle = module.HEAPU32[outputHandle >>> 2] >>> 0;
+      assert(pathHandle);
+      assert.equal(module._terra_plr_save(pathHandle, outputPath), 0);
+      assert.deepEqual(Buffer.from(module.FS.readFile("/output.plr")), source);
+    } finally {
+      module._tx_free(outputHandle);
+      module._tx_free(outputPath);
+      module._tx_free(inputPath);
+    }
     }
   } finally {
     if (pathHandle) module._terra_plr_close(pathHandle);
     if (handle) module._terra_plr_close(handle);
   }
-  assert.equal(heapUsed(module), originalHeap, "Web PLR handles leaked allocations");
+  assert.equal(trackedHeapBytes(module), originalHeap, "Web PLR handles leaked allocations");
 });
 
 
@@ -446,7 +438,7 @@ test("relogic PLR accepts unused zero capacity while preserving full validation 
     const module = await factory(factory === TerraWorldWasmWeb ? {
       wasmBinary: fs.readFileSync(path.join(__dirname, '..', 'build', 'terrax_world_wasm_web.wasm')),
     } : {});
-    const heap = heapUsed(module);
+    const heap = trackedHeapBytes(module);
     for (const version of [135, 279, 315, 326]) {
       const model = historicalModel(version);
       model.name = 'zero-capacity-contract';
@@ -482,7 +474,7 @@ test("relogic PLR accepts unused zero capacity while preserving full validation 
       wrong.write('relogic', 4); wrong[11] = 2;
       assert.throws(() => openBuffer(module, Buffer.concat([encryptPlr(wrong), Buffer.alloc(272)])), 'wrong file type remains invalid');
     }
-    assert.equal(heapUsed(module), heap, 'capacity fallback must not leak rejected or accepted documents');
+    assert.equal(trackedHeapBytes(module), heap, 'capacity fallback must not leak rejected or accepted documents');
   }
 });
 
@@ -571,7 +563,7 @@ function lastError(module) {
 
 test("PLR recognizes every historical Terraria release 1-326", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   for (let version = 1; version <= 326; version++) {
     let handle = 0;
     let reopened = 0;
@@ -585,13 +577,13 @@ test("PLR recognizes every historical Terraria release 1-326", async () => {
       if (reopened) assert.equal(module._terra_plr_close(reopened), 0);
       if (handle) assert.equal(module._terra_plr_close(handle), 0);
     }
-    assert.equal(heapUsed(module), baseline, `release ${version} leaked tracked allocations`);
+    assert.equal(trackedHeapBytes(module), baseline, `release ${version} leaked tracked allocations`);
   }
 });
 
 test("PLR historical source gates keep old layouts aligned", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   const versions = [
     9,10,16,17,37,38,46,47,57,58,73,74,80,81,82,83,97,98,106,107,
     113,114,116,117,118,119,123,124,125,127,128,134,135,137,138,
@@ -665,7 +657,7 @@ test("PLR historical source gates keep old layouts aligned", async () => {
       if (reopened) module._terra_plr_close(reopened);
       if (handle) module._terra_plr_close(handle);
     }
-    assert.equal(heapUsed(module), baseline, `gate release ${version} leaked`);
+    assert.equal(trackedHeapBytes(module), baseline, `gate release ${version} leaked`);
   }
 });
 
@@ -797,7 +789,7 @@ test("PLR opens independent item layout boundary fixtures", async () => {
 
 test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses changed layouts", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   for (const version of [327, 400]) {
     let handle = 0, reopened = 0;
     try {
@@ -836,12 +828,12 @@ test("PLR accepts newer releases when the 326 layout is unchanged and diagnoses 
   } finally {
     if (handle) module._terra_plr_close(handle);
   }
-  assert.equal(heapUsed(module), baseline);
+  assert.equal(trackedHeapBytes(module), baseline);
 });
 
 test("PLR legacy item edits reject fields that old releases cannot represent", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
 
   function probeSave(handle) {
     const required = module._tx_malloc(4);
@@ -897,5 +889,5 @@ test("PLR legacy item edits reject fields that old releases cannot represent", a
     module._tx_free(output);
     module._tx_free(input);
   }
-  assert.equal(heapUsed(module), baseline);
+  assert.equal(trackedHeapBytes(module), baseline);
 });

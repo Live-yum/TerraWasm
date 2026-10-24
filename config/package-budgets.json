@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "kind": "engineering-budget-not-platform-entitlement",
+  "profiles": {
+    "all": { "wrapperBytes": 131072, "wasmBytes": 524288, "warningWasmBytes": 491520 },
+    "wld": { "wrapperBytes": 131072, "wasmBytes": 524288, "warningWasmBytes": 491520 },
+    "plr": { "wrapperBytes": 131072, "wasmBytes": 327680 }
+  }
+}

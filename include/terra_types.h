@@ -98,12 +98,18 @@ struct TxPixelArtChunk {
 
 /* ---------- Dynamic buffer ---------- */
 
+typedef enum TxBufMode { TX_BUF_DYNAMIC = 0, TX_BUF_COUNT = 1, TX_BUF_FIXED = 2 } TxBufMode;
+
 typedef struct TxBuf {
     uint8_t* data;
     uint32_t len;
     uint32_t cap;
     int      ok;
+    TxBufMode mode; /* Zero initialization preserves the dynamic default. */
 } TxBuf;
+
+void buf_init_count(TxBuf* b);
+void buf_init_fixed(TxBuf* b, void* data, uint32_t capacity);
 
 /* ---------- Error state (V2 API structured error) ---------- */
 
@@ -123,6 +129,7 @@ typedef struct TxWorld {
     uint8_t  active;
     uint32_t handle;            /* packed generation + slot token exposed to JS */
     uint32_t allocation_mark;   /* native sequence before the first owned root */
+    uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
 
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
@@ -436,7 +443,7 @@ typedef struct TxWorld {
      * transient allocations without corrupting caller-allocated data. */
     uint32_t last_op_heap_end;
     /* Exact-keyed, single-use operation response for the two-call pattern. */
-    uint32_t op_response_ptr;
+    uint8_t* op_response_ptr;
     uint32_t op_response_len;
     uint8_t* op_request_key;
     uint32_t op_request_key_len;
@@ -475,6 +482,8 @@ int tx_world_is_future(const TxWorld* world);
 int tx_world_require_writable(const TxWorld* world);
 int tx_validate_future_sections(TxWorld* world);
 int tx_validate_future_tiles(TxWorld* world);
+int tx_validate_tiles(TxWorld* world);
+int tx_validate_footer(TxWorld* world);
 
 /* ---------- Pixel art color mapping entry (12 bytes, matches JS DataView layout) ---------- */
 

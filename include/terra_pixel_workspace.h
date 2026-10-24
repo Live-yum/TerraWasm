@@ -3,6 +3,9 @@
  * Coordinates are zero-based; palette index 0 is always transparent/missing.
  * Status 0 is success. On a mutating error, an open transaction is rolled back.
  * Nonmutating query errors do not change the transaction. Close accepts no stale IDs.
+ * While a world allocator checkpoint owns admission, pixel create/mutation/close
+ * return TRANSACTION without changing an existing pixel transaction. Pure queries
+ * remain available, including bounded temporary color matching.
  */
 #ifndef TERRA_PIXEL_WORKSPACE_H
 #define TERRA_PIXEL_WORKSPACE_H

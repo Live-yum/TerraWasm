@@ -1,3 +1,5 @@
+#include "terra_alignment.h"
+#include "terra_native_span.h"
 /*
  * terra_mem.c -- Owned allocation domains, TxBuf, toolchain libc.
  *
@@ -63,11 +65,15 @@ union TxAllocHeader {
         TxAllocHeader* next;
         uintptr_t reserved;
     } root;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 };
 
 #ifdef TERRAX_TESTING
+static uint64_t tx_test_allocation_attempts;
+uint64_t txw_test_allocation_attempts(void){return tx_test_allocation_attempts;}
 static uint32_t tx_test_allocation_limit=UINT32_MAX;
+static uint32_t tx_test_fail_after=UINT32_MAX;
+void txw_test_fail_after(uint32_t n){tx_test_fail_after=n;}
 void txw_test_allocation_limit(uint32_t n){tx_test_allocation_limit=n;}
 /* Test-only aggregate payload budget, held across an entire operation. This
  * models optional allocations succeeding before mandatory later work runs. */
@@ -102,7 +108,7 @@ static uint64_t tx_total_peak_bytes = 0;
 static uint64_t tx_native_owned_peak_bytes = 0;
 
 /* Result pointers (set by operations, read by JS) */
-uint32_t tx_last_ptr = 0;
+uint8_t* tx_last_ptr = NULL;
 uint32_t tx_last_len = 0;
 uint32_t tx_last_width = 0;
 uint32_t tx_last_height = 0;
@@ -231,7 +237,9 @@ static void tx_release_root(TxAllocHeader* header, uint32_t domain) {
 
 static void* tx_new_root(uint32_t size, uint32_t domain) {
 #ifdef TERRAX_TESTING
+    tx_test_allocation_attempts++;
     if(size>tx_test_allocation_limit||!tx_test_has_headroom(size))return NULL;
+    if(tx_test_fail_after!=UINT32_MAX){if(!tx_test_fail_after)return NULL;--tx_test_fail_after;}
 #endif
     size_t total = 0;
     if (!tx_allocation_size(size, &total)) return NULL;
@@ -259,25 +267,20 @@ static void* tx_new_root(uint32_t size, uint32_t domain) {
     return (uint8_t*)header + sizeof(TxAllocHeader);
 }
 
-uint32_t tx_malloc(uint32_t size) {
-    void* payload = tx_new_root(size, TX_DOMAIN_BRIDGE);
-    return (uint32_t)(uintptr_t)payload;
+void* tx_bridge_alloc_native(size_t size) {
+    if (size > UINT32_MAX) return NULL;
+    return tx_new_root((uint32_t)size, TX_DOMAIN_BRIDGE);
 }
-
-void tx_free(uint32_t ptr) {
-    void* payload = (void*)(uintptr_t)ptr;
-    tx_release_root(tx_find_root(payload, TX_DOMAIN_BRIDGE), TX_DOMAIN_BRIDGE);
+void tx_bridge_free_native(void* pointer) {
+    tx_release_root(tx_find_root(pointer, TX_DOMAIN_BRIDGE), TX_DOMAIN_BRIDGE);
 }
-
-uint32_t tx_bridge_allocation_size(uint32_t ptr) {
-    void* payload = (void*)(uintptr_t)ptr;
-    TxAllocHeader* header = tx_find_root(payload, TX_DOMAIN_BRIDGE);
+size_t tx_bridge_allocation_size_native(const void* pointer) {
+    TxAllocHeader* header = tx_find_root((void*)pointer, TX_DOMAIN_BRIDGE);
     return header ? header->root.size : 0u;
 }
-
-int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
-    if (!ptr) return length == 0u;
-    uintptr_t address = (uintptr_t)ptr;
+int tx_bridge_contains_native(const void* pointer, size_t length) {
+    if (!pointer) return length == 0u;
+    uintptr_t address = (uintptr_t)pointer;
     TxAllocHeader* root = tx_bridge_head;
     while (root) {
         if (root->root.magic == TX_ALLOC_MAGIC &&
@@ -286,15 +289,35 @@ int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
             uintptr_t payload = (uintptr_t)((uint8_t*)root + sizeof(TxAllocHeader));
             if (address >= payload) {
                 uintptr_t offset = address - payload;
-                if (offset <= root->root.size &&
-                    length <= root->root.size - (uint32_t)offset) {
-                    return 1;
-                }
+                if (offset <= root->root.size && length <= root->root.size - offset) return 1;
             }
         }
         root = root->root.next;
     }
     return 0;
+}
+int tx_wasm_span32(const void* pointer, size_t length, uint32_t* out_offset) {
+    if (!out_offset) return 0;
+    *out_offset = 0;
+    uintptr_t address = (uintptr_t)pointer;
+    if (address > UINT32_MAX || (!pointer && length) ||
+        (uint64_t)length > (uint64_t)UINT32_MAX + 1u - address) return 0;
+    *out_offset = (uint32_t)address;
+    return 1;
+}
+int tx_wasm_offset32(const void* pointer, uint32_t* out_offset) { return tx_wasm_span32(pointer,0,out_offset); }
+uint32_t tx_malloc(uint32_t size) {
+    void* payload = tx_bridge_alloc_native(size);
+    uint32_t offset = 0;
+    if (!tx_wasm_span32(payload, size, &offset)) tx_bridge_free_native(payload);
+    return offset;
+}
+void tx_free(uint32_t ptr) { tx_bridge_free_native((void*)(uintptr_t)ptr); }
+uint32_t tx_bridge_allocation_size(uint32_t ptr) {
+    return (uint32_t)tx_bridge_allocation_size_native((const void*)(uintptr_t)ptr);
+}
+int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length) {
+    return tx_bridge_contains_native((const void*)(uintptr_t)ptr, length);
 }
 
 uint8_t* tx_alloc(uint32_t size) {
@@ -309,6 +332,9 @@ void tx_internal_free(void* payload) {
 
 static void* tx_internal_realloc_domain(
     void* payload, uint32_t size, uint32_t domain) {
+    #ifdef TERRAX_TESTING
+    tx_test_allocation_attempts++;
+    #endif
     if (!payload) return tx_new_root(size ? size : 1u, domain);
     TxAllocHeader* old = tx_lookup_root(payload, domain);
     if (!old) return NULL;
@@ -504,17 +530,28 @@ uint32_t tx_get_world_open_count(void) { return tx_world_open_count; }
 /* ---------- TxBuf dynamic buffer ---------- */
 
 void buf_init(TxBuf* b, uint32_t cap) {
+    b->mode = TX_BUF_DYNAMIC;
     b->len = 0;
     b->cap = cap ? cap : 128u;
     b->data = tx_alloc(b->cap);
     b->ok = b->data != NULL;
 }
 
+void buf_init_count(TxBuf* b) {
+    *b = (TxBuf){NULL, 0, UINT32_MAX, 1, TX_BUF_COUNT};
+}
+
+void buf_init_fixed(TxBuf* b, void* data, uint32_t capacity) {
+    *b = (TxBuf){data, 0, capacity, data != NULL, TX_BUF_FIXED};
+}
+
 int buf_reserve(TxBuf* b, uint32_t extra) {
     if (!b->ok) return 0;
     if (extra > 0xffffffffu - b->len) { b->ok = 0; return 0; }
     uint32_t need = b->len + extra;
+    if (b->mode == TX_BUF_COUNT) return 1;
     if (need <= b->cap) return 1;
+    if (b->mode == TX_BUF_FIXED) { b->ok = 0; return 0; }
     uint32_t next = b->cap ? b->cap : 128u;
     while (next < need) {
         uint32_t old = next;
@@ -530,12 +567,15 @@ int buf_reserve(TxBuf* b, uint32_t extra) {
 }
 
 void buf_u8(TxBuf* b, uint8_t v) {
-    if (buf_reserve(b, 1)) b->data[b->len++] = v;
+    if (buf_reserve(b, 1)) {
+        if (b->mode != TX_BUF_COUNT) b->data[b->len] = v;
+        b->len++;
+    }
 }
 
 void buf_bytes(TxBuf* b, const void* p, uint32_t n) {
     if (buf_reserve(b, n)) {
-        if (n) memcpy(b->data + b->len, p, n);
+        if (n && b->mode != TX_BUF_COUNT) memcpy(b->data + b->len, p, n);
         b->len += n;
     }
 }
@@ -663,7 +703,7 @@ int set_result_buf(TxBuf* b) {
         tx_set_error("TERRAX_WASM_OOM", "out of memory");
         return -1;
     }
-    tx_last_ptr = (uint32_t)(uintptr_t)b->data;
+    tx_last_ptr = b->data;
     tx_last_len = b->len;
     tx_clear_error();
     return (int)b->len;
@@ -674,7 +714,7 @@ int set_result_bytes(uint8_t* p, uint32_t len) {
         tx_set_error("TERRAX_WASM_OOM", "out of memory");
         return -1;
     }
-    tx_last_ptr = (uint32_t)(uintptr_t)p;
+    tx_last_ptr = p;
     tx_last_len = len;
     tx_clear_error();
     return (int)len;

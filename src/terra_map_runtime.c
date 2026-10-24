@@ -1,4 +1,5 @@
 #include "terra_map_runtime.h"
+#include "terra_checkpoint.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -134,6 +135,10 @@ static int validate_runtime(const uint8_t* data, uint32_t len,
 }
 
 int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len) {
+    if (tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish world checkpoint before changing the process map palette");
+        return -1;
+    }
     TxMapRuntimeLayout candidate;
     uint8_t* copy;
     if (!data && data_len == 0u) {
@@ -168,6 +173,10 @@ int32_t txw_set_map_runtime_from_buffer(const uint8_t* data, uint32_t data_len) 
 }
 
 int32_t txw_set_map_runtime(uint32_t data_ptr, uint32_t data_len) {
+    if (tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish world checkpoint before changing the process map palette");
+        return -1;
+    }
     if (!data_ptr && !data_len) return txw_set_map_runtime_from_buffer(NULL, 0u);
     if (!data_ptr || !data_len || !tx_bridge_range_is_valid(data_ptr, data_len) ||
         tx_bridge_allocation_size(data_ptr) != data_len)
@@ -176,6 +185,10 @@ int32_t txw_set_map_runtime(uint32_t data_ptr, uint32_t data_len) {
 }
 
 int32_t txw_use_builtin_map_runtime(void) {
+    if (tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish world checkpoint before changing the process map palette");
+        return -1;
+    }
     /* Worlds read the process palette at use time. Tasks may retain rendered
      * rows, so never change palettes during an open or streaming task. */
     if (runtime_data && (tx_open_task_pending() || tx_stream_task_pending()))

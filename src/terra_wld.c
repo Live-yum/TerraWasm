@@ -952,6 +952,10 @@ int read_tile_at(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t) {
     return read_tile_at_mode(w,off,end,t,1);
 }
 
+int tx_read_tile_strict(TxWorld *w,uint32_t *off,uint32_t end,TxTile *t) {
+    return read_tile_at_mode(w,off,end,t,0);
+}
+
 /* Read-only browser region preview: caller owns bytes, column index and output.
  * Reuse the native decoder without normalizing saved timer frames. */
 static int preview_world(TxWorld *w,const uint8_t *bytes,uint32_t length,uint32_t width,uint32_t height) {

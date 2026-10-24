@@ -25,7 +25,7 @@ extern int tx_mutate_header_patch(TxWorld* w, const char* request, uint32_t requ
 extern int tx_mutate_replace_chests(TxWorld* w, const char* request, uint32_t request_len, TxBuf* response);
 extern int tx_mutate_replace_bestiary(TxWorld* w, const char* request, uint32_t request_len, TxBuf* response);
 
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
@@ -328,7 +328,7 @@ static int finish_map_response(TxBuf* response, uint8_t* map_data, uint32_t map_
         if (map_data) tx_internal_free(map_data);
         return -1;
     }
-    tx_last_ptr = (uint32_t)(uintptr_t)map_data;
+    tx_last_ptr = map_data;
     tx_last_len = map_len;
     tx_last_width = map_width;
     tx_last_height = map_height;
@@ -369,7 +369,7 @@ static int finish_preview_png_response(TxWorld* w, TxBuf* response,
         w->media_result_height = png_height;
         w->media_result_kind = 2u;
 
-        tx_last_ptr = (uint32_t)(uintptr_t)png_data;
+        tx_last_ptr = png_data;
         tx_last_len = png_len;
         tx_last_width = png_width;
         tx_last_height = png_height;
@@ -401,7 +401,7 @@ static int execute_txw_render_preview_png(TxWorld* w, const char* request, int j
     int result = txw_render_preview_png(w, (uint32_t)max_w, (uint32_t)max_h);
     if (result < 0) return -1;
 
-    uint32_t png_ptr = tx_last_ptr, png_len = tx_last_len;
+    uint8_t* png_ptr = tx_last_ptr; uint32_t png_len = tx_last_len;
     uint32_t png_w = tx_last_width, png_h = tx_last_height;
 
     if (output_path[0] && !write_file_from_heap(
@@ -442,7 +442,7 @@ static int execute_txw_render_thumbnail_png(TxWorld* w, const char* request, int
     int result = txw_render_preview_png(w, (uint32_t)max_w, 0);
     if (result < 0) return -1;
 
-    uint32_t png_ptr = tx_last_ptr, png_len = tx_last_len;
+    uint8_t* png_ptr = tx_last_ptr; uint32_t png_len = tx_last_len;
     uint32_t png_w = tx_last_width, png_h = tx_last_height;
 
     buf_cstr(response, "{\"status\":\"ok\",\"width\":");

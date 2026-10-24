@@ -15,6 +15,8 @@
 #define TERRAX_COMMAND_MAX_COUNT 128u
 #define TERRAX_COMMAND_MAX_PAYLOAD (16u * 1024u * 1024u)
 
+/* Atomic batch with an owned checkpoint. An existing checkpoint is rejected
+ * without mutation; the caller retains sole commit/rollback responsibility. */
 terrax_world_status terra_world_apply_commands(
     uint32_t handle,
     const uint8_t* commands,

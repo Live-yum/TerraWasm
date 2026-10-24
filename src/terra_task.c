@@ -73,7 +73,7 @@ extern uint32_t tx_get_world_open_count(void);
 extern void tx_set_error(const char* code, const char* message);
 extern int parse_format(TxWorld* world);
 extern TxWorld* tx_get_world(uint32_t handle);
-extern uint32_t tx_last_ptr;
+extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;

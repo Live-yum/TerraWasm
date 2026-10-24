@@ -25,6 +25,9 @@ enum TerraVmStatus {
     TERRA_VM_CALLBACK = -5
 };
 
+/* Only order_candidates interprets 2 as external-I/O suspension. It returns
+ * from terra_vm_step immediately, retaining VM_TRIP_END and order_started. */
+enum { TERRA_VM_ORDER_EXTERNAL_YIELD = 2 };
 typedef struct TerraVmCallbacks {
     /* Return 1 with the next lamp event, 0 at end, or a negative status. The
      * compiler owns cursor encoding; zero means the start of a net's rule list.

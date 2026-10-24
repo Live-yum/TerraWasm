@@ -45,9 +45,9 @@ static void metadata_budget(const uint8_t* source,uint32_t n){
     for(uint32_t i=9;i<11;i++)put32(bytes+26+i*4,get32(source+26+i*4)-old+section_size);
     extern int parse_format(TxWorld*);
     TxWorld w={0};TxWldGuardTask task={0};w.file=bytes;w.file_len=total;assert(parse_format(&w));
-    struct timespec start,finish;timespec_get(&start,TIME_UTC);
-    assert(tx_wld_guard_task_begin(&w,&task));timespec_get(&finish,TIME_UTC);
-    double seconds=(double)(finish.tv_sec-start.tv_sec)+(double)(finish.tv_nsec-start.tv_nsec)/1e9;
+    clock_t start=clock();
+    assert(tx_wld_guard_task_begin(&w,&task));
+    double seconds=(double)(clock()-start)/CLOCKS_PER_SEC;
     printf("future metadata task begin: %u empty strings, %.6f seconds (not viewer end-to-end)\n",sight_count,seconds);
     /* Inverse/oversized count must fail structurally, without trusting it as
      * an allocation size or walking outside its own section. */

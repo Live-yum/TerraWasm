@@ -12,10 +12,7 @@ const REAL_FIXTURE = process.env.TERRAWASM_PLR_FIXTURE ||
   path.join(__dirname, "files", "烟花.plr");
 const MODEL_FIXTURE = path.join(__dirname, "fixtures", "minimal-player.json");
 
-// Both tracked domains are exported by the buffer-only viewer profile.
-function heapUsed(module) {
-  return module._tx_bridge_heap_used() + module._tx_native_heap_used();
-}
+function trackedHeapBytes(module) { return module._tx_native_heap_used() + module._tx_bridge_heap_used(); }
 
 function allocBytes(module, bytes) {
   const value = Buffer.from(bytes);
@@ -64,12 +61,12 @@ function probeJsonCache(module, handle) {
   const required = module._tx_malloc(4);
   assert(required);
   try {
-    const before = heapUsed(module);
+    const before = trackedHeapBytes(module);
     assert.equal(module._terra_plr_get_json(handle, 0, 0n, required), 0);
-    const afterFirst = heapUsed(module);
+    const afterFirst = trackedHeapBytes(module);
     assert(afterFirst > before, "first get_json probe should populate the document JSON cache");
     assert.equal(module._terra_plr_get_json(handle, 0, 0n, required), 0);
-    assert.equal(heapUsed(module), afterFirst,
+    assert.equal(trackedHeapBytes(module), afterFirst,
       "second get_json probe must reuse the serialized JSON cache");
     return module.HEAPU32[required >>> 2] >>> 0;
   } finally {
@@ -90,9 +87,9 @@ function getDocumentJson(module, handle, knownSize = 0) {
     assert(size > 1);
     output = module._tx_malloc(size);
     assert(output);
-    const beforeFetch = heapUsed(module);
+    const beforeFetch = trackedHeapBytes(module);
     assert.equal(module._terra_plr_get_json(handle, output, BigInt(size), required), 0);
-    assert.equal(heapUsed(module), beforeFetch,
+    assert.equal(trackedHeapBytes(module), beforeFetch,
       "get_json fetch must not serialize the document again");
     return JSON.parse(module.UTF8ToString(output, size));
   } finally {
@@ -122,20 +119,17 @@ function getField(module, handle, pointer) {
 
 function setField(module, handle, pointer, value) {
   const edits = allocString(module, JSON.stringify([{ path: pointer, value }]));
-  try {
-    return module._terra_plr_set_many(handle, edits);
-  } finally {
-    module._tx_free(edits);
-  }
+  try { return module._terra_plr_set_many(handle, edits); }
+  finally { module._tx_free(edits); }
 }
 
 function encode(module, handle, { expectCached = false } = {}) {
   const required = module._tx_malloc(4);
   let output = 0;
   try {
-    const beforeProbe = heapUsed(module);
+    const beforeProbe = trackedHeapBytes(module);
     assert.equal(module._terra_plr_save_to_buffer(handle, 0, 0, required), 0);
-    const afterFirstProbe = heapUsed(module);
+    const afterFirstProbe = trackedHeapBytes(module);
     if (expectCached) {
       assert(afterFirstProbe > beforeProbe,
         "first dirty save probe should populate the encrypted output cache");
@@ -144,15 +138,15 @@ function encode(module, handle, { expectCached = false } = {}) {
         "clean save probe should use original encrypted bytes without allocating");
     }
     assert.equal(module._terra_plr_save_to_buffer(handle, 0, 0, required), 0);
-    assert.equal(heapUsed(module), afterFirstProbe,
+    assert.equal(trackedHeapBytes(module), afterFirstProbe,
       "second save probe must reuse the existing encrypted bytes/cache");
     const size = module.HEAPU32[required >>> 2] >>> 0;
     assert(size > 0);
     output = module._tx_malloc(size);
     assert(output);
-    const beforeFetch = heapUsed(module);
+    const beforeFetch = trackedHeapBytes(module);
     assert.equal(module._terra_plr_save_to_buffer(handle, output, size, required), 0);
-    assert.equal(heapUsed(module), beforeFetch,
+    assert.equal(trackedHeapBytes(module), beforeFetch,
       "save fetch must not encode/encrypt the PLR again");
     return Buffer.from(module.HEAPU8.slice(output, output + size));
   } finally {
@@ -183,7 +177,7 @@ function realFixtureBytes() {
 
 test("Node opens a real Terraria PLR and reuses two-call caches", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   const source = realFixtureBytes();
   let handle = 0;
   let reopened = 0;
@@ -216,7 +210,7 @@ test("Node opens a real Terraria PLR and reuses two-call caches", async () => {
     if (reopened) assert.equal(module._terra_plr_close(reopened), 0);
     if (handle) assert.equal(module._terra_plr_close(handle), 0);
   }
-  assert.equal(heapUsed(module), baseline,
+  assert.equal(trackedHeapBytes(module), baseline,
     "real PLR handles/caches leaked native allocations");
 });
 
@@ -224,7 +218,7 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
   const module = await TerraWorldWasmWeb({
     wasmBinary: fs.readFileSync(path.join(__dirname, "..", "build", "terrax_world_wasm_web.wasm")),
   });
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   const source = realFixtureBytes();
   let handle = 0;
   let reopened = 0;
@@ -244,12 +238,12 @@ test("Web opens and edits the real Terraria PLR fixture", async () => {
     if (reopened) module._terra_plr_close(reopened);
     if (handle) module._terra_plr_close(handle);
   }
-  assert.equal(heapUsed(module), baseline);
+  assert.equal(trackedHeapBytes(module), baseline);
 });
 
 test("real-layout PLR accepts a newer release when the persisted layout is unchanged", async () => {
   const module = await TerraWorldWasm();
-  const baseline = heapUsed(module);
+  const baseline = trackedHeapBytes(module);
   const source = realFixtureBytes();
   let handle = 0;
   let reopened = 0;
@@ -273,5 +267,5 @@ test("real-layout PLR accepts a newer release when the persisted layout is uncha
     if (reopened) module._terra_plr_close(reopened);
     if (handle) module._terra_plr_close(handle);
   }
-  assert.equal(heapUsed(module), baseline);
+  assert.equal(trackedHeapBytes(module), baseline);
 });

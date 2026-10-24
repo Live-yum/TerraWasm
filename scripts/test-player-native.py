@@ -5,13 +5,13 @@ import os, subprocess, sys, hashlib
 os.chdir(Path(__file__).resolve().parents[1])
 flags=['-fsanitize=address,undefined','-fno-omit-frame-pointer'] if '--sanitize' in sys.argv else []
 build=Path('build-native-player-sanitize' if flags else 'build-native-player');build.mkdir(exist_ok=True)
-base=['gcc','-std=gnu17','-O1','-g','-fno-pie','-DTERRAX_STATIC','-DTERRAX_TESTING','-DTERRAWASM_FEATURE_WLD=0','-DTERRAWASM_FEATURE_PLR=1','-Iinclude']+flags
+base=['gcc','-std=gnu17','-O1','-g','-DTERRAX_STATIC','-DTERRAX_TESTING','-DTERRAWASM_FEATURE_WLD=0','-DTERRAWASM_FEATURE_PLR=1','-Iinclude']+flags
 objects=[]
 for name in ['terra_mem','terra_reader','terra_abi','terra_plr']:
  out=build/(name+'.o');subprocess.run(base+(['-fno-tree-loop-distribute-patterns'] if name=='terra_mem' else [])+['-c','src/'+name+'.c','-o',str(out)],check=True);objects.append(str(out))
 for name in ['plr_contract','plr_workspace_contract','plr_workspace_differential','plr_preview_contract']:
  out=build/name
- subprocess.run(base+['-no-pie','-DTERRAWASM_PLR_JSON_FIXTURE_PATH="'+Path('tests/fixtures/minimal-player.json').resolve().as_posix()+'"','tests/'+name+'.c',*objects,'-lm','-o',str(out)],check=True)
+ subprocess.run(base+['-DTERRAWASM_PLR_JSON_FIXTURE_PATH="'+Path('tests/fixtures/minimal-player.json').resolve().as_posix()+'"','tests/'+name+'.c',*objects,'-lm','-o',str(out)],check=True)
  if name == 'plr_workspace_differential':
   result=subprocess.check_output([str(out)])
   expected='cbd7b51b0e149e578a0b500ae45048ba3a2a421c5e4bc9b9074e6e81d1f529c2'

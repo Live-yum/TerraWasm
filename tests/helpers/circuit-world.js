@@ -89,9 +89,10 @@ function makeCircuitTwld(width = 40, height = 32) {
   return zlib.gzipSync(tag(10, '', Buffer.concat([tag(10, 'tiles', tiles), tag(7, 'future-unknown-blob', Buffer.concat([u32(unknown.length), unknown])), Buffer.from([0])])));
 }
 
-async function makeDriver() {
+async function makeDriver(target = 'web', verifiedModule = null) {
   const build = process.env.TCW_BUILD_DIR ? path.resolve(process.env.TCW_BUILD_DIR) : path.join(__dirname, '../../build');
-  const M = await require(path.join(build, 'terrax_world_wasm_web.js'))({ wasmBinary: fs.readFileSync(path.join(build, 'terrax_world_wasm_web.wasm')) });
+  const name = target === 'node' ? 'terrax_world_wasm' : 'terrax_world_wasm_web';
+  const M = verifiedModule || await require(path.join(build, `${name}.js`))({ wasmBinary: fs.readFileSync(path.join(build, `${name}.wasm`)) });
   const pointers = [], alloc = bytes => { const p = M._tx_malloc(bytes); assert.ok(p); pointers.push(p); return p; };
   const hp = alloc(4), ep = alloc(48), cp = alloc(64), sp = alloc(96), input = alloc(1048576), data = alloc(1048576);
   const sources = new Map(); let world = 0, circuit = 0, openTask = 0, progress = 0;
@@ -144,10 +145,15 @@ async function makeDriver() {
     if (openTask) { okay(M._terra_world_stream_close(openTask)); openTask = 0; }
     assert.equal(M._tx_native_heap_used(), 0, 'all native session state released');
   };
-  function open(bytes, maximum = 48 * 1024 * 1024, sidecar) {
+  function open(bytes, maximum = 48 * 1024 * 1024, sidecar, memoryBacked = false) {
     close(); sources.clear(); sources.set(1, bytes); sources.set(2, Buffer.alloc(0)); if (sidecar) sources.set(3, sidecar);
+    if (memoryBacked) {
+      assert.ok(bytes.length <= 1048576); M.HEAPU8.set(bytes, input);
+      okay(M._terra_world_open_from_buffer(input, bytes.length, hp)); world = M.HEAPU32[hp >>> 2];
+    } else {
     okay(M._terra_world_stream_open_begin(1, bytes.length, hp)); openTask = M.HEAPU32[hp >>> 2]; pump(true);
     okay(M._terra_world_stream_adopt(openTask, 1, hp)); world = M.HEAPU32[hp >>> 2]; okay(M._terra_world_stream_close(openTask)); openTask = 0;
+    }
     okay(M._terra_circuit_world_begin(world, 2, sidecar ? 3 : 0, sidecar?.length || 0, maximum, hp)); circuit = M.HEAPU32[hp >>> 2]; return pump();
   }
   return { M, open, close, command, start, event, respond, pump, stats, sources, get worldHandle() { return world; }, get circuitHandle() { return circuit; },

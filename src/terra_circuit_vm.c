@@ -4,6 +4,7 @@
  * No RISC-V opcodes, registers, addresses, or Computerraria coordinates occur in
  * this executor. A CPU is an ordinary arrangement of its physical wiring rules.
  */
+#include "terra_alignment.h"
 #include "terra_circuit_vm.h"
 #include <limits.h>
 #include <stddef.h>
@@ -16,7 +17,7 @@ extern void tx_persistent_free(void* pointer);
 
 typedef union VmAllocation {
     struct { uint32_t charged; } value;
-    max_align_t alignment;
+    TerraMaxAlign alignment;
 } VmAllocation;
 
 typedef struct VmDoneSlot {
@@ -341,7 +342,7 @@ int32_t terra_vm_step(TerraCircuitVm* vm, uint32_t max_operations) {
         case VM_TRIP_END:
             if(vm->callbacks.order_candidates){
                 status=vm->callbacks.order_candidates(vm->context,vm->candidates?vm->candidates+vm->trip_candidate_start:NULL,vm->candidate_count-vm->trip_candidate_start,!vm->order_started);vm->order_started=1;
-                if(status<0)return vm_fail(vm,TERRA_VM_CALLBACK);if(status>0)break;
+                if(status<0)return vm_fail(vm,TERRA_VM_CALLBACK);if(status==TERRA_VM_ORDER_EXTERNAL_YIELD)return TERRA_VM_MORE;if(status>0)break;
             }
             if (vm->callbacks.trip_end && vm->callbacks.trip_end(vm->context) < 0)
                 return vm_fail(vm, TERRA_VM_CALLBACK);

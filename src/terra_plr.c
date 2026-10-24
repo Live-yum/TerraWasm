@@ -11,6 +11,7 @@
  */
 
 #include "terra_plr.h"
+#include "terra_checkpoint.h"
 #include "terra_types.h"
 #include "terra_reader.h"
 
@@ -21,9 +22,19 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <wchar.h>
+#else
+#include <unistd.h>
+#endif
 
-extern void *memcpy(void *dst, const void *src, unsigned long n);
-extern void *memset(void *dst, int value, unsigned long n);
 extern uint8_t *tx_persistent_alloc(uint32_t size);
 extern void tx_persistent_free(void *ptr);
 extern void *tx_persistent_realloc(void *ptr, uint32_t size);
@@ -3686,12 +3697,11 @@ static terrax_world_status plr_open_parsed(
     return TERRAX_WORLD_STATUS_OK;
 }
 
-static terrax_world_status plr_open_from_encrypted(
-    const uint8_t *buffer, uint32_t buffer_length, uint32_t *out_handle) {
-    g_plr_oom = 0;
-    uint8_t *original = (uint8_t *)plr_malloc(buffer_length);
-    if (!original) return plr_parse_error();
-    memcpy(original, buffer, buffer_length);
+/* Full decoder shared by opening and pre-publication validation. It owns only
+ * scoped parser memory, not a document slot, cache, or original byte copy. */
+static PlrJsonValue* plr_parse_encrypted_candidate(const uint8_t* buffer,uint32_t buffer_length,
+    terrax_world_status* out_status) {
+    g_plr_oom=0;
     uint32_t plain_length = 0u;
     uint8_t *plain = plr_decrypt(buffer, buffer_length, &plain_length);
     if (!plain && !g_plr_oom && (buffer_length & 15u) == 0u) {
@@ -3714,8 +3724,8 @@ static terrax_world_status plr_open_from_encrypted(
         }
     }
     if (!plain) {
-        free(original);
-        return plr_parse_error();
+        *out_status=plr_parse_error();
+        return NULL;
     }
     int32_t detected_version = 0;
     if (plain_length >= 4u) detected_version = (int32_t)(
@@ -3724,10 +3734,23 @@ static terrax_world_status plr_open_from_encrypted(
     PlrJsonValue *root = plr_parse_plain_mode(plain, plain_length, 0);
     free(plain);
     if (!root) {
-        free(original);
-        return plr_parse_error_for_version(detected_version);
+        *out_status=plr_parse_error_for_version(detected_version);
+        return NULL;
     }
-    return plr_open_parsed(root, original, buffer_length, out_handle);
+    *out_status=TERRAX_WORLD_STATUS_OK;
+    return root;
+}
+
+static terrax_world_status plr_open_from_encrypted(
+    const uint8_t *buffer, uint32_t buffer_length, uint32_t *out_handle) {
+    g_plr_oom=0;
+    uint8_t* original=(uint8_t*)plr_malloc(buffer_length);
+    if(!original)return plr_parse_error();
+    memcpy(original,buffer,buffer_length);
+    terrax_world_status status=TERRAX_WORLD_STATUS_OK;
+    PlrJsonValue* root=plr_parse_encrypted_candidate(buffer,buffer_length,&status);
+    if(!root){free(original);return status;}
+    return plr_open_parsed(root,original,buffer_length,out_handle);
 }
 
 static terrax_world_status plr_copy_json_result(
@@ -3785,6 +3808,10 @@ static terrax_world_status plr_copy_document_json_result(
             "TERRAX_INVALID_ARGUMENT",
             "null PLR document or required-size pointer");
     }
+    /* A query may use temporary roots, but must not publish a cache that the
+     * foreign world rollback would later free behind this document's pointer. */
+    if (tx_checkpoint_active() && !document->json_cache)
+        return plr_copy_json_result(document->root, buffer, buffer_size, required_size);
     if (!document->json_cache) {
         g_plr_oom = 0;
         uint32_t length = 0u;
@@ -3872,12 +3899,46 @@ static const uint8_t *plr_encoded_document(
  * -------------------------------------------------------------------------
  */
 
+#ifdef _WIN32
+typedef wchar_t PlrFileChar;
+#define PLR_FILE_TEXT(text) L##text
+#define plr_file_fopen _wfopen
+#define plr_file_remove _wremove
+/* The public ABI always takes UTF-8, regardless of the process ANSI code page.
+ * Reject invalid input instead of silently selecting another filename. Both
+ * publication paths are allocated before an exclusive candidate is created. */
+static wchar_t *plr_windows_path(const char *path) {
+    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    if (count <= 0 || (uint64_t)count * sizeof(wchar_t) > UINT32_MAX) return NULL;
+    wchar_t *wide = (wchar_t *)plr_malloc((size_t)count * sizeof(wchar_t));
+    if (!wide) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, count) != count) {
+        free(wide);
+        return NULL;
+    }
+    return wide;
+}
+static FILE *plr_fopen_utf8(const char *path) {
+    wchar_t *wide = plr_windows_path(path);
+    if (!wide) return NULL;
+    FILE *file = _wfopen(wide, L"rb");
+    free(wide);
+    return file;
+}
+#else
+typedef char PlrFileChar;
+#define PLR_FILE_TEXT(text) text
+#define plr_file_fopen fopen
+#define plr_file_remove remove
+static FILE *plr_fopen_utf8(const char *path) { return fopen(path, "rb"); }
+#endif
+
 static int plr_read_file(
     const char *path, uint8_t **out_data, uint32_t *out_length) {
     if (!path || !out_data || !out_length) return 0;
     *out_data = NULL;
     *out_length = 0u;
-    FILE *file = fopen(path, "rb");
+    FILE *file = plr_fopen_utf8(path);
     if (!file) return 0;
     if (fseek(file, 0, SEEK_END) != 0) {
         fclose(file);
@@ -3905,14 +3966,95 @@ static int plr_read_file(
     return 1;
 }
 
-static int plr_write_file(
-    const char *path, const uint8_t *data, uint32_t length) {
+/* External file publication: same-directory exclusive candidate plus replacement.
+ * This is not a managed-history CAS or a durable publication receipt. */
+#ifdef TERRAX_TESTING
+static uint32_t plr_test_write_limit = UINT32_MAX;
+static int plr_test_corrupt_candidate;
+void terrax_test_plr_corrupt_candidate(int enabled) { plr_test_corrupt_candidate=enabled; }
+void terrax_test_plr_write_limit(uint32_t limit) { plr_test_write_limit = limit; }
+#endif
+/* Read the completed candidate, not just the source buffer or a write count.
+ * Bounded verification establishes byte identity; full parsing was completed
+ * before this file was created. No durability/managed-CAS claim is implied. */
+static int plr_candidate_matches(const PlrFileChar* path,const uint8_t* data,uint32_t length) {
+    FILE* file=plr_file_fopen(path,PLR_FILE_TEXT("rb"));if(!file)return 0;
+    uint8_t chunk[4096];uint32_t offset=0;int ok=1;
+    while(ok&&offset<length){
+        uint32_t n=length-offset;if(n>sizeof(chunk))n=sizeof(chunk);
+        if(fread(chunk,1,n,file)!=n||!plr_memory_equal(chunk,data+offset,n))ok=0;
+        offset+=n;
+    }
+    if(ok&&(fgetc(file)!=EOF||ferror(file)))ok=0;
+    if(fclose(file)!=0)ok=0;
+    return ok;
+}
+static int plr_write_file(const char *path, const uint8_t *data, uint32_t length) {
     if (!path || (!data && length)) return 0;
-    FILE *file = fopen(path, "wb");
-    if (!file) return 0;
-    size_t written = fwrite(data, 1u, length, file);
-    int ok = written == length && fflush(file) == 0;
+#ifdef _WIN32
+    PlrFileChar *target = plr_windows_path(path);
+    if (!target) return 0;
+    uint32_t n = (uint32_t)wcslen(target);
+    unsigned long pid = (unsigned long)_getpid();
+#else
+    const PlrFileChar *target = path;
+    uint32_t n = tx_strlen(path);
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    PlrFileChar *candidate = NULL;
+    int ok = 0;
+    if (n > UINT32_MAX / sizeof(PlrFileChar) - 80u) goto cleanup;
+    candidate = (PlrFileChar *)plr_malloc(((size_t)n + 80u) * sizeof(PlrFileChar));
+    if (!candidate) goto cleanup;
+    static uint32_t sequence;
+    FILE *file = NULL;
+    for (unsigned attempt = 0; attempt < 128; ++attempt) {
+#ifdef _WIN32
+        int count = swprintf(candidate, n + 80u, L"%ls.tmp.%lu.%lu", target, pid, (unsigned long)++sequence);
+        if (count < 0 || (uint32_t)count >= n + 80u) break;
+        /* MSVCRT does not support fopen's C11 exclusive-create mode. */
+        int fd = _wopen(candidate, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+        if (fd >= 0) {
+            file = _fdopen(fd, "wb");
+            if (!file) { _close(fd); plr_file_remove(candidate); break; }
+        }
+#else
+        snprintf(candidate, n + 80u, "%s.tmp.%lu.%lu", target, pid, (unsigned long)++sequence);
+        file = fopen(candidate, "wbx");
+#endif
+        if (file || errno != EEXIST) break;
+    }
+    if (!file) goto cleanup;
+    size_t requested = length;
+#ifdef TERRAX_TESTING
+    if (requested > plr_test_write_limit) requested = plr_test_write_limit;
+#endif
+    size_t written = fwrite(data, 1u, requested, file);
+    ok = written == length && fflush(file) == 0;
     if (fclose(file) != 0) ok = 0;
+#ifdef TERRAX_TESTING
+    if(ok&&plr_test_corrupt_candidate){
+        FILE* corrupt=plr_file_fopen(candidate,plr_test_corrupt_candidate==3?PLR_FILE_TEXT("wb"):PLR_FILE_TEXT("r+b"));
+        if(!corrupt)ok=0;
+        else {
+            if(plr_test_corrupt_candidate==1){int first=fgetc(corrupt);if(first==EOF||fseek(corrupt,0,SEEK_SET)||fputc(first^0xff,corrupt)==EOF)ok=0;}
+            if(plr_test_corrupt_candidate==2&&(fseek(corrupt,0,SEEK_END)||fputc(0,corrupt)==EOF))ok=0;
+            if(fclose(corrupt))ok=0;
+        }
+    }
+#endif
+    if(ok)ok=plr_candidate_matches(candidate,data,length);
+#ifdef _WIN32
+    if (ok) ok = MoveFileExW(candidate, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    if (ok) ok = rename(candidate, target) == 0;
+#endif
+    if (!ok) plr_file_remove(candidate);
+cleanup:
+    free(candidate);
+#ifdef _WIN32
+    free(target);
+#endif
     return ok;
 }
 
@@ -3938,6 +4080,8 @@ terrax_world_status terra_plr_preview_json_from_buffer(
 terrax_world_status terra_plr_open_from_buffer(
     const uint8_t *buffer, uint32_t buffer_len, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     if (!buffer || !out_handle || buffer_len == 0u) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -3956,6 +4100,8 @@ terrax_world_status terra_plr_open_from_buffer(
 terrax_world_status terra_plr_open(
     const char *path_utf8, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     uint32_t path_length = 0u;
     if (!path_utf8 || !out_handle ||
         !plr_cstring_length_bounded(path_utf8, PLR_MAX_JSON_BYTES, &path_length) ||
@@ -3982,6 +4128,8 @@ terrax_world_status terra_plr_open(
 terrax_world_status terra_plr_open_json(
     const char *json_utf8, uint32_t *out_handle) {
     if (out_handle) *out_handle = 0u;
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before opening a player owner");
     if (!json_utf8 || !out_handle) {
         return plr_status_error(
             TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
@@ -4000,6 +4148,8 @@ terrax_world_status terra_plr_open_json(
 }
 
 terrax_world_status terra_plr_close(uint32_t handle) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     plr_destroy_document(document);
@@ -4064,6 +4214,8 @@ terrax_world_status terra_plr_get_field_json(
 
 terrax_world_status terra_plr_replace_json(
     uint32_t handle, const char *json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4164,6 +4316,8 @@ static terrax_world_status plr_apply_field_edits(
 
 terrax_world_status terra_plr_set(
     uint32_t handle, const char *pointer_utf8, const char *value_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4196,6 +4350,8 @@ terrax_world_status terra_plr_set(
 
 terrax_world_status terra_plr_set_many(
     uint32_t handle, const char *edits_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(
@@ -4214,6 +4370,8 @@ terrax_world_status terra_plr_set_many(
 uint32_t terra_plr_workspace_abi_version(void) { return 1u; }
 
 terrax_world_status terra_plr_release_caches(uint32_t handle) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     plr_invalidate_document_caches(document);
@@ -4264,31 +4422,29 @@ terrax_world_status terra_plr_save_to_buffer(
     uint32_t handle, uint8_t *output, uint32_t capacity, uint32_t *out_required) {
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
-    if (!out_required) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
-            "TERRAX_INVALID_ARGUMENT",
-            "null PLR required-size pointer");
-    }
+    if (!out_required) return plr_status_error(TERRAX_WORLD_STATUS_INVALID_ARGUMENT,
+        "TERRAX_INVALID_ARGUMENT", "null PLR required-size pointer");
     *out_required = 0u;
+    /* Encode against a stack copy during foreign checkpoints. Existing original
+     * bytes/caches are borrowed; a newly encoded cache is scoped to this call. */
+    PlrDocumentSlot transient;
+    PlrDocumentSlot *source = document;
+    if (tx_checkpoint_active()) { transient = *document; source = &transient; }
     terrax_world_status status = TERRAX_WORLD_STATUS_OK;
     uint32_t length = 0u;
-    const uint8_t *encoded = plr_encoded_document(document, &length, &status);
-    if (!encoded) return status;
+    const uint8_t *encoded = plr_encoded_document(source, &length, &status);
+    uint8_t *temporary = source != document && source->encoded_cache != document->encoded_cache
+        ? source->encoded_cache : NULL;
+    if (!encoded) { free(temporary); return status; }
     *out_required = length;
-    if (!output || capacity == 0u) {
-        tx_clear_error();
-        return TERRAX_WORLD_STATUS_OK;
+    if (output && capacity) {
+        if (capacity < length) status = plr_status_error(TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
+            "TERRAX_BUFFER_TOO_SMALL", "PLR output buffer is too small");
+        else memcpy(output, encoded, length);
     }
-    if (capacity < length) {
-        return plr_status_error(
-            TERRAX_WORLD_STATUS_BUFFER_TOO_SMALL,
-            "TERRAX_BUFFER_TOO_SMALL",
-            "PLR output buffer is too small");
-    }
-    memcpy(output, encoded, length);
-    tx_clear_error();
-    return TERRAX_WORLD_STATUS_OK;
+    free(temporary);
+    if (status == TERRAX_WORLD_STATUS_OK) tx_clear_error();
+    return status;
 }
 
 terrax_world_status terra_plr_encode(
@@ -4298,6 +4454,8 @@ terrax_world_status terra_plr_encode(
 
 terrax_world_status terra_plr_save(
     uint32_t handle, const char *path_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     uint32_t path_length = 0u;
@@ -4313,6 +4471,9 @@ terrax_world_status terra_plr_save(
     uint32_t length = 0u;
     const uint8_t *encoded = plr_encoded_document(document, &length, &status);
     if (!encoded) return status;
+    PlrJsonValue* validated=plr_parse_encrypted_candidate(encoded,length,&status);
+    if(!validated)return status;
+    plr_json_free(validated);
     int ok = plr_write_file(path_utf8, encoded, length);
     if (!ok) return plr_status_error(
         TERRAX_WORLD_STATUS_IO_ERROR,
@@ -4623,6 +4784,8 @@ static terrax_world_status plr_patch_apply(
 
 terrax_world_status terra_plr_apply_patch_json(
     uint32_t handle, const char *patch_json_utf8) {
+    if (tx_checkpoint_active()) return plr_status_error(TERRAX_WORLD_STATUS_STATE_ERROR,
+        "TERRAX_STATE_ERROR", "finish world checkpoint before changing a player owner");
     PlrDocumentSlot *document = plr_document(handle);
     if (!document) return plr_invalid_handle();
     if (document->original_version > PLR_CURRENT_KNOWN_VERSION) return plr_status_error(

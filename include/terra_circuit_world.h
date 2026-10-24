@@ -1,6 +1,7 @@
 #ifndef TERRA_CIRCUIT_WORLD_H
 #define TERRA_CIRCUIT_WORLD_H
 #include <stdint.h>
+#include "terra_native_span.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -93,10 +94,13 @@ uint32_t terra_circuit_world_abi_version(void);
 int32_t terra_circuit_world_begin(uint32_t world_handle, uint32_t scratch_source_id,
     uint32_t twld_source_id, uint32_t twld_size, uint32_t max_bytes, uint32_t* out_handle);
 int32_t terra_circuit_world_step(uint32_t handle, uint32_t work_units, TerraCircuitWorldEvent* out);
+/* Native adapters keep data_ptr zero and use explicit borrowed pointer spans. */
+int32_t terra_circuit_world_step_native(uint32_t handle, uint32_t work_units, TerraCircuitWorldEvent* out, TerraConstSpan* span);
 int32_t terra_circuit_world_supply(uint32_t handle, uint32_t source_id, uint32_t offset,
     const uint8_t* data, uint32_t length);
 int32_t terra_circuit_world_ack(uint32_t handle);
 int32_t terra_circuit_world_command(uint32_t handle, const TerraCircuitWorldCommand* command);
+int32_t terra_circuit_world_command_native(uint32_t handle, const TerraCircuitWorldCommand* command, TerraConstSpan data);
 int32_t terra_circuit_world_stats(uint32_t handle, TerraCircuitWorldStats* out);
 int32_t terra_circuit_world_cancel(uint32_t handle);
 int32_t terra_circuit_world_close(uint32_t handle);

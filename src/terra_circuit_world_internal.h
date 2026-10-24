@@ -13,6 +13,7 @@
 #define CX_CHECK_COLUMNS 64u
 #define CX_CACHE_PAGES 64u
 #define CX_NONE UINT32_MAX
+enum CxReadTarget { CX_READ_WORLD=0, CX_READ_SCRATCH=1, CX_READ_TWLD=2, CX_READ_GEOMETRY=3 };
 enum CxPhase {
     CX_TOPOLOGY=1, CX_ROOTS, CX_NUMBER, CX_REMAP, CX_MAP_SIZE, CX_MAP_ENCODE,
     CX_COUNT, CX_LAYOUT, CX_ZERO, CX_WRITE, CX_FLUSH, CX_INTERN, CX_IDLE,
@@ -47,6 +48,7 @@ typedef struct CxModTile { TerraTwldTile tile; TxTile vanilla; } CxModTile;
 typedef struct CxPort { uint32_t net,pixel; uint8_t axis,colour; uint16_t reserved; } CxPort;
 typedef struct CxFragments CxFragments;
 typedef struct CxOrder CxOrder;
+typedef struct CxOrderGeometry CxOrderGeometry;
 /* Feature-local projectile state. No entity/NPC simulation is implied. */
 typedef struct CxProjectile { float x,y,vx,vy,origin_x,origin_y; uint32_t remaining; uint16_t type; uint8_t active,returning; } CxProjectile;
 typedef struct CxSolidSpan { uint32_t first,last; uint8_t shape,dynamic; uint16_t reserved; } CxSolidSpan;
@@ -58,6 +60,7 @@ typedef struct CxWorld {
     TerraTwld* twld; uint32_t twld_cursor,twld_mode,twld_output_offset,twld_saved_size;
     CxModTile* mods; uint32_t mod_count,mod_capacity,mod_cursor;
     TerraCircuitWorldEvent event;
+    const uint8_t* event_data;
     TerraCircuitWorldCommand command;
     uint8_t* input; uint32_t input_offset,input_length,input_source;
     uint32_t read_target,read_slot;
@@ -101,6 +104,7 @@ typedef struct CxWorld {
     CxOverride* overrides; uint32_t override_count,override_capacity;
     CxOverride* override_snapshot; uint32_t override_snapshot_capacity,override_saved_count;
     CxBinding* bindings; uint32_t binding_count,binding_capacity;
+    uint32_t* binding_index; uint32_t binding_index_capacity;
     CxInputPoint* points; uint32_t point_count,point_index;
     uint32_t* result; uint32_t result_count,result_capacity;
     uint32_t query_x0,query_x1,query_y0,query_y1,query_stride,query_point;
@@ -120,14 +124,22 @@ typedef struct CxWorld {
     uint8_t save_patch[64];
     CxFragments* fragments;
     CxOrder* order;
+    CxOrderGeometry* geometry;
 } CxWorld;
 
 int cx_order_capture_column(CxWorld*);
+int cx_order_supply_geometry(CxWorld*,const uint8_t*,uint32_t);
 void cx_order_close(CxWorld*);
 int32_t cx_order_candidates(void*,TerraVmGateRef*,uint32_t,uint32_t);
-uint32_t cx_order_rank(CxWorld*,uint32_t,uint32_t,uint32_t);
-uint32_t cx_order_event_rank(CxWorld*,TerraVmGateRef);
-int cx_order_gate_position(CxWorld*,uint32_t,uint32_t*,uint32_t*);
+void cx_order_cancel(CxWorld*);
+typedef struct CxOrderCandidate { uint32_t parsed,valid,direct,group,offset,gate,x,y,nets[4],member_records; } CxOrderCandidate;
+int cx_order_candidate_step(CxWorld*,TerraVmGateRef,CxOrderCandidate*);
+enum { CX_ORDER_GATE_ABSENT=3 };
+int cx_order_gate_position_step(CxWorld*,uint32_t,uint32_t*,uint32_t*);
+/* Non-mutating exact accounting for optional performance layers. */
+uint64_t cx_allocation_charge(uint32_t);
+static inline uint64_t cx_resident_total(uint32_t native_bytes,uint32_t vm_bytes,uint32_t twld_bytes){return (uint64_t)native_bytes+(uint64_t)vm_bytes+(uint64_t)twld_bytes;}
+uint64_t cx_resident_bytes(CxWorld*);
 void* cx_alloc(CxWorld*,uint32_t);
 void cx_free(CxWorld*,void*);
 int cx_fail(CxWorld*,int,const char*);
@@ -161,6 +173,7 @@ int cx_query_step(CxWorld*,uint32_t*);
 int cx_command_complete(CxWorld*);
 int cx_save_step(CxWorld*,uint32_t*);
 uint32_t cx_wire_mask(const TxTile*);
+CxBinding* cx_find_binding(CxWorld*,uint32_t,uint32_t);
 uint32_t cx_true_lamp(CxWorld*,const CxBinding*);
 int cx_override_value(CxWorld*,uint32_t,uint32_t,uint32_t);
 int cx_set_override(CxWorld*,uint32_t,uint32_t,uint32_t,uint32_t);
@@ -197,7 +210,7 @@ int cx_seed_contains(const CxWorld*,uint32_t,uint32_t);
 int cx_inside_wiring(const CxWorld*,uint32_t,uint32_t);
 int cx_devices_prepare(CxWorld*);
 void cx_devices_end_columns(CxWorld*);
-int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*);
+int cx_fragments_begin(CxWorld*,const TerraCircuitWorldCommand*,const uint8_t*);
 int cx_fragments_step(CxWorld*,uint32_t*);
 void cx_fragments_free(CxWorld*);
 void cx_fragments_cancel(CxWorld*);

@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include "terra_status.h"
+#include "terra_outcome.h"
 #include "terra_task.h"
 #include "terra_commands.h"
 
@@ -35,6 +36,12 @@ terrax_world_status terra_world_save_to_buffer(
     uint8_t* output,
     uint32_t capacity,
     uint32_t* out_required);
+
+/* Candidate-before-swap v1: failure retains the old owner; successful fill
+ * replaces it without post-close allocation. Host delivery is not acknowledged. */
+uint32_t terra_world_commit_abi_version(void);
+terrax_world_status terra_world_commit_to_buffer(uint32_t handle, uint8_t* output,
+    uint32_t capacity, uint32_t* out_required, uint32_t* out_new_handle);
 
 terrax_world_status terra_world_open_from_buffer(
     const uint8_t* buffer,
@@ -84,6 +91,16 @@ terrax_world_status terra_info_get_section_schema_json(
 /*
  * Section read/write
  */
+/* Optional ABI v1: exact legacy header JSON including its terminating NUL.
+ * NULL buffer or zero capacity probes required_size without allocating output.
+ * Each call recounts; too-small output is untouched. Does not use legacy caches.
+ * Size is uint32 representable (including NUL), capacity is compared as uint64.
+ * Source/destination must not overlap; concurrent world mutation is unsupported.
+ */
+uint32_t terra_header_json_abi_version(void);
+terrax_world_status terra_header_get_json(
+    uint32_t handle, char* buffer, uint64_t buffer_size, uint64_t* required_size);
+
 terrax_world_status terra_section_get_json(
     uint32_t handle,
     const char*          section_name,

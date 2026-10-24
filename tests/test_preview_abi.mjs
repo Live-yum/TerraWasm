@@ -5,7 +5,10 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const root = path.resolve(import.meta.dirname, '..'), profile = process.argv[2] || 'plr'
 const directory = path.resolve(process.argv[3] || path.join(root, `build-preview-${profile}`))
-const M = await require(path.join(directory, 'terrax_world_wasm.js'))()
+const target = process.argv[4] || 'node'
+assert(['node', 'web'].includes(target))
+const moduleName = target === 'web' ? 'terrax_world_wasm_web' : 'terrax_world_wasm'
+const M = await require(path.join(directory, `${moduleName}.js`))({ wasmBinary: fs.readFileSync(path.join(directory, `${moduleName}.wasm`)) })
 const alloc = size => { const p = M._tx_malloc(size); assert(p); return p }
 const baseline = M._tx_native_heap_used()
 if (profile === 'plr') {
@@ -27,6 +30,7 @@ if (profile === 'plr') {
     } finally { if(output)M._tx_free(output); M._tx_free(size); M._tx_free(input) }
     assert.equal(M._tx_native_heap_used(),baseline,'preview retains no native model')
   }
+  assert(count > 0, 'preview fixture corpus must not be empty')
   console.log(`PLR preview WASM: ${count} real files, truncated inputs rejected, no retained native allocations`)
 } else {
   const { makeCircuitWorld } = require('./helpers/circuit-world.js')

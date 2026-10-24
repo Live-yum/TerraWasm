@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdint.h>
+#include "terra_alignment.h"
 extern uint32_t tx_heap_used(void);
 extern uint32_t tx_native_heap_used(void);
 extern uint32_t tx_native_heap_peak(void);
@@ -17,6 +18,7 @@ int main(void) {
     for (unsigned round = 0; round < 20; ++round) {
         uint8_t* persistent = tx_persistent_alloc(1048576);
         assert(persistent);
+        assert((uintptr_t)persistent % _Alignof(TerraMaxAlign) == 0);
         persistent[0] = (uint8_t)round;
         assert(tx_native_heap_used() == native_baseline + 1048576);
         uint32_t mark = tx_mark();
@@ -25,6 +27,7 @@ int main(void) {
         assert(tx_native_heap_used() == native_baseline + 1048576);
         persistent = tx_internal_realloc(persistent, 2097152);
         assert(persistent && persistent[0] == (uint8_t)round);
+        assert((uintptr_t)persistent % _Alignof(TerraMaxAlign) == 0);
         assert(tx_native_heap_used() == native_baseline + 2097152);
         assert(tx_native_heap_peak() >= tx_native_heap_used());
         tx_internal_free(persistent);
@@ -36,6 +39,7 @@ int main(void) {
         assert(tx_heap_used() == baseline);
         uint8_t* temporary = tx_alloc(1024);
         assert(temporary);
+        assert((uintptr_t)temporary % _Alignof(TerraMaxAlign) == 0);
         tx_internal_free(temporary);
         assert(tx_heap_used() == baseline);
     }
