@@ -23,7 +23,14 @@ async function fixture(extra = {}, repeatReceive = false) {
     __terraBasicMemoryHandoff(value, lifecycle) { memory = value; control = lifecycle },
     ...extra,
   })
-  return { module, memory, control, resize: imports.a.b }
+  // Import names are minified per feature profile. In the standalone PLR
+  // artifact a.b is a filesystem import, not the heap resize hook. Resolve the
+  // actual generated function from the real import object instead of invoking
+  // an unrelated function and mistaking its errno for a growth result.
+  const resizeImports = Object.values(imports).flatMap(namespace => Object.values(namespace))
+    .filter(value => typeof value === 'function' && value.name === '_emscripten_resize_heap')
+  assert.equal(resizeImports.length, 1, 'the real artifact must import exactly one reviewed heap resize hook')
+  return { module, memory, control, resize: resizeImports[0] }
 }
 
 function countGrow(memory) {

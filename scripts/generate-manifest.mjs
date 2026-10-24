@@ -99,7 +99,7 @@ function validateWorkspaces(abi, exports, featureSet, label) {
   if (abi.pixelWorkspace && featureSet === 'plr') fail(`${label} pixel workspace feature mismatch`)
   if (abi.playerWorkspace && featureSet === 'wld') fail(`${label} player workspace feature mismatch`)
 }
-function compiledWorkspaces(identity, module, exports, label) {
+export function compiledWorkspaces(identity, module, exports, label) {
   const abi = {}
   if (identity.headerJsonAbiVersion !== undefined) {
     const enabled = ['all','wld'].includes(identity.featureSet)
@@ -349,6 +349,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     if (identities.node[field] !== identity[field]) fail(`Node/Web build identity ${field} mismatch`)
   }
   if (JSON.stringify(identities.node.stream) !== JSON.stringify(identity.stream)) fail('Node/Web stream identity mismatch')
+  if (JSON.stringify(identities.node.workspaceAbi) !== JSON.stringify(identity.workspaceAbi)) fail('Node/Web workspace identity mismatch')
   if (sourceCommit !== undefined && identity.sourceCommit !== sourceCommit) fail('compiled source commit does not match requested source commit')
   if (dirty !== undefined && identity.dirty !== dirty) fail('compiled dirty state does not match requested dirty state')
   const manifest = {

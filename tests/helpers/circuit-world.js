@@ -89,10 +89,10 @@ function makeCircuitTwld(width = 40, height = 32) {
   return zlib.gzipSync(tag(10, '', Buffer.concat([tag(10, 'tiles', tiles), tag(7, 'future-unknown-blob', Buffer.concat([u32(unknown.length), unknown])), Buffer.from([0])])));
 }
 
-async function makeDriver(target = 'web') {
+async function makeDriver(target = 'web', verifiedModule = null) {
   const build = process.env.TCW_BUILD_DIR ? path.resolve(process.env.TCW_BUILD_DIR) : path.join(__dirname, '../../build');
   const name = target === 'node' ? 'terrax_world_wasm' : 'terrax_world_wasm_web';
-  const M = await require(path.join(build, `${name}.js`))({ wasmBinary: fs.readFileSync(path.join(build, `${name}.wasm`)) });
+  const M = verifiedModule || await require(path.join(build, `${name}.js`))({ wasmBinary: fs.readFileSync(path.join(build, `${name}.wasm`)) });
   const pointers = [], alloc = bytes => { const p = M._tx_malloc(bytes); assert.ok(p); pointers.push(p); return p; };
   const hp = alloc(4), ep = alloc(48), cp = alloc(64), sp = alloc(96), input = alloc(1048576), data = alloc(1048576);
   const sources = new Map(); let world = 0, circuit = 0, openTask = 0, progress = 0;

@@ -114,7 +114,8 @@ if ($Test) {
         "tests/test_artifact_size_contract.js",
         "tests/test_feature_set.js",
         "tests/test_basic_runtime_history.mjs",
-        "tests/test_stream_abi_manifest.mjs"
+        "tests/test_stream_abi_manifest.mjs",
+        "tests/test_workspace_abi_manifest.mjs"
     )
     $wldTests = @(
         "tests/circuit/projectile-contract.cjs",
@@ -153,8 +154,12 @@ if ($Test) {
         "tests/test_fixture_contract.js"
     )
     $regressionTests = @($commonTests)
-    if ($Features -eq "all") { $regressionTests += "tests/test_foreign_checkpoint_owners.js",
-    "tests/test_world_outcome.js" }
+    if ($Features -eq "all") { $regressionTests += @(
+        "tests/test_foreign_checkpoint_owners.js",
+        "tests/test_production_artifact_set.mjs",
+        "tests/production_all_web_contract.cjs"
+    ) }
+    if ($Features -ne "plr") { $regressionTests += "tests/test_world_outcome.js" }
     if ($Features -ne "plr") { $regressionTests += $wldTests }
     if ($Features -ne "wld") { $regressionTests += @("tests/test_plr.js", "tests/test_plr_real_fixture.js") }
 

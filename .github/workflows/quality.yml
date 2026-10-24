@@ -30,6 +30,13 @@ jobs:
         run: cmake --build build-native --config Release --parallel
       - name: Run native contracts and fuzz smoke
         run: ctest --test-dir build-native --build-config Release --output-on-failure
+      - name: Upload native contract evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-contracts-${{ github.sha }}
+          path: build-native/Testing/Temporary/
+          if-no-files-found: warn
       - name: Check source mechanic capacity without adding release exports
         run: |
           cc -std=c17 -O2 -ffunction-sections -fdata-sections -Iinclude -Isrc \
@@ -56,8 +63,8 @@ jobs:
         run: cmake --build build-sanitizer --config RelWithDebInfo --parallel
       - name: Run sanitizer contracts
         run: ctest --test-dir build-sanitizer --build-config RelWithDebInfo --output-on-failure
-      # Stream events use Wasm32 addresses. The low-address native harness is
-      # incompatible with ASan's address space, but supports full UBSan checks.
+      # Native spans now support LP64/ASan; retain the separate UBSan runner as
+      # additional coverage of the same public stream/circuit object contract.
       - name: Run stream and circuit object contracts under UBSan
         run: python3 scripts/test-stream-native.py --ubsan
 
@@ -81,6 +88,7 @@ jobs:
         shell: pwsh
         run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
       - name: Upload traceable release artifacts
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: terrawasm-${{ github.sha }}
@@ -184,7 +192,8 @@ jobs:
       - name: Verify production all Web identity and core consumers
         env:
           TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
-        run: node --test tests/production_all_web_contract.cjs
+          TCW_EXPECTED_COMMIT: ${{ github.sha }}
+        run: node --test tests/production_all_web_contract.cjs tests/test_production_artifact_set.mjs
       - name: Verify natural traps, sparse fragments and placement anchors in the compiled WLD artifact
         env:
           TCW_BUILD_DIR: ${{ runner.temp }}/circuit-wld-artifact
