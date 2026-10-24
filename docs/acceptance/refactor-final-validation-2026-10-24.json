@@ -1,0 +1,279 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-24",
+  "sourceCommit": "4d81e63cb4e8ca08c1c1b65b4c3a7977429b8928",
+  "sourceTree": "ba17c9b338361e6db278cd8347a617c965a9406b",
+  "dirty": false,
+  "emscripten": "5.0.7",
+  "nativeContracts": {
+    "tests": 56,
+    "passed": 56
+  },
+  "sanitizerContracts": {
+    "tests": 56,
+    "passed": 56,
+    "modes": [
+      "ASan",
+      "UBSan",
+      "LeakSanitizer"
+    ]
+  },
+  "windowsContracts": {
+    "tests": 3,
+    "passed": 3,
+    "contracts": [
+      "terra_plr_file_contract",
+      "terra_allocator_contract",
+      "terra_native_span_contract"
+    ]
+  },
+  "continuousNativeCycles": 16,
+  "profiles": {
+    "all": {
+      "tests": {
+        "tests": 242,
+        "pass": 242,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "artifacts": [
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.js",
+          "bytes": 89193,
+          "sha256": "5c4d5e0068ea43ccc7e5813c39e04f229f13f140f46ed5b1564971350158fba5"
+        },
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.wasm",
+          "bytes": 491329,
+          "sha256": "ba064d89a6e807bfb1e812e5325e5a26366482aaf1b9e5f1e955afe0a3d38367"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.js",
+          "bytes": 24469,
+          "sha256": "97b24e58cc8dd350268cb364596fd522c11701b0849d31dcfe830eea029a1c38"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.wasm",
+          "bytes": 474863,
+          "sha256": "07f00c021de9f4531bfa2cff537f3de95694f08c1c48186b961531e1be6e32f1"
+        },
+        {
+          "target": "both",
+          "filename": "terra.manifest.json",
+          "bytes": 19580,
+          "sha256": "f128f2e80006234feefaca26367b1f08fdc7f734ded5de75cda72fff64024437"
+        }
+      ],
+      "sizeVerification": {
+        "wrapperBytes": 24469,
+        "wasmBytes": 474863,
+        "node": {
+          "wrapperBytes": 89193,
+          "wasmBytes": 491329
+        },
+        "web": {
+          "wrapperBytes": 24469,
+          "wasmBytes": 474863
+        },
+        "limits": {
+          "wrapperBytes": 131072,
+          "wasmBytes": 524288,
+          "warningWasmBytes": 491520
+        }
+      },
+      "fullArtifactVerification": "passed",
+      "legacy": {
+        "tests": 38,
+        "passed": 38
+      },
+      "mapBenchmark8400x2400": "passed",
+      "previewPairs": "passed",
+      "memory": {
+        "node": {
+          "initialBytes": 134217728,
+          "maxBytes": 536870912
+        },
+        "web": {
+          "initialBytes": 16777216,
+          "maxBytes": 167772160
+        }
+      }
+    },
+    "wld": {
+      "tests": {
+        "tests": 218,
+        "pass": 218,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "artifacts": [
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.js",
+          "bytes": 84854,
+          "sha256": "ef0d55e903682944e92871afe6661379e8bfec4c389c4a4eb386ab1feebcf4e1"
+        },
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.wasm",
+          "bytes": 576488,
+          "sha256": "a807a6812173d3e3be2dea3139073697126caaf0ac45289db536866d51577c42"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.js",
+          "bytes": 23275,
+          "sha256": "aaa891410c621fe5eb32e67d43cb7ad157770b80cf9c53be1d403078617c628a"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.wasm",
+          "bytes": 463614,
+          "sha256": "6712cdabdbbe2f16ae1a757fa44bbef9452c684811755b6de0458ce1102347a0"
+        },
+        {
+          "target": "both",
+          "filename": "terra.manifest.json",
+          "bytes": 17457,
+          "sha256": "4d1e578c2ccf37212715bb48aa584dbe568c906919b96bd9501051dc5179f796"
+        }
+      ],
+      "sizeVerification": {
+        "wrapperBytes": 23275,
+        "wasmBytes": 463614,
+        "node": {
+          "wrapperBytes": 84854,
+          "wasmBytes": 576488
+        },
+        "web": {
+          "wrapperBytes": 23275,
+          "wasmBytes": 463614
+        },
+        "limits": {
+          "wrapperBytes": 131072,
+          "wasmBytes": 524288,
+          "warningWasmBytes": 491520
+        }
+      },
+      "fullArtifactVerification": "passed",
+      "legacy": {
+        "tests": 38,
+        "passed": 38
+      },
+      "mapBenchmark8400x2400": "passed",
+      "previewPairs": "passed",
+      "memory": {
+        "node": {
+          "initialBytes": 134217728,
+          "maxBytes": 536870912
+        },
+        "web": {
+          "initialBytes": 16777216,
+          "maxBytes": 167772160
+        }
+      }
+    },
+    "plr": {
+      "tests": {
+        "tests": 69,
+        "pass": 69,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "artifacts": [
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.js",
+          "bytes": 75284,
+          "sha256": "e2b638d7877292328ac5158a1880eba2ce7eee2c100ae596388ca9e02b6f570f"
+        },
+        {
+          "target": "node",
+          "filename": "terrax_world_wasm.wasm",
+          "bytes": 68124,
+          "sha256": "4f41da663f78e46911fbf69243771a90ff1573e5d51809307915958087133da2"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.js",
+          "bytes": 66918,
+          "sha256": "a2cf8f2b5b51c0cd8293a18be48b409bfdc6107aa4d401768f46e0ac99f0b358"
+        },
+        {
+          "target": "web",
+          "filename": "terrax_world_wasm_web.wasm",
+          "bytes": 68199,
+          "sha256": "8788655e438ed17b9267c2022b7ec7f6a83f607c18385cff68b4fa3cb290fa2e"
+        },
+        {
+          "target": "both",
+          "filename": "terra.manifest.json",
+          "bytes": 8484,
+          "sha256": "4fc82b7b46dd78e1bb5013a6a2a807affe6dc84dd8cc13ec5fad678003dfaca1"
+        }
+      ],
+      "sizeVerification": {
+        "wrapperBytes": 66918,
+        "wasmBytes": 68199,
+        "node": {
+          "wrapperBytes": 75284,
+          "wasmBytes": 68124
+        },
+        "web": {
+          "wrapperBytes": 66918,
+          "wasmBytes": 68199
+        },
+        "limits": {
+          "wrapperBytes": 131072,
+          "wasmBytes": 327680
+        }
+      },
+      "fullArtifactVerification": "passed",
+      "legacy": null,
+      "mapBenchmark8400x2400": "not applicable",
+      "previewPairs": "passed",
+      "memory": {
+        "node": {
+          "initialBytes": 134217728,
+          "maxBytes": 536870912
+        },
+        "web": {
+          "initialBytes": 1048576,
+          "maxBytes": 167772160
+        }
+      }
+    }
+  },
+  "ci": [
+    {
+      "kind": "push",
+      "runId": 40118470703,
+      "url": "https://github.com/Live-yum/TerraWasm/actions/runs/40118470703",
+      "compiledSourceCommit": "4d81e63cb4e8ca08c1c1b65b4c3a7977429b8928",
+      "jobs": 7,
+      "successfulJobs": 7,
+      "allArtifactId": 12569768536
+    },
+    {
+      "kind": "pull_request",
+      "runId": 40118473841,
+      "url": "https://github.com/Live-yum/TerraWasm/actions/runs/40118473841",
+      "headCommit": "4d81e63cb4e8ca08c1c1b65b4c3a7977429b8928",
+      "compiledSourceCommit": "5340169a542ed169b6611faa68798197e4d69322",
+      "compiledSourceKind": "GitHub temporary merge commit; no master update",
+      "jobs": 7,
+      "successfulJobs": 7
+    }
+  ],
+  "pullRequest": "https://github.com/Live-yum/TerraWasm/pull/44",
+  "masterUnchangedAt": "1181281d7e9f78f547191f529fb57bf95925c265",
+  "consumerProfile": "all",
+  "scope": "Producer build/native/Windows/CI evidence. Viewer integration and device acceptance have independent gates. Subsequent documentation-only commits do not change the pinned compiled source."
+}
