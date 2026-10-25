@@ -2,8 +2,8 @@
 
 This additive C/Wasm interface compiles a sectioned Terraria `.wld` into a native
 wiring graph, executes its gates, queries visible cells, and writes a new `.wld`.
-An optional `.twld` supplies named mod tile metadata and preserves those tiles on
-save. Inputs, compiler scratch, and output transactions belong to the host. No
+TWLD sidecars are unsupported: they are not parsed, stored, or saved.
+Inputs, compiler scratch, and output transactions belong to the host. No
 world-sized JavaScript array, base64 encoding, Emscripten filesystem, or external
 WireHead process is required by the Web build.
 
@@ -15,7 +15,7 @@ cell array or impose a wire-count or component-count policy cutoff.
 ## Capabilities and lifetime
 
 WLD and combined builds expose the `circuit-world` capability, compiled build
-identity field `circuitWorldAbiVersion: 1`, and the following manifest group:
+identity fields `circuitWorldAbiVersion: 1` and `circuitWorldStreamingTwld: false`, and the following manifest group:
 
 ```json
 {
@@ -24,7 +24,7 @@ identity field `circuitWorldAbiVersion: 1`, and the following manifest group:
       "version": 1,
       "fileBacked": true,
       "streamingWld": true,
-      "streamingTwld": true,
+      "streamingTwld": false,
       "compiledNetworks": true,
       "compactState": true,
       "atomicCommands": true,
@@ -76,15 +76,17 @@ int32_t terra_circuit_world_cancel(uint32_t handle);
 int32_t terra_circuit_world_close(uint32_t handle);
 ```
 
-The new scratch source must be empty, readable, writable, and distinct from both
-immutable inputs. The compiler first appends zero-filled bounded chunks before
+The new scratch source must be empty, readable, writable, and distinct from the
+immutable WLD input. The compiler first appends zero-filled bounded chunks before
 overwriting its allocated ranges; the host need not support sparse holes.
 Scratch is no longer read after compilation reaches READY and may then be
-removed. Original WLD/TWLD sources are still needed for viewport reconstruction
+removed. The original WLD source is still needed for viewport reconstruction
 and save. Source IDs identify files within the host's operation context; they
 are not file descriptors or application-visible paths.
 
-Use zero for both TWLD arguments when there is no sidecar. A source ID is never
+The legacy `twld_source_id` and `twld_size` ABI slots must both be zero.
+Either nonzero value returns `UNSUPPORTED -7`, with a zero output handle,
+before allocating a session or reading a sidecar. A source ID is never
 inferred from a filename. Close the circuit before its adopted world. Native
 allocations are released by `close`, including a cancelled or failed compiler.
 Cancelling a command after compilation returns to an idle usable session;
@@ -116,7 +118,7 @@ The event occupies exactly 48 bytes:
 | 7–8 | `completed`, `total` | Progress units, independent of the byte range |
 | 9 | `result_kind` | Command producing the result |
 | 10 | `result_count` | RESULT record count; final SAVE WLD bytes; final FRAGMENTS total; final EXTRACT cell count |
-| 11 | `reserved` | Rule flags on non-SAVE READY; final SAVE TWLD byte count |
+| 11 | `reserved` | Always zero |
 
 A READ requests an exact immutable-source or scratch range. Supply exactly its
 source ID, offset, and length; partial or mismatched responses are rejected.
@@ -126,10 +128,8 @@ and acknowledged. READ, WRITE, and RESULT repeat unchanged across `step` calls
 until fulfilled; calling `step` again does not acknowledge them. MORE requires
 another `step`. READY means compilation or the current command has finished.
 
-For non-SAVE READY, `reserved & 1` selects the native Computerraria pixel-wave
-compatibility described below. For SAVE, the entire field is the output TWLD
-length; it must not be interpreted as rule flags. Cache the rule flag from
-compilation or a non-SAVE command.
+`reserved` is always zero, including compilation and SAVE READY.
+No selectable mod profile is advertised.
 
 Status codes are `INVALID -1`, `HANDLE -2`, `STATE -3`, `MEMORY -4`, `FORMAT -5`,
 `IO -6`, and `UNSUPPORTED -7`. Host I/O failures require cancelling the native
@@ -164,12 +164,10 @@ Each foreground sample is four words:
  (frameX & 65535) | (frameY & 65535) << 16]
 ```
 
-Foreground flags are active `1`, actuator `2`, inactive `4`, named custom color
-pixel `8`, and wall present `16`. Wires are red `1`, blue `2`, green `4`, yellow
-`8`. Frame halves are signed 16-bit tile frame values. Internal tile type
-`0xfffe` represents restored ColorPixelBox only within this API; it is never
-written as a vanilla WLD tile ID. The host can render real PNG resources using
-the original type and frame, and retain color fallbacks for other world tiles.
+Foreground flags are active `1`, actuator `2`, inactive `4`, and wall present
+`16`. Wires are red `1`, blue `2`, green `4`, yellow `8`. Frame halves are signed
+16-bit tile frame values. The host can render real PNG resources using the
+original type and frame, and retain color fallbacks for other world tiles.
 
 Set `flags = 2` to request the separate wall layer. Its sample is
 `[x, y, wallId | flags << 16, wallPaint]`, with active `1`, wall layer `32`,
@@ -224,12 +222,13 @@ special implementation of display memory writes.
 
 ### 6: SAVE
 
-Provide a new writable staging `source_id` for the WLD. If a TWLD was attached,
-also provide a distinct `aux_source_id` for the sidecar. Both must be distinct
-from both original inputs and compiler scratch. The host must abort incomplete
-files on cancellation or failure, verify the final sizes, and publish the pair
-only after both have succeeded. Native success does not itself rename files or
-commit a platform transaction.
+Provide a new writable staging `source_id` for the WLD, distinct from the
+original input and compiler scratch. `aux_source_id` must be zero for SAVE;
+a nonzero value returns `UNSUPPORTED -7` before output allocation. This does not
+retire the separate COB1 object companion used by fragment extraction.
+The host must abort incomplete output on cancellation or failure and verify the
+final size before publishing. Native success does not rename files or commit a
+platform transaction.
 
 The writer streams the original prefix, rewrites tiles using the existing WLD
 RLE encoder, streams original suffix sections, and patches section offsets.
@@ -239,15 +238,10 @@ load-time rules, such as disabled timer frames, retain Terraria's interpretation
 The original input is never overwritten and remains the session's immutable
 baseline for subsequent saves.
 
-ColorPixelBox uses the vanilla fallback tile in the WLD and its current frame
-in TWLD. The sidecar is streamed through inflate, fixed-size frame patching,
-and deflate. Unknown NBT tags and unrelated mod data are preserved as raw
-uncompressed bytes. Recompression may change gzip bytes and length. An interrupted
-save can be abandoned and a new save started from the same committed state.
-
-The final READY has `result_kind = 6`, `result_count = WLD byte length`, and
-`reserved = TWLD byte length` (zero without a sidecar). These are real WLD/TWLD
-files; neither a gzip stream renamed `.wld` nor the old TL format is produced.
+An interrupted save can be abandoned and a new save started from the same
+committed state. The final READY has `result_kind = 6`,
+`result_count = WLD byte length`, and `reserved = 0`. The output is a real WLD,
+not a gzip stream renamed `.wld` or the old TL format.
 
 ## State, cancellation, and memory
 
@@ -321,19 +315,13 @@ solid/material, temple progression, protected wall, tree, furniture, boulder,
 and teleporter support predicates, with sparse adjacent-column reads where
 necessary. An unavailable malformed support neighborhood is an explicit error.
 
-### Vanilla and Computerraria pixel profiles
+### Vanilla PixelBox rules
 
-Original Terraria applies PixelBox intersections after each individual TripWire.
-The pinned WireHead implementation used to build Computerraria applies them
-after a whole gate wave, uses cross-color pairing for normal monochrome pixels,
-and pairs same-color horizontal/vertical networks for ColorPixelBox. Repeated
-hits contribute by parity, and identical H/V networks are not a two-net pair.
-
-The native importer selects the compatibility profile only when TWLD metadata
-identifies an actual tile as mod `WireHead`, name `ColorPixelBox`. Saved numeric
-IDs and filenames do not select it. Worlds without that named tile retain
-vanilla per-TripWire behavior. Both behaviors are implemented in C; installing
-WireHead, tModLoader, or a JavaScript display emulator is unnecessary.
+PixelBox intersections are applied after each individual TripWire. A tile must
+receive both horizontal and vertical hits in that same TripWire to toggle;
+single-axis hits do not change it, and separate TripWires never pair. These
+rules also apply to the original Computerraria WLD. No mod metadata, filename,
+or saved custom tile ID selects an alternate profile.
 
 ### Explicit compatibility boundaries
 
@@ -344,7 +332,7 @@ probability calculation and UnifiedRandom arithmetic, multiple probabilistic
 gates on one network can receive successive samples in a different order.
 The game also does not store its global `Main.rand` state in WLD. Therefore this
 API does not promise frame-for-frame replay of arbitrary stochastic gameplay;
-the deterministic CPU and display acceptance does not remove that boundary.
+the deterministic WLD-only CPU acceptance does not remove that boundary.
 
 The implemented behavior covers wiring, gates and lamps, junctions, pixel boxes,
 switch interactions, mechanical timers, momentary buttons, selected wired light
@@ -360,10 +348,7 @@ mechanical tick implements its original NPC clock generator.
 Rules were checked against the user-pinned
 [Terraria Wiring.cs](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria/Wiring.cs),
 [WorldGen.cs](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria/WorldGen.cs),
-[WorldFile.cs](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.IO/WorldFile.cs),
-and the published WireHead
-[WiringWrapper.cs](https://github.com/misprit7/WireHead/blob/e6009d010ca54ff43d04b44697accc7115807b9c/WiringWrapper.cs)
-and [Accelerator.cs](https://github.com/misprit7/WireHead/blob/e6009d010ca54ff43d04b44697accc7115807b9c/Accelerator.cs).
+[WorldFile.cs](https://github.com/Live-yum/TerrariaDecompiledSource/blob/8255d34616c780af12079425ac92a0a7aed87d71/Terraria.IO/WorldFile.cs).
 The material table is generated from pinned source-derived inputs, whose hashes
 are recorded in the generated header.
 
@@ -374,18 +359,18 @@ normal pixel boundaries, direct junction seeds, world margins, material and
 wide support rules, multi-tile interactions, walls, and save/reopen.
 
 Native contracts cover VM scheduling and callback rollback, whole-batch
-checkpoints, allocation failures, sparse actuation predicates, one-byte gzip
-fragments, sidecar metadata ordering, unknown tags, lossless frame patching,
-changed/truncated source rejection, and interrupted replay recovery.
+checkpoints, allocation failures, sparse actuation predicates, unsupported
+reserved sidecar arguments before allocation, changed/truncated WLD source
+rejection, and interrupted save recovery.
 
-The actual full-world integration test is described in
-[`tests/computerraria/README.md`](../tests/computerraria/README.md). It checks
-the published 405,983,441-byte world and its exact sidecar hashes, compiles
-72,939,714 wired cells and 13,641,575 gates, loads a physical ROM program, and
-compares 48 physical RAM signatures across 38 RV32I instruction kinds. It also
-changes one actual ROM bit as a negative control, executes real display stores,
-saves both files, reimports the complete world, checks both displays, and reruns
-the program. The production runtime contains no instruction decoder.
+The full-world integration test is described in
+[`tests/computerraria/README-wld.md`](../tests/computerraria/README-wld.md).
+It checks the published 405,983,441-byte WLD hash, loads a physical ROM program,
+and compares 48 physical RAM signatures across 38 RV32I instruction kinds.
+It changes an actual ROM bit as a negative control and saves/reopens the WLD.
+No sidecar or mod color-display compatibility is required or claimed. The
+production runtime contains no instruction decoder. Historical modded reports
+are not evidence of current WLD-only acceptance.
 
 The published CPU's ECALL/EBREAK behavior is tested as an architectural boundary;
 this acceptance is not full RISC-V certification. Run reports include the tested

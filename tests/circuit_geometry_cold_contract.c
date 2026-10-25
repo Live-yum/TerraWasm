@@ -89,10 +89,10 @@ static void buffered_mixed_cache(void){Fixture f;init(&f,64,32,0);f.owner.world_
 }
 static void optional_budget_contract(void){
     /* Synthetic statistics prove widening before addition without >4GiB alloc. */
-    uint64_t wide=cx_resident_total(UINT32_MAX,UINT32_MAX,UINT32_MAX);
-    assert(wide==3ull*UINT32_MAX&&!cold_budget_enabled(UINT32_MAX,wide,4096u));
-    assert(cx_resident_total(0,UINT32_MAX,1u)==(uint64_t)UINT32_MAX+1u);
-    assert(!cold_budget_enabled(UINT32_MAX,cx_resident_total(0,UINT32_MAX,1u),4096u));
+    uint64_t wide=cx_resident_total(UINT32_MAX,UINT32_MAX);
+    assert(wide==2ull*UINT32_MAX&&!cold_budget_enabled(UINT32_MAX,wide,4096u));
+    assert(cx_resident_total(UINT32_MAX,1u)==(uint64_t)UINT32_MAX+1u);
+    assert(!cold_budget_enabled(UINT32_MAX,cx_resident_total(UINT32_MAX,1u),4096u));
     assert(!cold_budget_enabled(UINT32_MAX,0,UINT64_MAX));
     assert(cold_budget_enabled(160u*1024u*1024u,0,2u*1024u*1024u));
 

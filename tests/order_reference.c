@@ -1,4 +1,5 @@
-/* Frozen f9 source-order oracle. Linked into tests only. */
+/* f9 source-order algorithm, linked into tests only. WLD-only ABI adaptation:
+ * removed its dead sidecar-profile guard; ordering algorithm is unchanged. */
 #define cx_order_rank reference_cx_order_rank
 #define cx_order_gate_position reference_cx_order_gate_position
 #define cx_order_capture_column reference_cx_order_capture_column
@@ -53,7 +54,7 @@ int cx_order_gate_position(CxWorld* w,uint32_t gate,uint32_t* x,uint32_t* y){
     if(!w->order||!gate||gate>w->gates)return 0;*x=w->order->gates[gate*2u];*y=w->order->gates[gate*2u+1u];return 1;
 }
 int cx_order_capture_column(CxWorld* w){
-    if(w->twld_state)return TCW_OK; /* Explicit mod rule profile remains unchanged. */
+    /* WLD-only adapter: the retired sidecar-profile guard is absent. */
     if(!w->order){
         if(w->height>0xffffffu||w->wire_cells>UINT32_MAX/4u)return cx_fail(w,TCW_MEMORY,"wire ordering index exceeds coordinate capacity");
         CxOrder* o=(CxOrder*)cx_alloc(w,sizeof(CxOrder));if(!o)return TCW_MEMORY;memset(o,0,sizeof(*o));w->order=o;

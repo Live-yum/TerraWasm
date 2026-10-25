@@ -11,7 +11,6 @@ PIN = '0379d5b0d89dbb7fd4342b3afff9c3be5e1ab9d8'
 BASE = f'https://raw.githubusercontent.com/misprit7/computerraria/{PIN}/'
 HASHES = {
     'computerraria.tar.gz': '31423b4f7ebbecceeaa54f982f02980efa5b8edccede5456456d892b0452ea1a',
-    'computerraria.twld': 'c6de694b3d034701513dc1ba17311213561ec359d3ecddde7bc35ea3c9611ed8',
     'computerraria.wld': '55d0a24bd1f56d622003dbd30d52555e7d06d6d1bcacfc22ae506f2db5240c33',
 }
 
@@ -56,12 +55,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--cache', type=Path, help='Read already downloaded public inputs instead of the network')
-    parser.add_argument('--wld-only', action='store_true', help='Fetch only the original world, without companion mod data')
+    parser.add_argument('--wld-only', action='store_true', help='Compatibility flag: inputs are always WLD-only')
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     archive = download(args.directory, 'computerraria.tar.gz', args.cache)
-    if not args.wld_only:
-        download(args.directory, 'computerraria.twld', args.cache)
     world = args.directory / 'computerraria.wld'
     if not world.exists():
         temporary = args.directory / 'computerraria.wld.extracting'
@@ -76,8 +73,7 @@ def main():
         finally:
             temporary.unlink(missing_ok=True)
     verified(world)
-    kind = 'WLD' if args.wld_only else 'WLD/TWLD'
-    print(f'Verified pinned {kind} in {args.directory.resolve()}')
+    print(f'Verified pinned WLD in {args.directory.resolve()}')
 
 
 if __name__ == '__main__':

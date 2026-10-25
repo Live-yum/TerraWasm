@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeCircuitWorld, makeCircuitTwld, makeDriver } = require('./helpers/circuit-world');
+const { makeCircuitWorld, makeDriver } = require('./helpers/circuit-world');
 const line = (x1, x2, y, wires) => Array.from({ length: x2 - x1 + 1 }, (_, n) => ({ x: x1 + n, y, wires }));
 
 test('COB1 preserves all 18 section-backed objects and exact long strings through the real WASM writer', async () => {
@@ -367,28 +367,50 @@ test('multi-tile levers and momentary buttons normalize a lower-right interactio
   } finally { d.dispose(); }
 });
 
-test('cancelling a paired save during TWLD output permits a complete retry from committed state', async () => {
+test('cancelling a WLD save during output permits a complete retry from committed state', async () => {
   const d = await makeDriver();
   try {
-    d.open(makeCircuitWorld([{ x: 4, y: 4, type: 136, wires: 1 }, { x: 5, y: 4, type: 419, wires: 1 }]), 48 * 1024 * 1024, makeCircuitTwld());
+    d.open(makeCircuitWorld([{ x: 4, y: 4, type: 136, wires: 1 }, { x: 5, y: 4, type: 419, wires: 1 }]), 48 * 1024 * 1024);
     d.command(2, { x: 4, y: 4, flags: 1 }); assert.equal(d.cell(5, 4).fx, 18);
-    assert.equal(d.cell(10, 10).flags & 8, 8);
-    d.command(6, { source: 9, auxSource: 10 });
-    const baselineWld = Buffer.from(d.sources.get(9)), baselineTwld = Buffer.from(d.sources.get(10));
+    d.command(6, { source: 9 });
+    const baselineWld = Buffer.from(d.sources.get(9));
     for (const acknowledged of [false, true]) {
-      assert.equal(d.start(6, { source: 11, auxSource: 12 }), 0); let interrupted = false;
+      assert.equal(d.start(6, { source: 11 }), 0); let interrupted = false;
       for (let n = 0; n < 10000; n++) {
         const e = d.event(false, 1);
-        if (e[1] === 2 && e[2] === 12) { if (acknowledged) d.respond(e); interrupted = true; break; }
+        if (e[1] === 2 && e[2] === 11) { if (acknowledged) d.respond(e); interrupted = true; break; }
         assert.notEqual(e[1], 4, 'the save must actually be interrupted');
         if (e[1] >= 1 && e[1] <= 3) d.respond(e);
       }
-      assert.equal(interrupted, true); d.cancel(); d.sources.delete(11); d.sources.delete(12);
-      assert.equal(d.cell(5, 4).fx, 18); assert.equal(d.cell(10, 10).fx, 18);
-      d.command(6, { source: 11, auxSource: 12 });
-      assert.deepEqual(d.sources.get(11), baselineWld); assert.deepEqual(d.sources.get(12), baselineTwld);
-      d.sources.delete(11); d.sources.delete(12);
+      assert.equal(interrupted, true); d.cancel(); d.sources.delete(11);
+      assert.equal(d.cell(5, 4).fx, 18);
+      d.command(6, { source: 11 });
+      assert.deepEqual(d.sources.get(11), baselineWld);
+      d.sources.delete(11);
     }
-    d.open(baselineWld, 48 * 1024 * 1024, baselineTwld); assert.equal(d.cell(5, 4).fx, 18); assert.equal(d.cell(10, 10).fy, 36);
+    d.open(baselineWld); assert.equal(d.cell(5, 4).fx, 18);
   } finally { d.dispose(); }
+});
+
+// Legacy ABI slots are retained only to reject unsupported inputs before allocation.
+test('reserved sidecar begin slots and SAVE auxiliary source reject without allocations', async () => {
+  const d = await makeDriver(); const M = d.M, out = M._tx_malloc(4);
+  try {
+    d.open(makeCircuitWorld([{ x: 5, y: 4, type: 419 }]));
+    const before = [M._tx_native_heap_used(), M._tx_bridge_heap_used()];
+    for (const [source, size] of [[3, 0], [0, 1], [3, 1]]) {
+      M.HEAPU32[out >>> 2] = 0xffffffff;
+      assert.equal(M._terra_circuit_world_begin(d.worldHandle, 2, source, size, 48 * 1024 * 1024, out), -7);
+      assert.equal(M.HEAPU32[out >>> 2], 0);
+      assert.deepEqual([M._tx_native_heap_used(), M._tx_bridge_heap_used()], before);
+    }
+    assert.equal(d.start(6, { source: 9, auxSource: 10 }), -7);
+    assert.deepEqual([M._tx_native_heap_used(), M._tx_bridge_heap_used()], before);
+    assert.equal(d.sources.has(9), false); assert.equal(d.sources.has(10), false);
+    assert.equal(d.event()[11], 0);
+    assert.equal(d.cell(5, 4).fx, 0);
+    const saved = d.command(6, { source: 9 });
+    assert.equal(saved.event[11], 0);
+    d.open(Buffer.from(d.sources.get(9))); assert.equal(d.cell(5, 4).fx, 0);
+  } finally { M._tx_free(out); d.dispose(); }
 });

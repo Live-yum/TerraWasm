@@ -207,7 +207,7 @@ and every registration in [TileEntitiesManager.RegisterAll](https://github.com/L
 and its entity-specific tile validation at that pinned game source. The old
 frame-encoded weapon rack (334) is not mistaken for the tile-entity weapon rack
 (471). The bounded companion protocol below carries the associated records.
-The host must not apply this WLD-only writer to a TWLD companion transaction.
+TWLD companion transactions are unsupported; COB1 object companions remain supported.
 
 All other sections and unselected tile values are preserved. The result remains
 an unadopted candidate until the existing host verification/publish protocol
@@ -227,7 +227,7 @@ command/event sizes, and stream ABI versions remain unchanged.
 
 Command 8 with `flags = 1` takes `aux_source_id` as a distinct writable output,
 `width` as the byte budget (32–4194304), and `height` as the object budget
-(1–32768). The source must differ from world, scratch, and TWLD sources. After
+(1–32768). The source must differ from world and scratch sources. After
 validating the whole selected payload, native emits sequential WRITE events
 from offset zero in blocks up to 65536 bytes. The first block includes the
 complete 32-byte header; there are no backpatches. The original cell RESULT and

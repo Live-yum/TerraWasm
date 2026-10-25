@@ -86,7 +86,6 @@ int cx_order_gate_position_step(CxWorld* w,uint32_t gate,uint32_t* x,uint32_t* y
     return o->gate_row<w->height?1:CX_ORDER_GATE_ABSENT;
 }
 int cx_order_capture_column(CxWorld* w){
-    if(w->twld_state)return TCW_OK; /* Explicit mod rule profile remains unchanged. */
     if(!w->order){
         if(w->height>0xffffffu||w->wire_cells>UINT32_MAX/4u)return cx_fail(w,TCW_MEMORY,"wire ordering index exceeds coordinate capacity");
         CxOrder* o=(CxOrder*)cx_alloc(w,sizeof(CxOrder));if(!o)return TCW_MEMORY;memset(o,0,sizeof(*o));w->order=o;

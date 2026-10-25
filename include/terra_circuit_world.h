@@ -27,11 +27,7 @@ enum TerraCircuitWorldStatus {
 /* Exactly twelve little-endian uint32 words. WRITE.data_ptr is borrowed until
  * ack; READ.data_ptr is zero. RESULT holds 16-byte cell records. READY is idle.
  * phase/completed/total are progress, independent of the source byte range.
- * Non-SAVE READY.reserved bit 0 identifies native WireHead pixel-wave rules.
- * They are selected ONLY by a TWLD tile-map entry named WireHead/ColorPixelBox,
- * never by the filename or saved numeric mod ID. Ordinary worlds retain vanilla
- * per-TripWire PixelBox rules; the mod profile reproduces its documented same-
- * colour custom pixel and cross-colour monochrome gate-wave pairing. */
+ * READY.reserved is zero. Only vanilla per-TripWire PixelBox rules apply. */
 typedef struct TerraCircuitWorldEvent {
     uint32_t abi_version, kind, source_id, offset, length, data_ptr;
     uint32_t phase, completed, total, result_kind, result_count, reserved;
@@ -44,9 +40,8 @@ typedef struct TerraCircuitWorldEvent {
  * TRIGGER.flags bit 0 invokes HitSwitch (normalizing multi-tile objects); zero
  * directly pulses the rectangle. TICKS advances the 60 Hz mechanical scheduler.
  * Cancelling or failing either command restores all of its circuit state.
- * SAVE writes to a distinct
- * source_id, plus aux_source_id when a TWLD sidecar was attached. Its final READY
- * has result_kind=TCW_SAVE, result_count=WLD bytes, reserved=TWLD bytes.
+ * SAVE writes WLD bytes to a distinct source_id; aux_source_id must be zero.
+ * Its final READY has result_kind=TCW_SAVE, result_count=WLD bytes, reserved=0.
  * Frame/cell results are [x,y,type|flags<<16|wireMask<<24,frameX|frameY<<16]. */
 /* VIEWPORT.flags bit 1 requests the separate wall layer. Its records remain
  * 16 bytes: [x,y,wallId|flags<<16,wallPaint]. Wall flags: active=1, layer=32,
@@ -89,8 +84,9 @@ typedef struct TerraCircuitWorldStats {
 
 uint32_t terra_circuit_world_abi_version(void);
 /* world_handle must remain open until circuit close. scratch_source_id must be
- * a new empty writable file, distinct from the world's immutable source. A zero
- * twld_source_id means absent. Optional TWLD input is gzip/NBT streamed in C. */
+ * a new empty writable file, distinct from the world's immutable source.
+ * The two TWLD slots remain reserved for ABI stability and must both be zero.
+ * Any nonzero value returns TCW_UNSUPPORTED before acquiring a session or input. */
 int32_t terra_circuit_world_begin(uint32_t world_handle, uint32_t scratch_source_id,
     uint32_t twld_source_id, uint32_t twld_size, uint32_t max_bytes, uint32_t* out_handle);
 int32_t terra_circuit_world_step(uint32_t handle, uint32_t work_units, TerraCircuitWorldEvent* out);

@@ -146,7 +146,7 @@ void cx_current_tile(CxWorld* w,uint32_t x,uint32_t y,uint32_t gate,TxTile* t,co
     if(cx_lazy_toggle(t))flip^=cx_override_value(w,gate,x,y);
     if(t->active&&t->type==419u&&t->frame_x!=36){if(flip)t->frame_x=t->frame_x==18?0:18;}
     else if(t->active&&t->type==420u){uint32_t lo=0,hi=w->general_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;if(w->general[m].id<gate)lo=m+1;else hi=m;}if(lo<w->general_count&&w->general[lo].id==gate)t->frame_x=(int16_t)(18*w->general[lo].frame);}
-    else if(t->active&&(t->type==445u||t->type==0xfffeu)){uint32_t i=cx_pixel_find(w,x,y);if(i!=CX_NONE){CxPixel* p=w->pixels+i;t->frame_x=(int16_t)(18u*(p->custom?p->state&3u:p->state));if(p->custom)t->frame_y=(int16_t)(18u*((p->state>>2)&3u));}}
+    else if(t->active&&(t->type==445u)){uint32_t i=cx_pixel_find(w,x,y);if(i!=CX_NONE){CxPixel* p=w->pixels+i;t->frame_x=(int16_t)(18u*p->state);}}
     else if(t->active&&(t->type==132u||t->type==136u||t->type==144u||t->type==411u||t->type==209u)){CxDevice* d=cx_device_find(w,x,y);if(d){t->frame_x=d->tile.frame_x;t->frame_y=d->tile.frame_y;}}
     else if(flip&&t->active){if(t->type>=255u&&t->type<=268u&&!t->actuator)t->type=(uint16_t)(t->type>=262u?t->type-7u:t->type+7u);else switch(t->type){case 33:case 49:case 174:case 372:case 646:t->frame_x=(int16_t)(t->frame_x==0?18:0);break;case 4:t->frame_x=(int16_t)(t->frame_x>=66?t->frame_x-66:t->frame_x+66);break;case 421:if(!t->actuator)t->type=422;break;case 422:if(!t->actuator)t->type=421;break;default:break;}}
     if(t->actuator||t->type==130u||t->type==131u){CxDevice* d=cx_device_find(w,x,y);if(d){t->inactive=d->tile.inactive;if(t->type==130u||t->type==131u)t->type=d->tile.type;}}

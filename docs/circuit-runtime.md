@@ -18,7 +18,7 @@
 参考 TerrariaDecompiledSource `8255d34616c780af12079425ac92a0a7aed87d71`：
 
 - 逻辑灯/门按 source FIFO 与接线盒路径恢复命中顺序，取消/重试保留原子恢复。普通设备副作用仍按编译网络端口顺序执行，不宣称完整原版顺序兼容。
-- 原版 PixelBox 仅在同一次 TripWire 横纵同时命中时翻转；单轴不变，不同 TripWire 不配对。TWLD 模组规则保持独立。
+- 原版 PixelBox 仅在同一次 TripWire 横纵同时命中时翻转；单轴不变，不同 TripWire 不配对。不支持 TWLD 模组规则或伴随文件。
 - 支持 601 Portal Gun Station 电路 transport 和 186 Spear Trap style 4；支持 442 压板闭区间进入检测、冷却、取消恢复和 tick 顺序。
 - 601 遇斜坡明确返回 unsupported。186 的 AI SolidCollision 不等同完整斜坡物理。
 - 投射物最多 1000 槽，空槽优先，满池替换剩余寿命最短者，同值取低槽号。

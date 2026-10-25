@@ -24,12 +24,11 @@ The revised implementation makes three internal changes:
    leaves zero output and breaks its vertical connection without visiting every
    cell. Wired runs still visit every cell in the original colour/row order.
    Junction ports, label allocation, union order, and subsequent FIFO rules are
-   unchanged. Gate scanning skips only source runs without gates; with TWLD
-   replacements it retains the original per-cell scan.
+   unchanged. Gate scanning skips only source runs without gates.
 2. **Reuse the existing source window.** Seeking no longer invalidates the
    session's existing input bytes. The window remains bounded at 1 MiB and is
-   tagged with its source ID, so a TWLD read at an equal offset cannot masquerade
-   as WLD data. An out-of-window request replaces the window normally.
+   tagged with its source ID, so a scratch read at an equal offset cannot
+   masquerade as WLD data. An out-of-window request replaces the window normally.
 3. **Read static walls through the validated column index.** File-backed wall
    viewports seek directly to each sampled source column and decode RLE only as
    far as its last requested sample. They do not reconstruct wiring, visit
@@ -154,7 +153,7 @@ pulses and 180 timer ticks, lamp writes, and atomic cancellation. It also checks
 wall ID 300, wall paint, invisible/fullbright walls, column checkpoints, bottom
 edges, non-unit/maximum strides, work quantum 1 versus 4,096, cancelled/retried
 queries, source reuse without additional retained allocation, and foreground and
-wall coherence after TWLD save. Existing world/fragment contracts continue to
+wall coherence after WLD save. Existing world/fragment contracts continue to
 exercise save, routing, devices and supported object semantics.
 
 `build.ps1 -Features all -Test` includes the new regression in the normal WLD

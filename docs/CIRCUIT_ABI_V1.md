@@ -1,7 +1,7 @@
 # Circuit traversal ABI v1
 
 This is the sparse traversal API used by the temporary component sandbox. The
-file-backed WLD/TWLD world workspace uses the additive
+file-backed WLD world workspace uses the additive
 [Circuit World ABI v1](CIRCUIT_WORLD_ABI_V1.md), which owns compiled networks,
 compact state, native gate/device rules and atomic commands. The traversal API's
 capacity parameters below do not constrain imported circuit worlds. Actual

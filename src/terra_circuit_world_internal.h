@@ -2,7 +2,6 @@
 #define TERRA_CIRCUIT_WORLD_INTERNAL_H
 #include "terra_circuit_world.h"
 #include "terra_circuit_vm.h"
-#include "terra_circuit_twld.h"
 #include "terra_types.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -13,12 +12,12 @@
 #define CX_CHECK_COLUMNS 64u
 #define CX_CACHE_PAGES 64u
 #define CX_NONE UINT32_MAX
-enum CxReadTarget { CX_READ_WORLD=0, CX_READ_SCRATCH=1, CX_READ_TWLD=2, CX_READ_GEOMETRY=3 };
+enum CxReadTarget { CX_READ_WORLD=0, CX_READ_SCRATCH=1, CX_READ_GEOMETRY=3 };
 enum CxPhase {
     CX_TOPOLOGY=1, CX_ROOTS, CX_NUMBER, CX_REMAP, CX_MAP_SIZE, CX_MAP_ENCODE,
     CX_COUNT, CX_LAYOUT, CX_ZERO, CX_WRITE, CX_FLUSH, CX_INTERN, CX_IDLE,
     CX_QUERY, CX_RUN, CX_SAVE_PREFIX, CX_SAVE_TILES, CX_SAVE_SUFFIX, CX_SAVE_PATCH,
-    CX_FAILED, CX_CANCELLED, CX_TWLD, CX_TICKS, CX_FRAGMENTS
+    CX_FAILED, CX_CANCELLED, CX_TICKS=23, CX_FRAGMENTS
 };
 typedef struct CxBytes { uint8_t** pages; uint32_t length, pages_count, pages_capacity; } CxBytes;
 typedef struct CxWords { uint32_t** pages; uint32_t length, pages_count, pages_capacity; } CxWords;
@@ -43,8 +42,7 @@ typedef struct CxBinding {
 typedef struct CxInputPoint { uint32_t x,y,value,index; } CxInputPoint;
 typedef struct CxDevice { uint32_t x,y,nets[4],pulse_nets[4],gate; TxTile tile,initial; uint32_t cooldown,saved_cooldown,wire_hit_mask; int32_t can_deactivate; } CxDevice;
 typedef struct CxActuationPolicy { uint32_t device,x,y; uint32_t valid; TxTile above[10]; } CxActuationPolicy;
-typedef struct CxPixel { uint32_t x,y,h[4],v[4]; uint8_t state,initial,hit_h,hit_v,custom,marked; uint8_t reserved[2]; } CxPixel;
-typedef struct CxModTile { TerraTwldTile tile; TxTile vanilla; } CxModTile;
+typedef struct CxPixel { uint32_t x,y,h[4],v[4]; uint8_t state,initial,hit_h,hit_v,marked; uint8_t reserved[3]; } CxPixel;
 typedef struct CxPort { uint32_t net,pixel; uint8_t axis,colour; uint16_t reserved; } CxPort;
 typedef struct CxFragments CxFragments;
 typedef struct CxOrder CxOrder;
@@ -56,9 +54,6 @@ typedef struct CxWorld {
     uint32_t id, world_handle, maximum, bytes, peak, phase, error;
     TxWorld* world;
     uint32_t world_source, world_size, tile_start, tile_end, scratch_source;
-    uint32_t twld_source, twld_size, twld_state;
-    TerraTwld* twld; uint32_t twld_cursor,twld_mode,twld_output_offset,twld_saved_size;
-    CxModTile* mods; uint32_t mod_count,mod_capacity,mod_cursor;
     TerraCircuitWorldEvent event;
     const uint8_t* event_data;
     TerraCircuitWorldCommand command;
@@ -138,7 +133,7 @@ enum { CX_ORDER_GATE_ABSENT=3 };
 int cx_order_gate_position_step(CxWorld*,uint32_t,uint32_t*,uint32_t*);
 /* Non-mutating exact accounting for optional performance layers. */
 uint64_t cx_allocation_charge(uint32_t);
-static inline uint64_t cx_resident_total(uint32_t native_bytes,uint32_t vm_bytes,uint32_t twld_bytes){return (uint64_t)native_bytes+(uint64_t)vm_bytes+(uint64_t)twld_bytes;}
+static inline uint64_t cx_resident_total(uint32_t native_bytes,uint32_t vm_bytes){return (uint64_t)native_bytes+(uint64_t)vm_bytes;}
 uint64_t cx_resident_bytes(CxWorld*);
 void* cx_alloc(CxWorld*,uint32_t);
 void cx_free(CxWorld*,void*);
@@ -179,11 +174,6 @@ int cx_override_value(CxWorld*,uint32_t,uint32_t,uint32_t);
 int cx_set_override(CxWorld*,uint32_t,uint32_t,uint32_t,uint32_t);
 void cx_current_tile(CxWorld*,uint32_t,uint32_t,uint32_t,TxTile*,const uint32_t*);
 int cx_general_lamp_value(CxWorld*,const CxGeneralLamp*);
-int cx_twld_begin(CxWorld*);
-int cx_twld_step(CxWorld*,uint32_t*);
-int cx_twld_save_begin(CxWorld*);
-void cx_twld_cancel_save(CxWorld*);
-int cx_mod_column(CxWorld*);
 int cx_devices_column(CxWorld*);
 void cx_devices_bind_column(CxWorld*);
 int cx_devices_compile(CxWorld*);
@@ -203,7 +193,6 @@ int cx_operation_begin(CxWorld*);
 void cx_operation_commit(CxWorld*);
 void cx_operation_rollback(CxWorld*);
 int cx_seed_reserve(CxWorld*,uint32_t);
-int cx_mod_vanilla(CxWorld*,uint32_t,uint32_t,TxTile*);
 int cx_override_reserve(CxWorld*,uint32_t);
 int cx_lazy_toggle(const TxTile*);
 int cx_seed_contains(const CxWorld*,uint32_t,uint32_t);

@@ -5,7 +5,6 @@ export const COMPUTERRARIA = Object.freeze({
   sourceCommit: '0379d5b0d89dbb7fd4342b3afff9c3be5e1ab9d8',
   wireHeadCommit: 'e6009d010ca54ff43d04b44697accc7115807b9c',
   worldSha256: '55d0a24bd1f56d622003dbd30d52555e7d06d6d1bcacfc22ae506f2db5240c33',
-  twldSha256: 'c6de694b3d034701513dc1ba17311213561ec359d3ecddde7bc35ea3c9611ed8',
   width: 15200, height: 7200, worldBytes: 405983441, formatVersion: 279,
   romBytes: 768 * 1024, ramBase: 0x100000, ramBytes: 368 * 1024,
   clock: { x: 3194, y: 153, mask: 8 },

@@ -139,7 +139,7 @@ python scripts/build_txci.py
 
 WLD Web 使用 `-Oz + LTO` 压缩格式与管理代码，电路遍历、网络编译、VM 和门求值热路径保留 `-O3`；Node WLD 使用调用方选择的优化配置。所有目标参数写入编译身份和 manifest。
 
-新增的 [file-backed circuit world ABI v1](docs/CIRCUIT_WORLD_ABI_V1.md) 在 WLD/all 中实现整图网络预编译、紧凑状态、原生门/像素规则与流式 WLD/TWLD 读写。原有稀疏 traversal ABI 继续服务临时小电路。独立 PLR 不编入这些功能。
+新增的 [file-backed circuit world ABI v1](docs/CIRCUIT_WORLD_ABI_V1.md) 在 WLD/all 中实现整图网络预编译、紧凑状态、原生门/像素规则与流式 WLD 读写。原有稀疏 traversal ABI 继续服务临时小电路。独立 PLR 不编入这些功能。
 
 现有 `VIEWPORT` 调用已优化未接线 RLE 段、复用有界源文件窗口，并通过列索引直接读取静态墙层。ABI、采样精度、接线顺序和仿真状态语义保持不变。实现边界、实际 Web Wasm 基准与复现命令见 [电路视口性能说明](docs/CIRCUIT_VIEWPORT_PERFORMANCE.md)。
 
@@ -150,7 +150,7 @@ WLD Web 使用 `-Oz + LTO` 压缩格式与管理代码，电路遍历、网络�
 | `all` | 427,925 B（417.90 KiB） | 448 KiB |
 | `plr` | 不包含新增电路编译器与 VM | 原有 320 KiB |
 
-以上数值来自 Emscripten 5.0.7 对本轮完整源码的发布前构建；正式提交会改变编译身份和文件摘要，精确交付尺寸以随包 manifest 为准。WLD/all 分别保留约 23/30 KiB 功能余量，独立 PLR 预算不变。新增代码的成本包括网络编译、紧凑状态、原版延迟门求值、取消回滚和流式保存。小程序主流程使用单个 `.wld`；原版单色像素盒按逐 `TripWire` 规则执行，`.twld` 彩屏不是使用或验收前提。
+以上数值来自 Emscripten 5.0.7 对本轮完整源码的发布前构建；正式提交会改变编译身份和文件摘要，精确交付尺寸以随包 manifest 为准。WLD/all 分别保留约 23/30 KiB 功能余量，独立 PLR 预算不变。新增代码的成本包括网络编译、紧凑状态、原版延迟门求值、取消回滚和流式保存。小程序主流程使用单个 `.wld`；原版单色像素盒按逐 `TripWire` 规则执行，不支持、解析或存储 `.twld`，模组彩屏兼容不在范围内。
 <!-- circuit-size:end -->
 
 功能预算按实际新代码单独分配；所有 wrapper 上限仍为 128 KiB，WLD Web 的 64 MiB 初始内存和 160 MiB 最大线性内存保持原值。`scripts/check-artifact-size.mjs` 对每个 profile 校验尺寸与摘要，超过各自预算仍会失败。

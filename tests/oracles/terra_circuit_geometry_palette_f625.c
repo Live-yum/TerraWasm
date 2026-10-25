@@ -1,3 +1,4 @@
+/* WLD-only ABI adaptation: removed the retired sidecar-state guard only. */
 /* Bounded immutable source geometry with independent resumable decoding. */
 #include "terra_circuit_geometry.h"
 #include <string.h>
@@ -144,7 +145,7 @@ static int cold_budget_enabled(uint32_t maximum,uint64_t resident,uint64_t charg
     return charge<=(uint64_t)maximum/16u&&resident<=maximum&&charge<=maximum-resident;
 }
 int cx_geometry_create(CxWorld* w) {
-    if(!w||!w->world||(w->world_source?!w->world->stream_columns:(!w->world->file||!w->checkpoint_index))||!w->width||!w->height||w->twld_state||w->world->legacy_wld||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
+    if(!w||!w->world||(w->world_source?!w->world->stream_columns:(!w->world->file||!w->checkpoint_index))||!w->width||!w->height||w->world->legacy_wld||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
     if(w->geometry)return TCW_OK;
     if(w->height>UINT32_MAX/CX_GEOMETRY_SLOTS)return TCW_MEMORY;
     CxOrderGeometry* g=cx_alloc(w,sizeof(*g));if(!g)return TCW_MEMORY;memset(g,0,sizeof(*g));

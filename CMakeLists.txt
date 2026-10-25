@@ -51,8 +51,6 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_circuit_order_cache.c"
     "${SRC_DIR}/terra_circuit_rules.c"
     "${SRC_DIR}/terra_circuit_query.c"
-    "${SRC_DIR}/terra_circuit_twld.c"
-    "${SRC_DIR}/terra_circuit_twld_session.c"
     "${SRC_DIR}/terra_circuit_devices.c"
     "${SRC_DIR}/terra_circuit_actuation.c"
     "${SRC_DIR}/terra_legacy_npc.c"
@@ -431,14 +429,12 @@ else()
             target_include_directories(terra_circuit_geometry_cold_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_circuit_geometry_contract tests/circuit_geometry_contract.c ZLIB::ZLIB)
             target_include_directories(terra_circuit_geometry_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_circuit_wld_only_contract tests/circuit_wld_only_contract.c ZLIB::ZLIB)
             add_terra_contract(terra_circuit_contract tests/circuit_contract.c)
             add_terra_contract(terra_circuit_binding_index_contract tests/circuit_binding_index_contract.c ZLIB::ZLIB)
             target_include_directories(terra_circuit_binding_index_contract PRIVATE "${SRC_DIR}")
             target_compile_definitions(terra_circuit_contract PRIVATE TERRAX_TESTING)
             add_terra_contract(terra_circuit_vm_contract tests/circuit_vm_contract.c)
-            add_terra_contract(terra_circuit_twld_routing_contract tests/circuit_twld_routing_contract.c ZLIB::ZLIB)
-            target_include_directories(terra_circuit_twld_routing_contract PRIVATE "${SRC_DIR}")
-            add_terra_contract(terra_circuit_twld_unit tests/circuit_twld_unit.c ZLIB::ZLIB)
             add_terra_contract(terra_circuit_actuation_contract tests/circuit_actuation_contract.c)
             target_include_directories(terra_circuit_actuation_contract PRIVATE "${SRC_DIR}")
             add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)

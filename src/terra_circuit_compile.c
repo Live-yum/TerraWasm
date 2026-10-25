@@ -24,7 +24,7 @@ static uint32_t join(CxWorld* w,uint32_t a,uint32_t b){
     if(w->phase!=CX_TOPOLOGY){if(a!=b)cx_fail(w,TCW_FORMAT,"wire network replay does not match its compiled union graph");return a;}
     a=root(w,a);b=root(w,b);if(a>b){uint32_t t=a;a=b;b=t;}cx_set_word(&w->parents,b,a);return a;
 }
-static int important_tile(const TxTile* t){return t->active&&(t->type==419u||t->type==420u||t->type==424u||t->type==445u||t->actuator||t->type==132u||t->type==135u||t->type==136u||t->type==144u||t->type==33u||t->type==4u||t->type==429u||t->type==423u);}
+static int important_tile(const TxTile* t){return t->active&&(t->type==419u||t->type==420u||t->type==424u||t->type==445u||t->type==0xfffeu||t->actuator||t->type==132u||t->type==135u||t->type==136u||t->type==144u||t->type==33u||t->type==4u||t->type==429u||t->type==423u);}
 static int standard(const CxWorld* w,uint32_t y){
     if(!(y>=2u&&w->column[y].active&&w->column[y].type==420u&&w->column[y].frame_x==36&&
         w->column[y-1].active&&w->column[y-1].type==419u&&w->column[y-1].frame_x!=36&&
@@ -65,7 +65,7 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
         if(w->phase==CX_TOPOLOGY){uint32_t wires=cx_wire_mask(&t);if(wires){w->wire_cells+=run;if(w->x<w->min_x)w->min_x=w->x;if(w->x>w->max_x)w->max_x=w->x;if(w->y<w->min_y)w->min_y=w->y;if(w->y+run-1u>w->max_y)w->max_y=w->y+run-1u;}
             if(important_tile(&t))w->devices_count+=run;
         }
-        w->y+=run;--*work;if(w->y==w->height){int s=cx_mod_column(w);if(s)return s;memset(w->pixel_at_y,0,w->height*4u);if(w->phase==CX_COUNT){s=cx_devices_column(w);if(s)return s;}
+        w->y+=run;--*work;if(w->y==w->height){memset(w->pixel_at_y,0,w->height*4u);if(w->phase==CX_COUNT){int s=cx_devices_column(w);if(s)return s;}
             /* Keep the previous column's frontier intact while visiting this
              * column. Empty wire runs then need no per-cell routing or writes.
              * The bounded output arrays are cleared once and published to the
@@ -78,7 +78,6 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
         uint32_t advance=1;
         if(!(cx_wire_mask(t)&(1u<<c))){
             /* An unwired colour is unchanged throughout the source RLE run.
-             * TWLD replaces tile type/frames, never these source wire bits.
              * Every such jump starts at its record boundary: wired runs still
              * advance one cell at a time, including resumptions after a yield. */
             advance=(uint32_t)t->same+1u;
@@ -88,7 +87,7 @@ int cx_scan_step(CxWorld* w,uint32_t* work){
         }
         uint32_t left=w->front[y*4u+c],up=w->up,right=0,down=0,seed=0,opposite=0;
         if(cx_inside_wiring(w,w->x,y)&&(cx_wire_mask(t)&(1u<<c))){
-            if(t->active&&(t->type==424u||(t->type==445u&&!w->twld_state)||t->type==0xfffeu)){
+            if(t->active&&(t->type==424u||t->type==445u||t->type==0xfffeu)){
                 int route=t->type==424u?t->frame_x/18:0;
                 if(route<0||route>2){opposite=seed=right=down=join(w,left,up);}
                 else if(route==1){seed=join(w,left,up);opposite=right=down=make_label(w);}
@@ -108,9 +107,7 @@ routed:
     }
     while(*work&&w->col_stage==3){uint32_t y=w->col_row,advance=1;
         if(w->column[y].active&&w->column[y].type==420u)w->gate_at_y[y]=++w->gate_cursor;
-        /* A mod pixel can replace a gate inside an original RLE record, so
-         * retain cell-by-cell gate scanning for that uncommon source profile. */
-        else if(!w->mod_count)advance=(uint32_t)w->column[y].same+1u;
+        else advance=(uint32_t)w->column[y].same+1u;
         if(advance>w->height-y)return cx_fail(w,TCW_FORMAT,"circuit empty gate run crosses a world column");
         w->col_row+=advance;
         --*work;if(w->col_row==w->height){if(w->phase==CX_COUNT){cx_devices_bind_column(w);int s=cx_order_capture_column(w);if(s)return s;}w->col_stage=4;w->emit_y=0;w->emit_colour=0;w->emit_phase=0;}

@@ -46,7 +46,7 @@ static int joined(const CxWorld* w,ReplayMap* m,uint32_t a,uint32_t b,uint32_t* 
 static int failed(CxOrderReplay* r,int status){r->state=4;r->failure=status;return status;}
 int cx_order_replay_create(CxWorld* w,CxOrderReplay** out) {
     if(!out)return TCW_INVALID;*out=NULL;
-    if(!w||!w->height||!w->width||w->height>UINT32_MAX/16u||w->twld_state||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
+    if(!w||!w->height||!w->width||w->height>UINT32_MAX/16u||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
     CxOrderReplay* r=cx_alloc(w,sizeof(*r));if(!r)return TCW_MEMORY;memset(r,0,sizeof(*r));r->owner=w;
     r->front=cx_alloc(w,w->height*16u);if(!r->front){cx_free(w,r);return TCW_MEMORY;}
     *out=r;return TCW_OK;
@@ -61,7 +61,7 @@ void cx_order_replay_cancel(CxOrderReplay* r) {
 int cx_order_replay_begin(CxOrderReplay* r,uint32_t x,uint32_t y) {
     if(!r||!r->owner)return TCW_STATE;
     const CxWorld* w=r->owner;
-    if(w->phase==CX_CANCELLED||w->phase==CX_FAILED||w->twld_state)return TCW_STATE;
+    if(w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
     if(x>=w->width||y>=w->height)return TCW_INVALID;
     cx_order_replay_cancel(r);
     uint32_t index=x/CX_CHECK_COLUMNS;

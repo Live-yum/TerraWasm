@@ -37,14 +37,13 @@ CxWorld* cx_lookup(uint32_t id) {
     for(uint32_t i=0;i<4;i++)if(sessions[i]&&sessions[i]->id==id)return sessions[i];
     return NULL;
 }
-static uint32_t vm_bytes(CxWorld* w) { uint32_t bytes=0;TerraVmStats s;if(w->vm){terra_vm_stats(w->vm,&s);bytes=s.allocated_bytes;}TerraTwldStats t;if(w->twld){terra_twld_stats(w->twld,&t);bytes+=t.allocated_bytes;}return bytes; }
-uint32_t cx_vm_available(CxWorld* w){uint64_t used=w->bytes;TerraTwldStats t;if(w->twld){terra_twld_stats(w->twld,&t);used+=t.allocated_bytes;}return used<w->maximum?w->maximum-(uint32_t)used:0u;}
+static uint32_t vm_bytes(CxWorld* w) { uint32_t bytes=0;TerraVmStats s;if(w->vm){terra_vm_stats(w->vm,&s);bytes=s.allocated_bytes;}return bytes; }
+uint32_t cx_vm_available(CxWorld* w){uint64_t used=w->bytes;return used<w->maximum?w->maximum-(uint32_t)used:0u;}
 uint64_t cx_allocation_charge(uint32_t bytes){return (uint64_t)bytes+sizeof(CxAllocation)+32u;}
 uint64_t cx_resident_bytes(CxWorld* w){
-    uint32_t vm=0,twld=0;TerraVmStats s;TerraTwldStats t;
+    uint32_t vm=0;TerraVmStats s;
     if(w->vm){terra_vm_stats(w->vm,&s);vm=s.allocated_bytes;}
-    if(w->twld){terra_twld_stats(w->twld,&t);twld=t.allocated_bytes;}
-    return cx_resident_total(w->bytes,vm,twld);
+    return cx_resident_total(w->bytes,vm);
 }
 void* cx_alloc(CxWorld* w,uint32_t bytes) {
     uint64_t n=cx_allocation_charge(bytes);
@@ -154,7 +153,7 @@ int cx_cache_flush(CxWorld* w){
     return TCW_OK;
 }
 static void destroy(CxWorld* w){
-    if(!w)return;terra_vm_destroy(w->vm);w->vm=NULL;terra_twld_destroy(w->twld);w->twld=NULL;
+    if(!w)return;terra_vm_destroy(w->vm);w->vm=NULL;
     cx_fragments_free(w);
     cx_order_close(w);
     cx_geometry_destroy(w);
@@ -164,7 +163,7 @@ static void destroy(CxWorld* w){
     RELEASE(input);RELEASE(column);RELEASE(front);RELEASE(ids);RELEASE(seed_ids);RELEASE(opposite_ids);RELEASE(gate_at_y);RELEASE(pixel_at_y);RELEASE(checkpoint_index);RELEASE(column_gates);
     RELEASE(action_bits);RELEASE(action_rank);RELEASE(actions);RELEASE(cache);RELEASE(cache_pages);RELEASE(cache_map);RELEASE(stored_pages);
     RELEASE(intern_buffer);RELEASE(hashes);RELEASE(general);RELEASE(lamps);RELEASE(devices);RELEASE(pixels);RELEASE(overrides);RELEASE(bindings);RELEASE(binding_index);
-    RELEASE(points);RELEASE(result);RELEASE(output);RELEASE(general_snapshot);RELEASE(mods);RELEASE(ports);RELEASE(pixel_touched);RELEASE(pixel_snapshot);
+    RELEASE(points);RELEASE(result);RELEASE(output);RELEASE(general_snapshot);RELEASE(ports);RELEASE(pixel_touched);RELEASE(pixel_snapshot);
     RELEASE(mechs);RELEASE(mechs_snapshot);RELEASE(trigger_nets);RELEASE(override_snapshot);
     RELEASE(projectiles);RELEASE(projectile_snapshot);RELEASE(solid_spans);RELEASE(solid_columns);
     RELEASE(policies);cx_free(w,w->previous_columns[0]);cx_free(w,w->previous_columns[1]);
@@ -174,16 +173,18 @@ static void destroy(CxWorld* w){
 uint32_t terra_circuit_world_abi_version(void){return TERRA_CIRCUIT_WORLD_ABI;}
 int32_t terra_circuit_world_begin(uint32_t world_handle,uint32_t scratch_source_id,uint32_t twld_source_id,uint32_t twld_size,uint32_t max_bytes,uint32_t* out_handle){
     if(!out_handle)return TCW_INVALID;*out_handle=0;
+    /* ABI slots retained, but sidecars are never parsed, read or allocated. */
+    if(twld_source_id||twld_size)return cx_fail(NULL,TCW_UNSUPPORTED,"TWLD sidecars are not supported; use a WLD-only source");
     if(tx_checkpoint_active())return cx_fail(NULL,TCW_STATE,"finish workspace transaction before opening a circuit session");
     TxWorld* world=tx_get_world(world_handle);
-    if(!world||!scratch_source_id||scratch_source_id==world->stream_source_id||scratch_source_id==twld_source_id||(!twld_source_id&&twld_size))return TCW_INVALID;
+    if(!world||!scratch_source_id||scratch_source_id==world->stream_source_id)return TCW_INVALID;
     if(world->legacy_wld)return cx_fail(NULL,TCW_UNSUPPORTED,"circuit simulation requires a sectioned WLD file");
     if(tx_world_is_future(world))return cx_fail(NULL,TCW_UNSUPPORTED,"future-layout worlds are read-only and cannot open a mutable circuit session");
     if(world->maxTilesX<1||world->maxTilesY<1)return TCW_FORMAT;
     uint32_t slot=0;while(slot<4&&sessions[slot])++slot;if(slot==4||!next_session)return TCW_STATE;
     CxWorld* w=(CxWorld*)tx_persistent_alloc(sizeof(*w));if(!w)return TCW_MEMORY;memset(w,0,sizeof(*w));
     w->maximum=max_bytes?max_bytes:UINT32_MAX;w->bytes=w->peak=sizeof(*w)+32u;
-    w->id=next_session++;w->world_handle=world_handle;w->world=world;w->scratch_source=scratch_source_id;w->twld_source=twld_source_id;w->twld_size=twld_size;
+    w->id=next_session++;w->world_handle=world_handle;w->world=world;w->scratch_source=scratch_source_id;
     w->world_source=world->stream_source_id;w->world_size=w->world_source?world->stream_source_size:world->file_len;
     w->tile_start=w->world_source?world->stream_tile_start:world->starts[1];w->tile_end=w->world_source?world->stream_tile_end:world->ends[1];
     w->width=(uint32_t)world->maxTilesX;w->height=(uint32_t)world->maxTilesY;w->min_x=w->width;w->min_y=w->height;
@@ -195,7 +196,6 @@ int32_t terra_circuit_world_begin(uint32_t world_handle,uint32_t scratch_source_
     w->checkpoint_index=(CxCheckpoint*)cx_alloc(w,w->checkpoint_count*sizeof(CxCheckpoint));
     if(!w->input||!w->column||!w->front||!w->ids||!w->seed_ids||!w->opposite_ids||!w->gate_at_y||!w->pixel_at_y||!w->column_gates||!w->checkpoint_index||!cx_compile_initialize(w)){int status=w->error?-(int)w->error:TCW_MEMORY;destroy(w);return status;}
     memset(w->checkpoint_index,0,w->checkpoint_count*sizeof(CxCheckpoint));
-    if(twld_source_id){int status=cx_twld_begin(w);if(status<0){destroy(w);return status;}}
     sessions[slot]=w;*out_handle=w->id;return TCW_OK;
 }
 int32_t terra_circuit_world_supply(uint32_t handle,uint32_t source_id,uint32_t offset,const uint8_t* data,uint32_t length){
@@ -216,8 +216,7 @@ int32_t terra_circuit_world_ack(uint32_t handle){
         if(w->phase==CX_FRAGMENTS&&(w->command.flags&1)&&w->event.source_id==w->command.aux_source_id)cx_fragments_ack(w);
         else if(w->phase==CX_ZERO)w->output_offset+=w->event.length;
         else if(w->event.source_id==w->scratch_source){CxCachePage* p=w->cache_pages+w->read_slot;p->dirty=0;w->stored_pages[p->page>>3]|=(uint8_t)(1u<<(p->page&7u));}
-        else if(w->phase==CX_SAVE_PATCH){int s=cx_twld_save_begin(w);if(s<0)return s;if(!w->twld)w->phase=CX_IDLE;}
-        else if(w->phase==CX_TWLD&&w->twld_mode==2u){w->twld_output_offset+=w->event.length;w->output_length=0;}
+        else if(w->phase==CX_SAVE_PATCH)w->phase=CX_IDLE;
         else{w->output_offset+=w->event.length;w->output_length=0;}
     }else{w->result_count=0;w->phase=CX_IDLE;}
     memset(&w->event,0,sizeof(w->event));return TCW_OK;
@@ -241,16 +240,15 @@ static int32_t circuit_world_step_impl(uint32_t handle,uint32_t work_units,Terra
                 else status=cx_command_complete(w);
             }else status=TCW_CONTINUE;
         }else if(w->phase>=CX_SAVE_PREFIX&&w->phase<=CX_SAVE_PATCH)status=cx_save_step(w,&work);
-        else if(w->phase==CX_TWLD)status=cx_twld_step(w,&work);
         else if(w->phase==CX_TICKS)status=cx_ticks_step(w,&work);
         else if(w->phase==CX_FRAGMENTS)status=cx_fragments_step(w,&work);
         else status=cx_fail(w,TCW_STATE,"unknown circuit session phase");
-        if(status<0){cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
+        if(status<0){cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_operation_rollback(w);w->phase=CX_IDLE;memset(&w->event,0,sizeof(w->event));}else w->phase=CX_FAILED;return status;}
         if(w->event.kind){*out=w->event;return TCW_CONTINUE;}
         if(status==TCW_CONTINUE&&!work)break;
     }
     memset(out,0,sizeof(*out));out->abi_version=1;out->kind=w->phase==CX_IDLE?TCW_READY:TCW_MORE;out->phase=w->phase;out->completed=w->x;out->total=w->width;
-    if(w->phase==CX_IDLE){out->result_kind=w->command.kind;out->reserved=w->twld_state&1u;if(w->command.kind==TCW_SAVE){out->source_id=w->output_source;out->result_count=w->save_result_size;out->reserved=w->twld_saved_size;}else if(w->command.kind==TCW_FRAGMENTS||w->command.kind==TCW_EXTRACT)out->result_count=cx_fragments_result_count(w);}
+    if(w->phase==CX_IDLE){out->result_kind=w->command.kind;if(w->command.kind==TCW_SAVE){out->source_id=w->output_source;out->result_count=w->save_result_size;}else if(w->command.kind==TCW_FRAGMENTS||w->command.kind==TCW_EXTRACT)out->result_count=cx_fragments_result_count(w);}
     return w->phase==CX_IDLE?TCW_OK:TCW_CONTINUE;
 }
 int32_t terra_circuit_world_step(uint32_t handle,uint32_t work_units,TerraCircuitWorldEvent* out){
@@ -274,5 +272,5 @@ int32_t terra_circuit_world_stats(uint32_t handle,TerraCircuitWorldStats* out){
         w->min_x,w->min_y,w->max_x,w->max_y,w->wire_cells,w->devices_count,w->gates,w->networks,w->vm?w->width:w->x,w->phase,bytes,peak,
         (uint32_t)w->ticks,(uint32_t)(w->ticks>>32),(uint32_t)s.net_pulses,(uint32_t)(s.net_pulses>>32),(uint32_t)s.gates_fired,(uint32_t)(s.gates_fired>>32)};return TCW_OK;
 }
-int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_twld_cancel_save(w);cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
+int32_t terra_circuit_world_cancel(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;cx_order_cancel(w);cx_geometry_cancel(w);cx_fragments_cancel(w);if(w->vm){cx_operation_rollback(w);w->phase=CX_IDLE;}else w->phase=CX_CANCELLED;memset(&w->event,0,sizeof(w->event));w->tick_remaining=w->tick_stage=w->trigger_remaining=0;return TCW_OK;}
 int32_t terra_circuit_world_close(uint32_t handle){CxWorld* w=cx_lookup(handle);if(!w)return TCW_HANDLE;for(uint32_t i=0;i<4;i++)if(sessions[i]==w){sessions[i]=NULL;break;}destroy(w);return TCW_OK;}

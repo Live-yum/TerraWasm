@@ -211,7 +211,7 @@ static int cf_emit_page(CxWorld* w){CxFragments* f=w->fragments;uint32_t n=w->co
 int cx_fragments_begin(CxWorld* w,const TerraCircuitWorldCommand* cmd,const uint8_t* command_data){
     if(!cmd->count||cmd->count>32768u||cmd->data_count>65536u||(!command_data&&cmd->data_count))return TCW_INVALID;
     if(cmd->kind==TCW_EXTRACT&&(!w->fragments||!w->fragments->ready||cmd->data_count))return TCW_STATE;
-    if(cmd->kind==TCW_EXTRACT&&(cmd->flags&1)&&(!cmd->aux_source_id||cmd->aux_source_id==w->world_source||cmd->aux_source_id==w->scratch_source||cmd->aux_source_id==w->twld_source||cmd->width<32||cmd->width>CO_LIMIT||!cmd->height||cmd->height>CO_COUNT))return TCW_INVALID;
+    if(cmd->kind==TCW_EXTRACT&&(cmd->flags&1)&&(!cmd->aux_source_id||cmd->aux_source_id==w->world_source||cmd->aux_source_id==w->scratch_source||cmd->width<32||cmd->width>CO_LIMIT||!cmd->height||cmd->height>CO_COUNT))return TCW_INVALID;
 #ifdef __wasm__
     if(cmd->data_count&&!tx_bridge_contains_native(command_data,cmd->data_count*16u))return TCW_INVALID;
 #endif

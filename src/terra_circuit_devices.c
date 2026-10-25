@@ -32,7 +32,7 @@ int cx_devices_column(CxWorld* w){
     for(uint32_t i=0;i<w->policy_count;){CxActuationPolicy* p=w->policies+i;fill_policy(w,p,w->x,w->column);if(w->x>=p->x+2u||w->x+1u==w->width){finish_policy(w,p);w->policies[i]=w->policies[--w->policy_count];}else ++i;}
     w->column_device_first=w->device_count;
     for(uint32_t y=0;y<w->height;y++){TxTile* t=w->column+y;if(!t->active&&!t->actuator)continue;
-        if(t->type==445u||t->type==0xfffeu){if(!grow(w,(void**)&w->pixels,&w->pixel_capacity,w->pixel_count+1u,sizeof(CxPixel)))return TCW_MEMORY;CxPixel* p=w->pixels+w->pixel_count;memset(p,0,sizeof(*p));p->x=w->x;p->y=y;p->custom=t->type==0xfffeu;p->state=p->initial=p->custom?(uint8_t)((t->frame_x/18)&3u)|((uint8_t)((t->frame_y/18)&3u)<<2):(uint8_t)(t->frame_x==18);w->pixel_at_y[y]=++w->pixel_count;}
+        if(t->type==445u){if(!grow(w,(void**)&w->pixels,&w->pixel_capacity,w->pixel_count+1u,sizeof(CxPixel)))return TCW_MEMORY;CxPixel* p=w->pixels+w->pixel_count;memset(p,0,sizeof(*p));p->x=w->x;p->y=y;p->state=p->initial=(uint8_t)(t->frame_x==18);w->pixel_at_y[y]=++w->pixel_count;}
         if(t->type==137u||t->type==209u||is_switch(t->type)||t->actuator||t->type==130u||t->type==131u){if(!grow(w,(void**)&w->devices,&w->device_capacity,w->device_count+1u,sizeof(CxDevice)))return TCW_MEMORY;CxDevice* d=w->devices+w->device_count++;memset(d,0,sizeof(*d));d->x=w->x;d->y=y;d->tile=d->initial=*t;if(t->type==144u)d->tile.frame_y=0;if(t->actuator||t->type==130u||t->type==131u){int s=prepare_policy(w,d);if(s)return s;}}
     }return TCW_OK;
 }
@@ -45,14 +45,14 @@ void cx_devices_end_columns(CxWorld* w){
 }
 int cx_devices_compile(CxWorld* w){
     cx_devices_end_columns(w);
-    uint64_t count=0;for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(w->twld_state&&p->custom&&p->h[c]==p->v[c])continue;count+=p->h[c]!=0;if(!w->twld_state||p->custom)count+=p->v[c]!=0;}
+    uint64_t count=0;for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;count+=p->h[c]!=0;count+=p->v[c]!=0;}
     for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u||w->devices[i].tile.type==209u||w->devices[i].tile.type==137u)for(uint32_t c=0;c<4;c++)count+=w->devices[i].nets[c]!=0;
     for(uint32_t i=0;i<w->device_count;i++)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c]){count+=w->devices[i].tile.actuator!=0;count+=w->devices[i].tile.type==130u||w->devices[i].tile.type==131u;}
     if(count>UINT32_MAX/sizeof(CxPort))return TCW_MEMORY;
     w->ports=(CxPort*)cx_alloc(w,(count?count:1u)*sizeof(CxPort));w->pixel_touched=(uint32_t*)cx_alloc(w,(w->pixel_count?w->pixel_count:1u)*4u);w->pixel_snapshot=(uint8_t*)cx_alloc(w,w->pixel_count?w->pixel_count:1u);
     w->mech_capacity=w->device_count?w->device_count:1u;if(w->mech_capacity>CX_MECH_LIMIT)w->mech_capacity=CX_MECH_LIMIT;w->mechs=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);w->mechs_snapshot=(uint32_t*)cx_alloc(w,w->mech_capacity*4u);
     if(!w->ports||!w->pixel_touched||!w->pixel_snapshot||!w->mechs||!w->mechs_snapshot)return TCW_MEMORY;
-    for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(w->twld_state&&p->custom&&p->h[c]==p->v[c])continue;if(p->h[c])w->ports[w->port_count++]=(CxPort){p->h[c],i,0,(uint8_t)c,0};if((!w->twld_state||p->custom)&&p->v[c])w->ports[w->port_count++]=(CxPort){p->v[c],i,1,(uint8_t)c,0};}
+    for(uint32_t i=0;i<w->pixel_count;i++)for(uint32_t c=0;c<4;c++){CxPixel* p=w->pixels+i;if(p->h[c])w->ports[w->port_count++]=(CxPort){p->h[c],i,0,(uint8_t)c,0};if(p->v[c])w->ports[w->port_count++]=(CxPort){p->v[c],i,1,(uint8_t)c,0};}
     for(uint32_t i=0;i<w->device_count;i++)if(w->devices[i].tile.type==144u||w->devices[i].tile.type==411u||w->devices[i].tile.type==209u||w->devices[i].tile.type==137u)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c])w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,w->devices[i].tile.type==144u?2:w->devices[i].tile.type==411u?3:6,(uint8_t)c,0};
     for(uint32_t i=0;i<w->device_count;i++)for(uint32_t c=0;c<4;c++)if(w->devices[i].nets[c]){if(w->devices[i].tile.actuator)w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,4,(uint8_t)c,0};if(w->devices[i].tile.type==130u||w->devices[i].tile.type==131u)w->ports[w->port_count++]=(CxPort){w->devices[i].nets[c],i,5,(uint8_t)c,0};}
     qsort(w->ports,w->port_count,sizeof(CxPort),compare_ports);return TCW_OK;
@@ -61,7 +61,7 @@ uint32_t cx_pixel_find(CxWorld* w,uint32_t x,uint32_t y){uint32_t lo=0,hi=w->pix
 CxDevice* cx_device_find(CxWorld* w,uint32_t x,uint32_t y){uint32_t lo=0,hi=w->device_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;CxDevice* p=w->devices+m;if(p->x<x||(p->x==x&&p->y<y))lo=m+1;else hi=m;}return lo<w->device_count&&w->devices[lo].x==x&&w->devices[lo].y==y?w->devices+lo:NULL;}
 static int check_mech(CxWorld* w,CxDevice* d,uint32_t time){if(d->cooldown||w->mech_count>=CX_MECH_LIMIT)return 0;if(w->mech_count>=w->mech_capacity)return -1;d->cooldown=time;w->mechs[w->mech_count++]=(uint32_t)(d-w->devices);return 1;}
 static int toggle_timer(CxWorld* w,CxDevice* d){if(d->tile.frame_y==0){d->tile.frame_y=18;if(check_mech(w,d,18000u)<0)return -1;}else d->tile.frame_y=0;return 0;}
-int cx_trip_begin(void* context){CxWorld* w=(CxWorld*)context;++w->vm_trip_index;TerraVmGateRef source;w->vm_source_gate=terra_vm_current_gate(w->vm,&source)==1&&source.group==0?source.offset:0;if(!w->twld_state)w->pixel_touched_count=0;for(uint32_t i=0;i<w->device_count;i++)w->devices[i].wire_hit_mask=0;return 0;}
+int cx_trip_begin(void* context){CxWorld* w=(CxWorld*)context;++w->vm_trip_index;TerraVmGateRef source;w->vm_source_gate=terra_vm_current_gate(w->vm,&source)==1&&source.group==0?source.offset:0;w->pixel_touched_count=0;for(uint32_t i=0;i<w->device_count;i++)w->devices[i].wire_hit_mask=0;return 0;}
 int cx_net_hit(void* context,uint32_t net){
     CxWorld* w=(CxWorld*)context;uint32_t group=net+1u,lo=0,hi=w->port_count;while(lo<hi){uint32_t m=lo+(hi-lo)/2;if(w->ports[m].net<group)lo=m+1;else hi=m;}
     while(lo<w->port_count&&w->ports[lo].net==group){CxPort* port=w->ports+lo++;
@@ -76,20 +76,18 @@ int cx_net_hit(void* context,uint32_t net){
             base->wire_hit_mask|=bit;int shift=base->tile.frame_x>=36?-36:36;for(uint32_t a=x;a<x+2u;a++)for(uint32_t b=y;b<y+2u;b++){CxDevice* part=cx_device_find(w,a,b);if(part&&part->tile.type==411u)part->tile.frame_x=(int16_t)(part->tile.frame_x+shift);}continue;
         }
         CxPixel* p=w->pixels+port->pixel;if(!p->marked){p->marked=1;w->pixel_touched[w->pixel_touched_count++]=port->pixel;}uint8_t bit=(uint8_t)(1u<<port->colour);
-        if(w->twld_state){if(port->axis)p->hit_v^=bit;else p->hit_h^=bit;}else if(port->axis)p->hit_v|=bit;else p->hit_h|=bit;
+        if(port->axis)p->hit_v|=bit;else p->hit_h|=bit;
     }return 0;
 }
 static int pixel_pass(CxWorld* w){
     for(uint32_t i=0;i<w->pixel_touched_count;i++){CxPixel* p=w->pixels+w->pixel_touched[i];
-        if(p->custom){uint8_t both=p->hit_h&p->hit_v;for(uint32_t c=0;c<4;c++)if(both&(1u<<c))p->state^=(uint8_t)(1u<<(3u-c));}
-        else if(w->twld_state){uint32_t n=(uint32_t)__builtin_popcount((unsigned)p->hit_h);p->state^=(uint8_t)((n*(n-1u)/2u)&1u);}
-        else if(p->hit_h&&p->hit_v)p->state^=1u;
+        if(p->hit_h&&p->hit_v)p->state^=1u;
         p->hit_h=p->hit_v=p->marked=0;
     }w->pixel_touched_count=0;return 0;
 }
-int cx_trip_end(void* context){CxWorld* w=(CxWorld*)context;return w->twld_state?0:pixel_pass(w);}
+int cx_trip_end(void* context){CxWorld* w=(CxWorld*)context;return pixel_pass(w);}
 int cx_wave_begin(void* context){(void)context;return 0;}
-int cx_wave_end(void* context){CxWorld* w=(CxWorld*)context;return w->twld_state?pixel_pass(w):0;}
+int cx_wave_end(void* context){(void)context;return 0;}
 int cx_interact(CxWorld* w){
     CxDevice* d=cx_device_find(w,w->command.x,w->command.y);if(!d)return 0;
     uint32_t type=d->tile.type;

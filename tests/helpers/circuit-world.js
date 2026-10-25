@@ -2,7 +2,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const zlib = require('node:zlib');
 const { makeSectionedWorld } = require('./sectioned-world');
 
 // Independent, small sectioned WLD encoder for mechanism contracts. It uses
@@ -74,21 +73,6 @@ function makeCircuitWorld(cells, width = 40, height = 32, version = 196, { rle =
   return Buffer.concat([format, ...sections]);
 }
 
-// One named ColorPixelBox plus incompressible unknown metadata keeps a save
-// replay spread over several input chunks, so cancellation can occur mid-gzip.
-function makeCircuitTwld(width = 40, height = 32) {
-  const u32 = n => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
-  const str = s => { const b = Buffer.from(s), n = Buffer.alloc(2); n.writeUInt16BE(b.length); return Buffer.concat([n, b]); };
-  const tag = (type, name, bytes) => Buffer.concat([Buffer.from([type]), str(name), bytes]);
-  const pixels = [];
-  for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) pixels.push(x === 10 && y === 10 ? Buffer.from([0xbb, 2, 0, 18, 0, 36, 0]) : Buffer.alloc(2));
-  const data = Buffer.concat(pixels), unknown = Buffer.alloc(16384); let state = 0x1729abcd;
-  for (let i = 0; i < unknown.length; i++) { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; unknown[i] = state >>> 24; }
-  const entry = Buffer.concat([tag(3, 'value', u32(699)), tag(8, 'mod', str('WireHead')), tag(8, 'name', str('ColorPixelBox')), tag(1, 'framed', Buffer.from([1])), Buffer.from([0])]);
-  const tiles = Buffer.concat([tag(7, 'tileData', Buffer.concat([u32(data.length), data])), tag(9, 'tileMap', Buffer.concat([Buffer.from([10]), u32(1), entry])), Buffer.from([0])]);
-  return zlib.gzipSync(tag(10, '', Buffer.concat([tag(10, 'tiles', tiles), tag(7, 'future-unknown-blob', Buffer.concat([u32(unknown.length), unknown])), Buffer.from([0])])));
-}
-
 async function makeDriver(target = 'web', verifiedModule = null) {
   const build = process.env.TCW_BUILD_DIR ? path.resolve(process.env.TCW_BUILD_DIR) : path.join(__dirname, '../../build');
   const name = target === 'node' ? 'terrax_world_wasm' : 'terrax_world_wasm_web';
@@ -145,8 +129,9 @@ async function makeDriver(target = 'web', verifiedModule = null) {
     if (openTask) { okay(M._terra_world_stream_close(openTask)); openTask = 0; }
     assert.equal(M._tx_native_heap_used(), 0, 'all native session state released');
   };
-  function open(bytes, maximum = 48 * 1024 * 1024, sidecar, memoryBacked = false) {
-    close(); sources.clear(); sources.set(1, bytes); sources.set(2, Buffer.alloc(0)); if (sidecar) sources.set(3, sidecar);
+  function open(bytes, maximum = 48 * 1024 * 1024, reserved, memoryBacked = false) {
+    assert.equal(reserved, undefined, 'sidecars are not supported');
+    close(); sources.clear(); sources.set(1, bytes); sources.set(2, Buffer.alloc(0));
     if (memoryBacked) {
       assert.ok(bytes.length <= 1048576); M.HEAPU8.set(bytes, input);
       okay(M._terra_world_open_from_buffer(input, bytes.length, hp)); world = M.HEAPU32[hp >>> 2];
@@ -154,7 +139,7 @@ async function makeDriver(target = 'web', verifiedModule = null) {
     okay(M._terra_world_stream_open_begin(1, bytes.length, hp)); openTask = M.HEAPU32[hp >>> 2]; pump(true);
     okay(M._terra_world_stream_adopt(openTask, 1, hp)); world = M.HEAPU32[hp >>> 2]; okay(M._terra_world_stream_close(openTask)); openTask = 0;
     }
-    okay(M._terra_circuit_world_begin(world, 2, sidecar ? 3 : 0, sidecar?.length || 0, maximum, hp)); circuit = M.HEAPU32[hp >>> 2]; return pump();
+    okay(M._terra_circuit_world_begin(world, 2, 0, 0, maximum, hp)); circuit = M.HEAPU32[hp >>> 2]; return pump();
   }
   return { M, open, close, command, start, event, respond, pump, stats, sources, get worldHandle() { return world; }, get circuitHandle() { return circuit; },
     cancel() { okay(M._terra_circuit_world_cancel(circuit)); },
@@ -162,4 +147,4 @@ async function makeDriver(target = 'web', verifiedModule = null) {
     dispose() { close(); for (const p of pointers) M._tx_free(p); },
   };
 }
-module.exports = { makeCircuitWorld, makeCircuitTwld, makeDriver };
+module.exports = { makeCircuitWorld, makeDriver };

@@ -79,7 +79,7 @@ void cx_geometry_cancel(CxWorld* w){if(!w||!w->geometry)return;CxOrderGeometry* 
 void cx_geometry_destroy(CxWorld* w){if(!w||!w->geometry)return;CxOrderGeometry* g=w->geometry;cx_free(w,g->ends);cx_free(w,g->slot_owner);cx_free(w,g->blocks);cx_free(w,g->cold_bytes);cx_free(w,g->cells);cx_free(w,g->compiler_axis);cx_free(w,g->window);cx_free(w,g);w->geometry=NULL;}
 static int cold_budget_enabled(uint32_t maximum,uint64_t resident,uint64_t charge){return charge<=(uint64_t)maximum/16u&&resident<=maximum&&charge<=maximum-resident;}
 int cx_geometry_create(CxWorld* w){
-    if(!w||!w->world||(w->world_source?!w->world->stream_columns:(!w->world->file||!w->checkpoint_index))||!w->width||!w->height||w->twld_state||w->world->legacy_wld||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
+    if(!w||!w->world||(w->world_source?!w->world->stream_columns:(!w->world->file||!w->checkpoint_index))||!w->width||!w->height||w->world->legacy_wld||w->phase==CX_CANCELLED||w->phase==CX_FAILED)return TCW_STATE;
     if(w->geometry)return TCW_OK;if(w->height>UINT32_MAX/3u)return TCW_MEMORY;
     CxOrderGeometry* g=cx_alloc(w,sizeof(*g));if(!g)return TCW_MEMORY;memset(g,0,sizeof(*g));
     g->cells=cx_alloc(w,w->height*3u);if(g->cells)g->compiler_axis=cx_alloc(w,w->height*3u);if(g->compiler_axis)g->window=cx_alloc(w,CX_GEOMETRY_WINDOW);

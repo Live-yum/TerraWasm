@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeCircuitWorld, makeCircuitTwld, makeDriver } = require('./helpers/circuit-world');
+const { makeCircuitWorld, makeDriver } = require('./helpers/circuit-world');
 
 function fixture(rle) {
   const cells = new Map();
@@ -104,7 +104,7 @@ test('compressed and uncompressed wiring retain the same live frames after pulse
   } finally { d.dispose(); }
 });
 
-test('warm viewport source reuse adds no retained cache and stays coherent across layers, commands and TWLD save', async () => {
+test('warm viewport source reuse adds no retained cache and stays coherent across layers, commands and WLD save', async () => {
   const d = await makeDriver(), f = fixture(true);
   const request = { x: 62, y: 64, width: 14, height: 12, stride: 1 };
   try {
@@ -116,11 +116,11 @@ test('warm viewport source reuse adds no retained cache and stays coherent acros
       assert.equal(d.stats()[16], active, 'no extra viewport cache allocation');
     }
     assert.deepEqual(command(d, 1, request).rows, initial);
-    const sidecar = makeCircuitTwld();
-    d.open(makeCircuitWorld([{ x: 10, y: 10, wall: 300, wallPaint: 7 }], 40, 32, 326, { rle: true }), 48 * 1024 * 1024, sidecar);
+    d.open(makeCircuitWorld([{ x: 10, y: 10, wall: 300, wallPaint: 7 }], 40, 32, 326, { rle: true }));
     const cell = d.cell(10, 10), walls = command(d, 1, { x: 9, y: 9, width: 4, height: 4, flags: 2 }).rows;
-    d.command(6, { source: 4, auxSource: 5 });
-    assert.deepEqual(d.cell(10, 10), cell, 'WLD input cannot alias the last TWLD read');
+    assert.equal(d.command(6, { source: 4 }).event[11], 0);
+    assert.equal(d.sources.has(5), false);
+    assert.deepEqual(d.cell(10, 10), cell, 'WLD input remains coherent after saving');
     assert.deepEqual(command(d, 1, { x: 9, y: 9, width: 4, height: 4, flags: 2 }).rows, walls);
   } finally { d.dispose(); }
 });

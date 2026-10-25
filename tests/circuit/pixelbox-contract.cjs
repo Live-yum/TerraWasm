@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeCircuitWorld, makeCircuitTwld, makeDriver } = require('../helpers/circuit-world.js');
+const { makeCircuitWorld, makeDriver } = require('../helpers/circuit-world.js');
 
 // Wiring.PixelBoxPass at 8255d34616c780af12079425ac92a0a7aed87d71:
 // only horizontal + vertical signals in one TripWire toggle tile 445.
@@ -57,6 +57,7 @@ test('only the declared command set is accepted and no selectable PixelBox rule 
     assert.ok(start > 0 && end > start);
     const identity = JSON.parse(Buffer.from(d.M.HEAPU8.subarray(start, end)).toString('utf8'));
     assert.equal(Object.hasOwn(identity, 'circuitWorldPixelBoxModes'), false);
+    assert.equal(identity.circuitWorldStreamingTwld, false);
     d.open(fixture(true));
     const before = d.cell(10, 10);
     assert.equal(d.start(9, { mask: 1 }), -1);
@@ -80,23 +81,5 @@ test('cancelling a repeated crossed pulse restores a completed PixelBox transiti
     d.cancel(); assert.equal(pixel(d), 0);
     assert.deepEqual(d.stats().slice(18, 20), before.slice(18, 20), 'cancellation restores the clock');
     pulse(d, 3); assert.equal(pixel(d), 18);
-  } finally { d.dispose(); }
-});
-
-test('the existing TWLD profile and its saved color frames remain independent of vanilla rules', async () => {
-  const d = await makeDriver();
-  try {
-    const opened = d.open(makeCircuitWorld([]), 48 * 1024 * 1024, makeCircuitTwld());
-    assert.equal(opened.event[11], 1);
-    const before = d.cell(10, 10);
-    assert.equal(before.flags & 8, 8);
-    assert.equal(before.fx, 18); assert.equal(before.fy, 36);
-    assert.equal(d.start(9, { mask: 1 }), -1);
-    assert.deepEqual(d.cell(10, 10), before);
-    const saved = d.command(6, { source: 9, auxSource: 10 });
-    assert.equal(saved.event[11], d.sources.get(10).length);
-    const bytes = Buffer.from(d.sources.get(9)), sidecar = Buffer.from(d.sources.get(10));
-    assert.equal(d.open(bytes, 48 * 1024 * 1024, sidecar).event[11], 1);
-    assert.deepEqual(d.cell(10, 10), before);
   } finally { d.dispose(); }
 });

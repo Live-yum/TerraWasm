@@ -48,7 +48,7 @@ static CxBinding* bind_point(CxWorld* w,uint32_t y){
     w->binding_index[slot]=w->binding_count;
     b->gate=point_gate(w,y);for(uint32_t c=0;c<4;c++){b->nets[c]=w->seed_ids[y*4u+c];b->opposite[c]=w->opposite_ids[y*4u+c];}return b;
 }
-static int routing(CxWorld* w,const TxTile* t){if(!t->active)return -1;if(t->type==424u){int r=t->frame_x/18;return r>=0&&r<=2?r:-1;}if(t->type==0xfffeu||(t->type==445u&&!w->twld_state))return 0;return -1;}
+static int routing(CxWorld* w,const TxTile* t){if(!t->active)return -1;if(t->type==424u){int r=t->frame_x/18;return r>=0&&r<=2?r:-1;}if(t->type==0xfffeu||t->type==445u)return 0;return -1;}
 static uint32_t entering_net(CxWorld* w,const CxBinding* b,uint32_t colour,uint32_t direction){int r=routing(w,&b->tile);int other=r==0?direction>=2u:r==1?(direction==1u||direction==3u):r==2?(direction==1u||direction==2u):0;return other?b->opposite[colour]:b->nets[colour];}
 static uint32_t trigger_net(CxWorld* w,const CxBinding* b,uint32_t colour){
     if(!(cx_wire_mask(&b->tile)&(1u<<colour)))return 0;if(cx_inside_wiring(w,b->x,b->y))return b->nets[colour];
@@ -60,7 +60,7 @@ static void seek_checkpoint(CxWorld* w,uint32_t x){
     CxCheckpoint* c=w->checkpoint_index+x/CX_CHECK_COLUMNS;w->x=c->column;w->cursor=c->source_offset;w->map_cursor=c->map_offset;w->map_previous=c->map_previous;w->label_cursor=c->label_count;w->gate_cursor=c->gate_count;
     uint32_t at=c->offset;for(uint32_t colour=0;colour<4;colour++){uint32_t y=0;while(y<w->height){uint32_t run=cx_var_read(&w->checkpoints,&at),value=cx_var_read(&w->checkpoints,&at);for(uint32_t i=0;i<run;i++)w->front[(y+i)*4u+colour]=value;y+=run;}}
     /* Immutable source bytes survive a viewport seek. This is the existing
-     * one-MiB window, not another cache; input_source prevents aliasing a TWLD
+     * one-MiB window, not another cache; input_source prevents aliasing a different
      * read at the same numeric offset with WLD bytes. */
     w->y=0;w->col_stage=0;w->col_colour=w->col_row=0;w->emit_y=0;
 }
@@ -179,7 +179,7 @@ static int32_t circuit_world_command_impl(uint32_t handle,const TerraCircuitWorl
     if(cmd.kind==TCW_TRIGGER&&(cmd.flags&1u)){int s=cx_interaction_rect(w,&cmd);if(s<0)return TCW_INVALID;if(!s){w->command=cmd;return TCW_OK;}}
     if((cmd.kind==TCW_VIEWPORT||cmd.kind==TCW_TRIGGER)&&(!cmd.width||!cmd.height||cmd.x>=w->width||cmd.y>=w->height||cmd.width>w->width-cmd.x||cmd.height>w->height-cmd.y))return TCW_INVALID;
     if(cmd.kind==TCW_TRIGGER&&(cmd.mask>15u||!cmd.mask))return TCW_INVALID;
-    if(cmd.kind==TCW_SAVE){if(!cmd.source_id||cmd.source_id==w->world_source||cmd.source_id==w->scratch_source||cmd.source_id==w->twld_source)return TCW_INVALID;if(w->twld&&(!cmd.aux_source_id||cmd.aux_source_id==cmd.source_id||cmd.aux_source_id==w->world_source||cmd.aux_source_id==w->scratch_source||cmd.aux_source_id==w->twld_source))return TCW_INVALID;w->command=cmd;w->output_source=cmd.source_id;w->output_offset=0;w->output_length=0;w->save_cursor=0;w->twld_saved_size=0;w->phase=CX_SAVE_PREFIX;w->input_length=0;return TCW_OK;}
+    if(cmd.kind==TCW_SAVE){if(!cmd.source_id||cmd.source_id==w->world_source||cmd.source_id==w->scratch_source)return TCW_INVALID;if(cmd.aux_source_id)return TCW_UNSUPPORTED;w->command=cmd;w->output_source=cmd.source_id;w->output_offset=0;w->output_length=0;w->save_cursor=0;w->phase=CX_SAVE_PREFIX;w->input_length=0;return TCW_OK;}
     uint32_t count=0,allocated_count=0;
     if(cmd.kind==TCW_READ_LAMPS||cmd.kind==TCW_WRITE_LAMPS){if(cmd.data_count>65536u||(!command_data&&cmd.data_count))return TCW_INVALID;count=cmd.data_count;
 #ifdef __wasm__
@@ -222,7 +222,7 @@ int cx_save_step(CxWorld* w,uint32_t* work){
     }
     if(w->phase==CX_SAVE_TILES){
         while(*work&&w->x<w->width){int s=cx_scan_step(w,work);if(s<0||w->event.kind)return s;if(s!=2)return TCW_CONTINUE;
-            while(*work&&w->emit_y<w->height){uint32_t y=w->emit_y;TxTile t=w->column[y];cx_current_tile(w,w->x,y,point_gate(w,y),&t,w->ids+y*4u);if(t.type==0xfffeu&&!cx_mod_vanilla(w,w->x,y,&t))return TCW_FORMAT;t.same=0;
+            while(*work&&w->emit_y<w->height){uint32_t y=w->emit_y;TxTile t=w->column[y];cx_current_tile(w,w->x,y,point_gate(w,y),&t,w->ids+y*4u);t.same=0;
                 if(w->save_previous_valid&&w->save_repeat<32767u&&same_tile(&w->save_previous,&t))++w->save_repeat;
                 else{s=flush_tile(w);if(s)return s;w->save_previous=t;w->save_repeat=0;w->save_previous_valid=1;}
                 ++w->emit_y;--*work;
