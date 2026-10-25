@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { compiledWorkspaces, validateManifest } from './generate-manifest.mjs'
+import { compiledWorkspaces, validateCompiledExports, validateManifest } from './generate-manifest.mjs'
 
 // Acceptance runs against the downloaded release, not build-directory leftovers.
 // Check every byte before executing either wrapper. An expected source commit is
@@ -36,7 +36,7 @@ export async function verifyArtifactSet({ directory, expectedSourceCommit }) {
     delete require.cache[require.resolve(artifacts.wrapper.file)]
     const module = await require(artifacts.wrapper.file)({ wasmBinary: artifacts.wasm.bytes })
     const declared = manifest.targets[target]
-    for (const name of declared.exports) assert.equal(typeof module[name], 'function', `${target} export ${name} is missing`)
+    validateCompiledExports(module, declared.exports, target)
     const pointer = module._terra_build_info_json()
     assert.ok(Number.isSafeInteger(pointer) && pointer > 0 && pointer < module.HEAPU8.length,
       `${target} build identity pointer is invalid`)

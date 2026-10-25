@@ -33,6 +33,19 @@ function normalizeExports(exportsList, label = 'export set') {
   return normalizeStringList(exportsList, label)
 }
 
+export function validateCompiledExports(module, exports, label) {
+  for (const name of exports) {
+    if (typeof module[name] !== 'function') fail(`${label} wrapper is missing ${name}`)
+  }
+  // The manifest describes the complete public native ABI, not just a subset
+  // that happened to be required by one consumer. Runtime helpers use names
+  // without Emscripten's native-export underscore prefix.
+  const declared = new Set(exports)
+  const undeclared = Object.keys(module).filter(name => name.startsWith('_')
+    && typeof module[name] === 'function' && !declared.has(name))
+  if (undeclared.length) fail(`${label} wrapper has undeclared exports: ${undeclared.join(', ')}`)
+}
+
 function normalizeBuildFlags(buildFlags) {
   if (!buildFlags || typeof buildFlags !== 'object' || Array.isArray(buildFlags)) {
     fail('build flags must contain common/node/web arrays')
@@ -326,9 +339,7 @@ export async function generateManifest({ root = process.cwd(), output, sourceCom
     const target = identity.target
     if (!['node', 'web'].includes(target) || targets[target]) fail(`${file}: duplicate or invalid target ${target}`)
     const exports = normalizeExports(JSON.parse(fs.readFileSync(path.join(buildDir, `exported_functions_${target}.json`), 'utf8')))
-    for (const name of exports) {
-      if (typeof module[name] !== 'function') fail(`${target} wrapper is missing ${name}`)
-    }
+    validateCompiledExports(module, exports, target)
     validateStreamAbi(identity.stream, exports, target)
     if (identity.stream && module._terra_world_stream_abi_version() !== identity.stream.version) fail(`${target} compiled stream version mismatch`)
     identity.workspaceAbi = compiledWorkspaces(identity, module, exports, target)

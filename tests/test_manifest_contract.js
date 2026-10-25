@@ -77,7 +77,7 @@ test("schema validation does not prescribe the compiler's ABI version, feature s
   assert.doesNotThrow(() => validateManifest(candidate));
 });
 
-for (const scenario of ["stale exports", "mixed identity", "invalid wasm", "missing target", "duplicate target"]) {
+for (const scenario of ["stale exports", "omitted exports", "mixed identity", "invalid wasm", "missing target", "duplicate target"]) {
   test(`generation rejects ${scenario} before writing metadata`, async () => {
     const { generateManifest } = await contract;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "terra-manifest-"));
@@ -86,6 +86,10 @@ for (const scenario of ["stale exports", "mixed identity", "invalid wasm", "miss
       const nodeWasm = path.join(build, path.basename(manifest.targets.node.artifacts.find(a => a.role === "wasm").path));
       if (scenario === "stale exports") {
         fs.writeFileSync(path.join(build, "exported_functions_node.json"), JSON.stringify(["_missing_declared_export"]));
+      } else if (scenario === "omitted exports") {
+        const exports = manifest.targets.node.exports.filter(name => name !== "_tx_malloc");
+        assert.equal(exports.length, manifest.targets.node.exports.length - 1);
+        fs.writeFileSync(path.join(build, "exported_functions_node.json"), JSON.stringify(exports));
       } else if (scenario === "mixed identity" || scenario === "invalid wasm") {
         const bytes = fs.readFileSync(nodeWasm);
         if (scenario === "mixed identity") {
@@ -102,6 +106,7 @@ for (const scenario of ["stale exports", "mixed identity", "invalid wasm", "miss
       }
       await assert.rejects(generateManifest({ root, output: "build/result.json" }), {
         "stale exports": /missing_declared_export/,
+        "omitted exports": /undeclared exports: _tx_malloc/,
         "mixed identity": /Node\/Web build identity sourceCommit mismatch/,
         "invalid wasm": /wasm|magic|WebAssembly/i,
         "missing target": /both Node and Web/,

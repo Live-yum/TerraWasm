@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { verifyArtifactSet } from '../scripts/verify-artifact-set.mjs'
@@ -13,7 +14,7 @@ const expectedSourceCommit = process.env.TCW_EXPECTED_COMMIT
   || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 const original = JSON.parse(fs.readFileSync(path.join(build, 'terra.manifest.json'), 'utf8'))
 
-for (const scenario of ['stale source', 'changed Web wrapper', 'changed Node Wasm', 'missing Node wrapper', 'changed manifest capability']) {
+for (const scenario of ['stale source', 'changed Web wrapper', 'changed Node Wasm', 'missing Node wrapper', 'changed manifest capability', 'omitted Node export', 'omitted Web export']) {
   test(`downloaded artifact gate rejects ${scenario}`, async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'terra-artifact-gate-'))
     try {
@@ -32,6 +33,17 @@ for (const scenario of ['stale source', 'changed Web wrapper', 'changed Node Was
       }
       if (scenario === 'missing Node wrapper') fs.unlinkSync(path.join(directory, 'terrax_world_wasm.js'))
       if (scenario === 'changed manifest capability') delete manifest.abi.worldWorkspace
+      if (scenario.startsWith('omitted ')) {
+        const target = scenario === 'omitted Node export' ? 'node' : 'web'
+        const declared = manifest.targets[target]
+        assert.ok(declared.exports.includes('_tx_malloc'))
+        declared.exports = declared.exports.filter(name => name !== '_tx_malloc')
+        declared.exportHash = crypto.createHash('sha256').update(`${declared.exports.join('\n')}\n`).digest('hex')
+        if (target === 'web') {
+          manifest.abi.requiredExports = declared.exports
+          manifest.abi.exportHash = declared.exportHash
+        }
+      }
       fs.writeFileSync(path.join(directory, 'terra.manifest.json'), JSON.stringify(manifest))
       await assert.rejects(verifyArtifactSet({ directory, expectedSourceCommit: expected }), {
         'stale source': /source commit/,
@@ -39,6 +51,8 @@ for (const scenario of ['stale source', 'changed Web wrapper', 'changed Node Was
         'changed Node Wasm': /hash differs/,
         'missing Node wrapper': /ENOENT/,
         'changed manifest capability': /manifest|capabilities differ/,
+        'omitted Node export': /undeclared exports: _tx_malloc/,
+        'omitted Web export': /undeclared exports: _tx_malloc/,
       }[scenario])
     } finally { fs.rmSync(directory, { recursive: true, force: true }) }
   })

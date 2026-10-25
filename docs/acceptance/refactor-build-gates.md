@@ -4,6 +4,15 @@ Engineering quotas are in `config/package-budgets.json`: all/wld 512 KiB blockin
 
 The quality workflow consumes the **all Web** artifact from the source SHA. `tests/production_all_web_contract.cjs` checks the bytes against the producer manifest, compiled source identity and initial memory, then invokes world/circuit, player JSON and pixel workspace lifecycles. Existing circuit acceptance still runs against that artifact. This is core smoke coverage, not complete platform acceptance or full player/pixel semantics.
 
+Manifest generation and downloaded-artifact acceptance both compare the complete
+native function export set with the instantiated wrapper. Checking only that
+declared functions exist would accept a manifest or CMake export input that
+silently omits a real export, even after its export digest is recomputed. The
+shared check rejects missing functions and undeclared functions without adding
+exports or changing the public ABI. Negative contracts cover omitted Node and
+Web declarations as well as incomplete generation input; runtime helpers such
+as `UTF8ToString` are not native function exports.
+
 Private world input is opt-in:
 
 ```sh
