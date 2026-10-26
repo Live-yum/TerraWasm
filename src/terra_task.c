@@ -3,6 +3,7 @@
  */
 #include "terra_task.h"
 #include "terra_checkpoint.h"
+#include "terra_owner_guards.h"
 #include "terra_types.h"
 #include "terra_world.h"
 #include "terra_render_task.h"
@@ -73,6 +74,8 @@ extern uint32_t tx_get_world_open_count(void);
 extern void tx_set_error(const char* code, const char* message);
 extern int parse_format(TxWorld* world);
 extern TxWorld* tx_get_world(uint32_t handle);
+extern int tx_stream_has_task(void);
+extern terrax_world_status tx_world_adopt_open_task(TxWorld* candidate, uint32_t* out_handle);
 extern uint8_t* tx_last_ptr;
 extern uint32_t tx_last_len;
 extern uint32_t tx_last_width;
@@ -114,6 +117,7 @@ int tx_world_has_task(void) { return has_active_task(); }
 
 static TxOpenTask* claim_task_slot(void) {
     if (tx_checkpoint_active()) { tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction before opening another task"); return NULL; }
+    if (tx_stream_has_task()) { tx_set_error("TERRAX_STATE_ERROR", "close the stream task before opening another world"); return NULL; }
     /* TerraWasm exposes a one-world runtime contract. Serializing open tasks
      * also makes native allocation rewind ownership unambiguous on cancel. */
     if (has_active_task()) {
@@ -128,6 +132,7 @@ static TxOpenTask* claim_task_slot(void) {
             task->id = next_task_id(index);
             task->status = TERRAX_WORLD_STATUS_IN_PROGRESS;
             task->stage = TX_OPEN_STAGE_PREPARE;
+            tx_heap_reset_pin();
             return task;
         }
     }
@@ -141,6 +146,7 @@ static terrax_world_status invalid_task(void) {
 }
 
 static void clear_task(TxOpenTask* task) {
+    if (task->active) tx_heap_reset_unpin();
     *task = (TxOpenTask){0};
 }
 
@@ -225,25 +231,9 @@ static void copy_task_quantum(TxOpenTask* task) {
 
 static terrax_world_status activate_task_world(TxOpenTask* task) {
     uint32_t handle = 0u;
-    terrax_world_status status = terra_world_create(&handle);
+    terrax_world_status status = tx_world_adopt_open_task(task->staging_world, &handle);
     if (status != TERRAX_WORLD_STATUS_OK) {
         return fail_task(task, status);
-    }
-
-    TxWorld* target = tx_get_world(handle);
-    if (!target) {
-        (void)terra_world_close(handle);
-        tx_set_error("TERRAX_STATE_ERROR", "failed to claim activated world slot");
-        return fail_task(task, TERRAX_WORLD_STATUS_STATE_ERROR);
-    }
-
-    {
-        uint32_t heap_mark = tx_mark();
-        *target = *task->staging_world;
-        target->active = 1u;
-        target->handle = handle;
-        target->allocation_mark = task->allocation_mark;
-        target->heap_mark = heap_mark;
     }
 
     tx_internal_free(task->staging_world);

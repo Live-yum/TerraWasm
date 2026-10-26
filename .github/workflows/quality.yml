@@ -105,6 +105,9 @@ jobs:
       - name: Build and test Node and Web artifacts
         shell: pwsh
         run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Build and verify H5 profile from the same source
+        shell: bash
+        run: scripts/build-h5-profile.sh "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/terrawasm-h5" "$RUNNER_TEMP/emsdk"
       - name: Upload traceable release artifacts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -116,6 +119,18 @@ jobs:
             build/terrax_world_wasm.wasm
             build/terrax_world_wasm_web.js
             build/terrax_world_wasm_web.wasm
+          if-no-files-found: error
+
+      - name: Upload traceable H5 artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: terrawasm-h5-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/terrawasm-h5/build/terra.manifest.json
+            ${{ runner.temp }}/terrawasm-h5/build/terrax_world_wasm.js
+            ${{ runner.temp }}/terrawasm-h5/build/terrax_world_wasm.wasm
+            ${{ runner.temp }}/terrawasm-h5/build/terrax_world_wasm_web.js
+            ${{ runner.temp }}/terrawasm-h5/build/terrax_world_wasm_web.wasm
           if-no-files-found: error
 
   wasm-feature-matrix:

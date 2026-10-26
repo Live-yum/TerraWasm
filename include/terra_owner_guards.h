@@ -6,4 +6,8 @@ int tx_circuit_world_owns_world(uint32_t handle);
 int tx_circuit_world_has_sessions(void);
 int tx_circuit_world_require_unleased(uint32_t handle);
 int tx_world_can_activate_stream(void);
+/* Pending owners can exist before a public world handle. Keep the allocator
+ * independent of feature modules while protecting their roots from reset. */
+void tx_heap_reset_pin(void);
+void tx_heap_reset_unpin(void);
 #endif

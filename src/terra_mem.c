@@ -71,6 +71,8 @@ union TxAllocHeader {
 #ifdef TERRAX_TESTING
 static uint64_t tx_test_allocation_attempts;
 uint64_t txw_test_allocation_attempts(void){return tx_test_allocation_attempts;}
+static uint64_t tx_test_checkpoint_copy_bytes;
+uint64_t txw_test_checkpoint_copy_bytes(void){return tx_test_checkpoint_copy_bytes;}
 static uint32_t tx_test_allocation_limit=UINT32_MAX;
 static uint32_t tx_test_fail_after=UINT32_MAX;
 void txw_test_fail_after(uint32_t n){tx_test_fail_after=n;}
@@ -91,6 +93,7 @@ typedef struct TxCheckpoint {
 } TxCheckpoint;
 static TxCheckpoint* tx_checkpoint = NULL;
 static uint32_t tx_world_open_count = 0;
+static uint32_t tx_heap_reset_pins = 0;
 static TxAllocHeader* tx_bridge_head = NULL;
 static TxAllocHeader* tx_bridge_tail = NULL;
 static TxAllocHeader* tx_native_head = NULL;
@@ -441,8 +444,11 @@ void tx_rewind(uint32_t mark) {
     if (!tx_native_head && mark == 0u) tx_native_sequence = 0u;
 }
 
+void tx_heap_reset_pin(void) { ++tx_heap_reset_pins; }
+void tx_heap_reset_unpin(void) { if (tx_heap_reset_pins) --tx_heap_reset_pins; }
+
 void tx_reset_heap(void) {
-    if (tx_world_open_count != 0u) return;
+    if (tx_world_open_count != 0u || tx_heap_reset_pins || tx_checkpoint_active()) return;
     tx_rewind(0);
     tx_last_ptr = 0;
     tx_last_len = 0;
@@ -462,20 +468,25 @@ static int tx_checkpoint_selected(TxAllocHeader* root, void* const* roots, uint3
     for (uint32_t i = 0; i < count; i++) if (roots[i] == payload) return 1;
     return 0;
 }
-uint32_t tx_checkpoint_bytes(void* const* roots, uint32_t count) {
+uint32_t tx_checkpoint_bytes_readonly(void* const* roots, uint32_t count, const void* readonly_root) {
     if (tx_checkpoint || (count && !roots)) return 0;
     uint64_t bytes = sizeof(TxCheckpoint);
     for (uint32_t domain_index = 0; domain_index < 2; domain_index++) {
         TxAllocHeader* root = domain_index ? tx_persistent_head : tx_native_head;
         for (; root; root = root->root.next) if (tx_checkpoint_selected(root, roots, count)) {
-            bytes += sizeof(TxCheckpointEntry) + root->root.size;
+            const void* payload = (uint8_t*)root + sizeof(TxAllocHeader);
+            bytes += sizeof(TxCheckpointEntry);
+            if (payload != readonly_root) bytes += root->root.size;
             if (bytes > UINT32_MAX) return 0;
         }
     }
     return (uint32_t)bytes;
 }
-int tx_checkpoint_begin(void* const* roots, uint32_t count, uint32_t max_bytes) {
-    uint32_t required = tx_checkpoint_bytes(roots, count);
+uint32_t tx_checkpoint_bytes(void* const* roots, uint32_t count) {
+    return tx_checkpoint_bytes_readonly(roots, count, NULL);
+}
+int tx_checkpoint_begin_readonly(void* const* roots, uint32_t count, uint32_t max_bytes, const void* readonly_root) {
+    uint32_t required = tx_checkpoint_bytes_readonly(roots, count, readonly_root);
     if (!required || required > max_bytes) return 0;
     TxCheckpoint* checkpoint = (TxCheckpoint*)tx_new_root(required, TX_DOMAIN_PERSISTENT);
     if (!checkpoint) return 0;
@@ -488,12 +499,22 @@ int tx_checkpoint_begin(void* const* roots, uint32_t count, uint32_t max_bytes) 
     for (uint32_t d = 0; d < 2; d++) for (TxAllocHeader* root = d ? tx_persistent_head : tx_native_head; root; root = root->root.next) {
         if (!tx_checkpoint_selected(root, roots, count)) continue;
         TxCheckpointEntry* entry = &checkpoint->entries[i++];
-        entry->root = root; entry->saved = bytes; entry->freed = 0;
-        memcpy(bytes, (uint8_t*)root + sizeof(TxAllocHeader), root->root.size);
-        bytes += root->root.size; root->root.reserved = (uintptr_t)entry;
+        void* payload = (uint8_t*)root + sizeof(TxAllocHeader);
+        entry->root = root; entry->saved = payload == readonly_root ? NULL : bytes; entry->freed = 0;
+        if (entry->saved) {
+            memcpy(bytes, payload, root->root.size);
+#ifdef TERRAX_TESTING
+            tx_test_checkpoint_copy_bytes += root->root.size;
+#endif
+            bytes += root->root.size;
+        }
+        root->root.reserved = (uintptr_t)entry;
     }
     tx_checkpoint = checkpoint;
     return 1;
+}
+int tx_checkpoint_begin(void* const* roots, uint32_t count, uint32_t max_bytes) {
+    return tx_checkpoint_begin_readonly(roots, count, max_bytes, NULL);
 }
 int tx_checkpoint_finish(int rollback) {
     TxCheckpoint* checkpoint = tx_checkpoint;
@@ -514,8 +535,9 @@ int tx_checkpoint_finish(int rollback) {
         TxCheckpointEntry* entry = &checkpoint->entries[i];
         TxAllocHeader* root = entry->root;
         root->root.reserved = 0;
-        if (rollback) memcpy((uint8_t*)root + sizeof(TxAllocHeader), entry->saved, root->root.size);
-        else if (entry->freed) tx_release_root(root, root->root.domain);
+        if (rollback) {
+            if (entry->saved) memcpy((uint8_t*)root + sizeof(TxAllocHeader), entry->saved, root->root.size);
+        } else if (entry->freed) tx_release_root(root, root->root.domain);
     }
     tx_release_root(tx_root_from_owned_payload(checkpoint, TX_DOMAIN_PERSISTENT), TX_DOMAIN_PERSISTENT);
     return 1;

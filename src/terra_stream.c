@@ -37,6 +37,7 @@ extern int same_tile(const TxTile*,const TxTile*);
 extern void buf_init(TxBuf*,uint32_t);
 extern int apply_pixel_art_at(TxWorld*,uint32_t,uint32_t,TxTile*);
 extern int tx_stream_activate_world(TxWorld*,uint32_t*);
+extern int tx_world_has_task(void);
 
 #ifdef TERRAX_TESTING
 static void write_rgb_cache_run(TxWorld* world, uint8_t* rgb, uint32_t x,
@@ -156,6 +157,7 @@ uint32_t txw_test_stream_begin_for_runtime(void) {
     task->id = generation++;
     task->stage = OPEN_FORMAT;
     current = task;
+    tx_heap_reset_pin();
     return task->id;
 }
 #endif
@@ -225,14 +227,15 @@ static char* copy_bridge_string(const char* p,uint32_t maximum){
 }
 static StreamTask* new_task(uint32_t* out){
     tx_clear_error();
-    if(tx_checkpoint_active()){fail("TERRAX_STATE_ERROR","finish workspace transaction before streaming");return NULL;}
     if(out&&valid_range(out,4))*out=0;
+    if(tx_world_has_task()){fail("TERRAX_STATE_ERROR","close the world-open task before streaming");return NULL;}
+    if(tx_checkpoint_active()){fail("TERRAX_STATE_ERROR","finish workspace transaction before streaming");return NULL;}
     if(!valid_range(out,4)||current){fail("TERRAX_STATE_ERROR","invalid stream output pointer or another task is active");return NULL;}
     StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t){fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
     memset(t,0,sizeof(*t));t->stats.abi_version=2;t->stats.candidate_count=1;t->id=generation++;if(!t->id)t->id=generation++;
     t->candidate=(TxWorld*)tx_persistent_alloc(sizeof(TxWorld));t->input=tx_persistent_alloc(WINDOW);
     if(!t->candidate||!t->input){if(t->candidate)tx_internal_free(t->candidate);if(t->input)tx_internal_free(t->input);tx_internal_free(t);fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
-    memset(t->candidate,0,sizeof(TxWorld));clear_event(t);current=t;*out=t->id;return t;
+    memset(t->candidate,0,sizeof(TxWorld));clear_event(t);current=t;tx_heap_reset_pin();*out=t->id;return t;
 }
 static int source_event(StreamTask* t,uint32_t offset,uint32_t limit){
     if(offset>=limit)return fail("TERRAX_BAD_TILE_STREAM","source range exhausted");
@@ -1026,5 +1029,5 @@ int32_t terra_world_stream_close(uint32_t id){
     if(t->input)tx_internal_free(t->input);if(t->output.data)tx_internal_free(t->output.data);
     if(t->stripe)tx_internal_free(t->stripe);if(t->stripe_nodes)tx_internal_free(t->stripe_nodes);
     if(t->stamp){if(t->stamp->objects)tx_internal_free(t->stamp->objects);if(t->stamp->items)tx_internal_free(t->stamp->items);tx_internal_free(t->stamp);}
-    tx_internal_free(t);current=NULL;return 0;
+    tx_internal_free(t);current=NULL;tx_heap_reset_unpin();return 0;
 }

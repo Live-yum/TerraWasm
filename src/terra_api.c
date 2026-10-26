@@ -118,11 +118,33 @@ TxWorld* tx_get_world(uint32_t handle) {
 }
 
 static TxWorld* tx_claim_world_slot(void) {
-    if (tx_get_world_open_count() != 0u) {
-        tx_set_error("TERRAX_STATE_ERROR", "only one world may be open at a time");
+    if (tx_get_world_open_count() != 0u || tx_world_has_task() ||
+        tx_stream_has_task() || tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "close the active world and its tasks before opening another world");
         return NULL;
     }
     return &g_worlds[0];
+}
+
+/* Only the incremental opener may publish its staging arena. Public create/open
+ * cannot bypass the task lease: cancellation rewinds that arena's native roots.
+ * This transfer allocates nothing and preserves the task's original mark. */
+terrax_world_status tx_world_adopt_open_task(TxWorld* candidate, uint32_t* out_handle) {
+    if (out_handle) *out_handle = 0u;
+    if (!candidate || !out_handle || !tx_world_has_task() ||
+        tx_get_world_open_count() || tx_stream_has_task() || tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "incremental world owner cannot be activated");
+        return TERRAX_WORLD_STATUS_STATE_ERROR;
+    }
+    TxWorld* target = &g_worlds[0];
+    *target = *candidate;
+    target->handle = tx_next_handle(0u);
+    target->active = 1u;
+    target->heap_mark = tx_mark();
+    tx_set_world_open_count(1u);
+    *out_handle = target->handle;
+    tx_clear_error();
+    return TERRAX_WORLD_STATUS_OK;
 }
 
 static terrax_world_status tx_invalid_handle(void) {
@@ -501,8 +523,8 @@ terrax_world_status terra_world_close(
 /* Candidate roots belong to the persistent domain, so closing the old arena
  * cannot invalidate them. This final ownership swap does not allocate. */
 int tx_world_can_activate_stream(void) {
-    if (g_workspace_token || tx_checkpoint_active() || tx_circuit_world_has_sessions()) {
-        tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction and close circuit sessions before replacing the world");
+    if (g_workspace_token || tx_checkpoint_active() || tx_world_has_task() || tx_circuit_world_has_sessions()) {
+        tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction and close world tasks and circuit sessions before replacing the world");
         return 0;
     }
     return 1;
@@ -523,7 +545,7 @@ int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
 
 
 uint32_t terra_world_workspace_abi_version(void) { return 1u; }
-terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint32_t* out_bytes) {
+static terrax_world_status tx_workspace_checkpoint_size(uint32_t handle, uint32_t* out_bytes, int readonly_file) {
     if (out_bytes) *out_bytes = 0;
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
@@ -533,14 +555,17 @@ terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint3
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
     void* roots[] = { world->stream_owned ? world->file : NULL, world->stream_owned ? world->stream_columns : NULL };
-    *out_bytes = tx_checkpoint_bytes(roots, 2);
+    *out_bytes = tx_checkpoint_bytes_readonly(roots, 2, readonly_file && !world->stream_source_id ? world->file : NULL);
     return *out_bytes ? TERRAX_WORLD_STATUS_OK : TERRAX_WORLD_STATUS_INTERNAL_ERROR;
 }
-terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_bytes, uint32_t* out_token) {
+terrax_world_status terra_world_workspace_checkpoint_size(uint32_t handle, uint32_t* out_bytes) {
+    return tx_workspace_checkpoint_size(handle, out_bytes, 0);
+}
+static terrax_world_status tx_workspace_begin(uint32_t handle, uint32_t max_bytes, uint32_t* out_token, int readonly_file) {
     if (out_token) *out_token = 0;
     if (!out_token) return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
     uint32_t required = 0;
-    terrax_world_status status = terra_world_workspace_checkpoint_size(handle, &required);
+    terrax_world_status status = tx_workspace_checkpoint_size(handle, &required, readonly_file);
     if (status != TERRAX_WORLD_STATUS_OK) return status;
     TxWorld* world = tx_get_world(handle);
     if (world->workspace_revision == UINT64_MAX) {
@@ -556,7 +581,7 @@ terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_by
     tx_output_clear(world);
     tx_reclaim_transients();
     void* roots[] = { world->stream_owned ? world->file : NULL, world->stream_owned ? world->stream_columns : NULL };
-    if (!tx_checkpoint_begin(roots, 2, max_bytes)) {
+    if (!tx_checkpoint_begin_readonly(roots, 2, max_bytes, readonly_file && !world->stream_source_id ? world->file : NULL)) {
         tx_set_error("TERRAX_WASM_OOM", "cannot allocate workspace rollback checkpoint");
         return TERRAX_WORLD_STATUS_INTERNAL_ERROR;
     }
@@ -565,6 +590,9 @@ terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_by
     if (!g_workspace_token) g_workspace_token = g_next_workspace_token++;
     *out_token = g_workspace_token;
     return TERRAX_WORLD_STATUS_OK;
+}
+terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_bytes, uint32_t* out_token) {
+    return tx_workspace_begin(handle, max_bytes, out_token, 0);
 }
 static terrax_world_status tx_finish_workspace(uint32_t handle, uint32_t token, int rollback) {
     TxWorld* world = tx_get_world(handle);
@@ -1401,9 +1429,13 @@ static terrax_world_status tx_op_execute_json_inner(
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
-static int tx_operation_mutates_world(const char* name) {
+enum { TX_MUTATION_NONE, TX_MUTATION_SECTION_OVERRIDES, TX_MUTATION_SOURCE_WRITES };
+static int tx_operation_mutation_policy(const char* name) {
+    /* A new mutator must declare whether it writes the original file. Only
+     * section-override operations are allowed to omit that snapshot's bytes. */
     return name && (tx_streq_c(name,"header_patch") || tx_streq_c(name,"replace_chests") ||
-        tx_streq_c(name,"replace_bestiary") || tx_streq_c(name,"batch_update_tiles"));
+        tx_streq_c(name,"replace_bestiary") || tx_streq_c(name,"batch_update_tiles"))
+        ? TX_MUTATION_SECTION_OVERRIDES : TX_MUTATION_NONE;
 }
 /* A standalone mutation commits only after its probe response and exact
  * request key are deliverable. A caller-owned checkpoint remains caller-owned:
@@ -1412,7 +1444,7 @@ terrax_world_status terra_op_execute_json(
     uint32_t handle, const char* operation_name, const char* request_json,
     char* response_buffer, uint64_t response_buffer_size, uint64_t* required_size) {
     TxWorld* world = tx_get_world(handle);
-    int mutation = tx_operation_mutates_world(operation_name);
+    int mutation = tx_operation_mutation_policy(operation_name);
     uint32_t token = 0, bytes = 0;
     if (world && request_json && mutation && !g_workspace_token &&
         !tx_response_key_matches(world, operation_name, request_json)) {
@@ -1421,9 +1453,12 @@ terrax_world_status terra_op_execute_json(
          * Detach it from the snapshot; on failure discard it before rollback. */
         TxPreparedOutput* prepared = world->prepared_output;
         world->prepared_output = NULL;
-        terrax_world_status status = terra_world_workspace_checkpoint_size(handle, &bytes);
+        /* These four operations publish section overrides. The original WLD
+         * bytes stay read-only; pin their root without duplicating the file. */
+        int readonly_file = mutation == TX_MUTATION_SECTION_OVERRIDES;
+        terrax_world_status status = tx_workspace_checkpoint_size(handle, &bytes, readonly_file);
         if (status == TERRAX_WORLD_STATUS_OK)
-            status = terra_world_workspace_begin(handle, bytes, &token);
+            status = tx_workspace_begin(handle, bytes, &token, readonly_file);
         world->prepared_output = prepared;
         if (status != TERRAX_WORLD_STATUS_OK) {
             if (required_size) *required_size = 0;
@@ -1495,7 +1530,8 @@ terrax_world_status terra_op_execute_json_outcome(uint32_t handle,const char* op
         tx_set_error("TERRAX_STATE_ERROR","workspace owner invariant is invalid");
         return tx_outcome_write(out,TERRAX_WORLD_STATUS_STATE_ERROR,TERRA_EFFECT_UNKNOWN,TERRA_TX_INVALID,before,before);
     }
-    int mutation=tx_operation_mutates_world(operation)&&request&&!tx_response_key_matches(world,operation,request);
+    int policy=tx_operation_mutation_policy(operation);
+    int mutation=policy&&request&&!tx_response_key_matches(world,operation,request);
     if (!mutation) {
         terrax_world_status status=terra_op_execute_json(handle,operation,request,response,capacity,required);
         return tx_outcome_write(out,status,TERRA_EFFECT_NONE,tx_outcome_state(world),before,world->workspace_revision);
@@ -1507,8 +1543,9 @@ terrax_world_status terra_op_execute_json_outcome(uint32_t handle,const char* op
     }
     if (owned) {
         TxPreparedOutput* prepared=world->prepared_output;world->prepared_output=NULL;
-        uint32_t bytes=0;terrax_world_status status=terra_world_workspace_checkpoint_size(handle,&bytes);
-        if (status==TERRAX_WORLD_STATUS_OK) status=terra_world_workspace_begin(handle,bytes,&token);
+        int readonly_file=policy==TX_MUTATION_SECTION_OVERRIDES;
+        uint32_t bytes=0;terrax_world_status status=tx_workspace_checkpoint_size(handle,&bytes,readonly_file);
+        if (status==TERRAX_WORLD_STATUS_OK) status=tx_workspace_begin(handle,bytes,&token,readonly_file);
         world->prepared_output=prepared;
         if (status!=TERRAX_WORLD_STATUS_OK)
             return tx_outcome_write(out,status,TERRA_EFFECT_NONE,tx_outcome_state(world),before,world->workspace_revision);

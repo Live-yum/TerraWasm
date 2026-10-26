@@ -164,3 +164,44 @@ test("canceling a task before work preserves the native heap baseline", async ()
   M._tx_free(inputPtr);
   assert.equal(M._tx_native_heap_used() >>> 0, baseline);
 });
+
+test("mixed synchronous, incremental, and streaming opens share one owner", async () => {
+  const M = await TerraWorldWasm();
+  const input = fs.readFileSync(TEST_WLD);
+  const inputPtr = alloc(M, input, "world input");
+  const output = alloc(M, 4, "handle output");
+  const baseline = M._tx_native_heap_used() >>> 0;
+  for (const work of [0, 1, 3]) {
+    const task = M._terra_world_open_begin(inputPtr, input.length);
+    assert.notEqual(task, 0);
+    assert.equal(M._terra_world_open_step(task, work), 10);
+    const owned = M._tx_native_heap_used() >>> 0;
+    M.HEAPU32[output >>> 2] = 123;
+    assert.equal(M._terra_world_open_from_buffer(inputPtr, input.length, output), 8);
+    assert.equal(M.HEAPU32[output >>> 2], 0);
+    assert.equal(M._terra_world_create(output), 8);
+    assert.equal(M._terra_world_open_begin(inputPtr, input.length), 0);
+    assert.equal(M._terra_world_stream_open_begin(1, input.length, output), -1);
+    assert.equal(M.HEAPU32[output >>> 2], 0);
+    M._tx_reset_heap();
+    assert.equal(M._tx_native_heap_used() >>> 0, owned, "reset must preserve a task's arena");
+    assert.equal(M._terra_world_open_cancel(task), 11);
+    assert.equal(M._terra_world_task_close(task), 0);
+    assert.equal(M._tx_native_heap_used() >>> 0, baseline);
+    assert.equal(M._terra_world_open_from_buffer(inputPtr, input.length, output), 0);
+    assert.equal(M._terra_world_close(M.HEAPU32[output >>> 2]), 0);
+  }
+  assert.equal(M._terra_world_stream_open_begin(1, input.length, output), 0);
+  const stream = M.HEAPU32[output >>> 2];
+  const owned = M._tx_native_heap_used() >>> 0;
+  assert.equal(M._terra_world_open_begin(inputPtr, input.length), 0);
+  assert.equal(M._terra_world_open_from_buffer(inputPtr, input.length, output), 8);
+  assert.equal(M._terra_world_create(output), 8);
+  M._tx_reset_heap();
+  assert.equal(M._tx_native_heap_used() >>> 0, owned);
+  assert.equal(M._terra_world_stream_cancel(stream), 0);
+  assert.equal(M._terra_world_stream_close(stream), 0);
+  assert.equal(M._tx_native_heap_used() >>> 0, baseline);
+  M._tx_free(output);
+  M._tx_free(inputPtr);
+});
