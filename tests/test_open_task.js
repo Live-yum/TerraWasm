@@ -205,3 +205,48 @@ test("mixed synchronous, incremental, and streaming opens share one owner", asyn
   M._tx_free(output);
   M._tx_free(inputPtr);
 });
+
+test("finished task handles remain queryable across commit and cannot cancel or close the replacement world", async () => {
+  const M = await TerraWorldWasm();
+  const input = fs.readFileSync(TEST_WLD);
+  const inputPtr = alloc(M, input, "world input");
+  const handles = alloc(M, 12, "commit handles");
+  for (const cancel of [false, true]) {
+    const task = M._terra_world_open_begin(inputPtr, input.length);
+    assert.ok(task);
+    assert.equal(runToCompletion(M, task).status, 0);
+    const unclaimed = M._terra_world_task_get_world_handle(task);
+    assert.ok(unclaimed);
+    assert.equal(M._terra_world_commit_to_buffer(unclaimed, 0, 0, handles + 4, handles + 8), 0);
+    const required = M.HEAPU32[(handles + 4) >>> 2];
+    const output = alloc(M, required, "committed output");
+    // A ready task still owns its world until finish transfers the handle.
+    assert.equal(M._terra_world_commit_to_buffer(unclaimed, output, required, handles + 4, handles + 8), 8);
+    assert.equal(M.HEAPU32[(handles + 8) >>> 2], 0);
+    assert.equal(M._terra_world_task_get_world_handle(task), unclaimed);
+    assert.equal(M._terra_world_open_finish(task, handles), 0);
+    const original = M.HEAPU32[handles >>> 2];
+    assert.equal(original, unclaimed);
+    assert.equal(M._terra_world_task_get_world_handle(task), 0);
+    assert.equal(M._terra_world_commit_to_buffer(original, output, required, handles + 4, handles + 8), 0);
+    const replacement = M.HEAPU32[(handles + 8) >>> 2];
+    assert.ok(replacement && replacement !== original);
+    assert.deepEqual(Buffer.from(M.HEAPU8.subarray(output, output + required)), input);
+    assert.equal(M._terra_world_task_get_progress(task), 100);
+    assert.equal(M._terra_world_task_get_status(task), 0);
+    assert.equal(M._terra_world_open_step(task, 1), 0);
+    if (cancel) {
+      assert.equal(M._terra_world_open_cancel(task), 11);
+      assert.equal(M._terra_world_task_get_status(task), 11);
+    }
+    assert.equal(M._terra_world_task_close(task), 0);
+    assert.equal(M._terra_world_save_to_buffer(replacement, output, required, handles + 4), 0);
+    assert.deepEqual(Buffer.from(M.HEAPU8.subarray(output, output + required)), input);
+    assert.equal(M._terra_world_close(replacement), 0);
+    M._tx_free(output);
+    assert.equal(M._tx_native_heap_used(), 0);
+  }
+  M._tx_free(handles);
+  M._tx_free(inputPtr);
+  assert.equal(M._tx_bridge_heap_used(), 0);
+});

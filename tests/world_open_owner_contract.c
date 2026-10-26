@@ -3,6 +3,7 @@
 #include "terra_stream.h"
 #include "terra_native_span.h"
 #include "terra_types.h"
+#include "terra_owner_guards.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,9 @@
 extern uint32_t tx_native_heap_used(void);
 extern uint32_t tx_get_world_open_count(void);
 extern void tx_reset_heap(void);
+extern uint8_t* tx_alloc(uint32_t size);
+extern uint8_t* tx_last_ptr;
+extern uint32_t tx_last_len, tx_last_width, tx_last_height;
 
 static void assert_sync_busy(const uint8_t* bytes, uint32_t length) {
     uint32_t handle = 123;
@@ -31,6 +35,7 @@ static void staging_is_exclusive(const uint8_t* bytes, uint32_t length) {
         uint32_t before = tx_native_heap_used();
         uint32_t task = terra_world_open_begin(bytes, length);
         assert(task);
+        assert(tx_open_task_has_world_owner());
         if (allocated) assert(terra_world_open_step(task, 1) == TERRAX_WORLD_STATUS_IN_PROGRESS);
         uint32_t owned = tx_native_heap_used();
         assert(!allocated || owned > before);
@@ -74,6 +79,60 @@ static void failure_releases_owner(void) {
     assert(terra_world_close(handle) == TERRAX_WORLD_STATUS_OK);
 }
 
+static void finished_task_survives_commit(const uint8_t* bytes, uint32_t length) {
+    for (unsigned cancel = 0; cancel != 2; ++cancel) {
+        uint32_t task = terra_world_open_begin(bytes, length);
+        assert(task);
+        terrax_world_status status = TERRAX_WORLD_STATUS_IN_PROGRESS;
+        for (unsigned step = 0; step < 100000 && status == TERRAX_WORLD_STATUS_IN_PROGRESS; ++step)
+            status = terra_world_open_step(task, 1);
+        assert(status == TERRAX_WORLD_STATUS_OK);
+        assert(tx_open_task_has_world_owner()); /* ready but not transferred */
+        assert(!tx_world_can_activate_stream());
+        uint32_t handle = 0, replacement = 0, required = 0;
+        assert(terra_world_open_finish(task, &handle) == TERRAX_WORLD_STATUS_OK && handle);
+        assert(!tx_open_task_has_world_owner());
+        assert(terra_world_task_get_status(task) == TERRAX_WORLD_STATUS_OK);
+        assert(terra_world_task_get_progress(task) == 100);
+        assert(terra_world_task_get_world_handle(task) == 0);
+        assert(terra_world_commit_to_buffer(handle, NULL, 0, &required, &replacement) == TERRAX_WORLD_STATUS_OK);
+        assert(required == length && replacement == 0);
+        uint8_t* output = malloc(required);
+        assert(output);
+        assert(terra_world_commit_to_buffer(handle, output, required, &required, &replacement) == TERRAX_WORLD_STATUS_OK);
+        assert(replacement && replacement != handle && !memcmp(output, bytes, length));
+        assert(terra_world_task_get_status(task) == TERRAX_WORLD_STATUS_OK);
+        assert(terra_world_open_step(task, 1) == TERRAX_WORLD_STATUS_OK);
+        if (cancel) {
+            /* This terminal handle cannot clear output owned by another call. */
+            tx_last_ptr = output; tx_last_len = length; tx_last_width = 7; tx_last_height = 9;
+            assert(terra_world_open_cancel(task) == TERRAX_WORLD_STATUS_CANCELLED);
+            assert(tx_last_ptr == output && tx_last_len == length && tx_last_width == 7 && tx_last_height == 9);
+            assert(terra_world_task_get_status(task) == TERRAX_WORLD_STATUS_CANCELLED);
+        } else {
+            assert(terra_world_task_close(task) == TERRAX_WORLD_STATUS_OK);
+        }
+        assert(tx_get_world_open_count() == 1);
+        assert(terra_world_save_to_buffer(replacement, output, length, &required) == TERRAX_WORLD_STATUS_OK);
+        assert(required == length && !memcmp(output, bytes, length));
+        assert(terra_world_close(replacement) == TERRAX_WORLD_STATUS_OK);
+        assert(tx_get_world_open_count() == 0 && tx_native_heap_used() == 0);
+        if (cancel) {
+            /* A terminal task is still reset-pinned until task_close, even
+             * after its transferred/replacement world has been closed. */
+            uint8_t* scratch = tx_alloc(64);
+            assert(scratch); scratch[0] = 0x5a;
+            uint32_t owned = tx_native_heap_used();
+            tx_reset_heap();
+            assert(tx_native_heap_used() == owned && scratch[0] == 0x5a);
+            assert(terra_world_task_close(task) == TERRAX_WORLD_STATUS_OK);
+            tx_reset_heap();
+            assert(tx_native_heap_used() == 0);
+        }
+        free(output);
+    }
+}
+
 static void finish_then_reopen(const char* path) {
     FILE* file = fopen(path, "rb");
     assert(file && fseek(file, 0, SEEK_END) == 0);
@@ -83,6 +142,7 @@ static void finish_then_reopen(const char* path) {
     assert(bytes && fread(bytes, 1, (size_t)length, file) == (size_t)length);
     fclose(file);
     staging_is_exclusive(bytes, (uint32_t)length);
+    finished_task_survives_commit(bytes, (uint32_t)length);
     uint32_t task = terra_world_open_begin(bytes, (uint32_t)length);
     assert(task);
     terrax_world_status status = TERRAX_WORLD_STATUS_IN_PROGRESS;

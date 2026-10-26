@@ -523,7 +523,7 @@ terrax_world_status terra_world_close(
 /* Candidate roots belong to the persistent domain, so closing the old arena
  * cannot invalidate them. This final ownership swap does not allocate. */
 int tx_world_can_activate_stream(void) {
-    if (g_workspace_token || tx_checkpoint_active() || tx_world_has_task() || tx_circuit_world_has_sessions()) {
+    if (g_workspace_token || tx_checkpoint_active() || tx_open_task_has_world_owner() || tx_circuit_world_has_sessions()) {
         tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction and close world tasks and circuit sessions before replacing the world");
         return 0;
     }

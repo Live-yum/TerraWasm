@@ -115,6 +115,15 @@ int tx_open_task_pending(void) {
 
 int tx_world_has_task(void) { return has_active_task(); }
 
+int tx_open_task_has_world_owner(void) {
+    for (uint32_t index = 0u; index < TX_MAX_OPEN_TASKS; index++) {
+        const TxOpenTask* task = &g_tasks[index];
+        if (task->active && (task->status == TERRAX_WORLD_STATUS_IN_PROGRESS ||
+            task->allocation_started || task->staging_world || task->world_handle)) return 1;
+    }
+    return 0;
+}
+
 static TxOpenTask* claim_task_slot(void) {
     if (tx_checkpoint_active()) { tx_set_error("TERRAX_STATE_ERROR", "finish workspace transaction before opening another task"); return NULL; }
     if (tx_stream_has_task()) { tx_set_error("TERRAX_STATE_ERROR", "close the stream task before opening another world"); return NULL; }
@@ -389,7 +398,9 @@ terrax_world_status terra_world_open_cancel(uint32_t id) {
     if (task->world_handle) {
         (void)terra_world_close(task->world_handle);
         task->world_handle = 0u;
-    } else {
+    } else if (task->allocation_started) {
+        /* finish transferred every root to the caller's world. Cancelling a
+         * terminal query handle must not clear a replacement world's output. */
         release_staging(task);
     }
     task->status = TERRAX_WORLD_STATUS_CANCELLED;
