@@ -182,6 +182,18 @@ static terrax_world_status fail_task(TxOpenTask* task, terrax_world_status statu
     return status;
 }
 
+static terrax_world_status close_task_world(TxOpenTask* task) {
+    /* A borrowed task world may have a circuit lease. Keep the task's owner
+     * and reset pin until retirement really succeeds, so cleanup can retry.
+     * An already-retired generation owns nothing and needs no second close. */
+    if (tx_get_world(task->world_handle)) {
+        terrax_world_status status = terra_world_close(task->world_handle);
+        if (status != TERRAX_WORLD_STATUS_OK) return status;
+    }
+    task->world_handle = 0u;
+    return TERRAX_WORLD_STATUS_OK;
+}
+
 uint32_t terra_world_open_begin(const uint8_t* buffer, uint32_t buffer_len) {
     if (!buffer || buffer_len < 16u || buffer_len > TX_MAX_INPUT_BYTES) {
         tx_set_error("TERRAX_INVALID_ARGUMENT", "null or truncated world buffer");
@@ -377,7 +389,7 @@ terrax_world_status terra_world_open_finish(uint32_t id, uint32_t* out_handle) {
     if (out_handle) *out_handle = 0u;
     TxOpenTask* task = get_task(id);
     if (!task) return invalid_task();
-    if (task->status != TERRAX_WORLD_STATUS_OK || task->world_handle == 0u) {
+    if (task->status != TERRAX_WORLD_STATUS_OK || !tx_get_world(task->world_handle)) {
         tx_set_error("TERRAX_TASK_NOT_READY", "world open task is not complete");
         return task->status == TERRAX_WORLD_STATUS_IN_PROGRESS
             ? TERRAX_WORLD_STATUS_IN_PROGRESS
@@ -396,8 +408,8 @@ terrax_world_status terra_world_open_cancel(uint32_t id) {
     TxOpenTask* task = get_task(id);
     if (!task) return invalid_task();
     if (task->world_handle) {
-        (void)terra_world_close(task->world_handle);
-        task->world_handle = 0u;
+        terrax_world_status status = close_task_world(task);
+        if (status != TERRAX_WORLD_STATUS_OK) return status;
     } else if (task->allocation_started) {
         /* finish transferred every root to the caller's world. Cancelling a
          * terminal query handle must not clear a replacement world's output. */
@@ -428,8 +440,8 @@ terrax_world_status terra_world_task_close(uint32_t id) {
     TxOpenTask* task = get_task(id);
     if (!task) return invalid_task();
     if (task->world_handle) {
-        (void)terra_world_close(task->world_handle);
-        task->world_handle = 0u;
+        terrax_world_status status = close_task_world(task);
+        if (status != TERRAX_WORLD_STATUS_OK) return status;
     } else if (task->allocation_started) {
         release_staging(task);
     }

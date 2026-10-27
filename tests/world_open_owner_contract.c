@@ -4,6 +4,7 @@
 #include "terra_native_span.h"
 #include "terra_types.h"
 #include "terra_owner_guards.h"
+#include "terra_circuit_world.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,6 +134,52 @@ static void finished_task_survives_commit(const uint8_t* bytes, uint32_t length)
     }
 }
 
+static uint32_t ready_task(const uint8_t* bytes, uint32_t length) {
+    uint32_t task = terra_world_open_begin(bytes, length);
+    assert(task);
+    terrax_world_status status = TERRAX_WORLD_STATUS_IN_PROGRESS;
+    for (unsigned step = 0; step < 100000 && status == TERRAX_WORLD_STATUS_IN_PROGRESS; ++step)
+        status = terra_world_open_step(task, 1);
+    assert(status == TERRAX_WORLD_STATUS_OK);
+    return task;
+}
+
+static void rejected_cleanup_retains_owner(const uint8_t* bytes, uint32_t length) {
+    for (unsigned cancel = 0; cancel != 2; ++cancel) {
+        uint32_t task = ready_task(bytes, length);
+        uint32_t world = terra_world_task_get_world_handle(task), circuit = 0;
+        assert(world);
+        assert(terra_circuit_world_begin(world, 77, 0, 0, 8u * 1024u * 1024u, &circuit) == 0);
+        uint32_t owned = tx_native_heap_used();
+        for (unsigned attempt = 0; attempt != 2; ++attempt) {
+            terrax_world_status status = cancel ? terra_world_open_cancel(task) : terra_world_task_close(task);
+            assert(status == TERRAX_WORLD_STATUS_STATE_ERROR);
+            assert(terra_world_task_get_world_handle(task) == world);
+            assert(terra_world_task_get_status(task) == TERRAX_WORLD_STATUS_OK);
+            assert(terra_world_task_get_progress(task) == 100);
+            assert(tx_open_task_has_world_owner() && tx_get_world_open_count() == 1);
+            tx_reset_heap();
+            assert(tx_native_heap_used() == owned);
+            TerraCircuitWorldStats stats;
+            assert(terra_circuit_world_stats(circuit, &stats) == 0);
+        }
+        assert(terra_circuit_world_close(circuit) == 0);
+        if (cancel) assert(terra_world_open_cancel(task) == TERRAX_WORLD_STATUS_CANCELLED);
+        assert(terra_world_task_close(task) == TERRAX_WORLD_STATUS_OK);
+        assert(tx_get_world_open_count() == 0 && tx_native_heap_used() == 0);
+    }
+}
+
+static void retired_world_is_not_transferred(const uint8_t* bytes, uint32_t length) {
+    uint32_t task = ready_task(bytes, length);
+    uint32_t world = terra_world_task_get_world_handle(task), out = 123;
+    assert(world && terra_world_close(world) == TERRAX_WORLD_STATUS_OK);
+    assert(terra_world_open_finish(task, &out) == TERRAX_WORLD_STATUS_STATE_ERROR);
+    assert(out == 0);
+    assert(terra_world_task_close(task) == TERRAX_WORLD_STATUS_OK);
+    assert(tx_get_world_open_count() == 0 && tx_native_heap_used() == 0);
+}
+
 static void finish_then_reopen(const char* path) {
     FILE* file = fopen(path, "rb");
     assert(file && fseek(file, 0, SEEK_END) == 0);
@@ -143,6 +190,8 @@ static void finish_then_reopen(const char* path) {
     fclose(file);
     staging_is_exclusive(bytes, (uint32_t)length);
     finished_task_survives_commit(bytes, (uint32_t)length);
+    rejected_cleanup_retains_owner(bytes, (uint32_t)length);
+    retired_world_is_not_transferred(bytes, (uint32_t)length);
     uint32_t task = terra_world_open_begin(bytes, (uint32_t)length);
     assert(task);
     terrax_world_status status = TERRAX_WORLD_STATUS_IN_PROGRESS;

@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const { getPrimaryWorldPath } = require("./helpers/fixtures");
+const { makeCircuitWorld } = require("./helpers/circuit-world");
 
 const TerraWorldWasm = require(path.join(__dirname, "..", "build", "terrax_world_wasm.js"));
 const TEST_WLD = getPrimaryWorldPath();
@@ -38,6 +39,60 @@ function runToCompletion(M, task, budget = 1, maxSteps = 10000) {
   assert.notEqual(steps, maxSteps, "incremental open exceeded the step safety limit");
   return { status, steps, progress };
 }
+
+test("rejected task cancellation and close retain the leased world for cleanup retry", async () => {
+  const M = await TerraWorldWasm();
+  const input = makeCircuitWorld([{ x: 2, y: 2, type: 1, wires: 1 }], 8, 8);
+  const inputPtr = alloc(M, input, "world input");
+  const output = alloc(M, 4, "circuit handle");
+  const baseline = M._tx_native_heap_used();
+  for (const cancel of [false, true]) {
+    const task = M._terra_world_open_begin(inputPtr, input.length);
+    assert.ok(task);
+    assert.equal(runToCompletion(M, task).status, 0);
+    const world = M._terra_world_task_get_world_handle(task);
+    assert.ok(world);
+    assert.equal(M._terra_circuit_world_begin(world, 77, 0, 0, 8 * 1024 * 1024, output), 0);
+    const circuit = M.HEAPU32[output >>> 2];
+    const owned = M._tx_native_heap_used();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      assert.equal(cancel ? M._terra_world_open_cancel(task) : M._terra_world_task_close(task), 8);
+      assert.equal(M._terra_world_task_get_world_handle(task), world);
+      assert.equal(M._terra_world_task_get_status(task), 0);
+      assert.equal(M._terra_world_task_get_progress(task), 100);
+      M._tx_reset_heap();
+      assert.equal(M._tx_native_heap_used(), owned);
+    }
+    assert.equal(M._terra_circuit_world_close(circuit), 0);
+    if (cancel) assert.equal(M._terra_world_open_cancel(task), 11);
+    assert.equal(M._terra_world_task_close(task), 0);
+    assert.equal(M._tx_native_heap_used(), baseline);
+  }
+  M._tx_free(output);
+  M._tx_free(inputPtr);
+});
+
+test("finish rejects a task world that the borrower has already closed", async () => {
+  const M = await TerraWorldWasm();
+  const input = makeCircuitWorld([{ x: 2, y: 2, type: 1, wires: 1 }], 8, 8);
+  const inputPtr = alloc(M, input, "world input");
+  const output = alloc(M, 4, "world handle");
+  for (const cancel of [false, true]) {
+    const task = M._terra_world_open_begin(inputPtr, input.length);
+    assert.ok(task);
+    assert.equal(runToCompletion(M, task).status, 0);
+    const world = M._terra_world_task_get_world_handle(task);
+    assert.equal(M._terra_world_close(world), 0);
+    M.HEAPU32[output >>> 2] = 123;
+    assert.equal(M._terra_world_open_finish(task, output), 8);
+    assert.equal(M.HEAPU32[output >>> 2], 0);
+    if (cancel) assert.equal(M._terra_world_open_cancel(task), 11);
+    assert.equal(M._terra_world_task_close(task), 0);
+    assert.equal(M._tx_native_heap_used(), 0);
+  }
+  M._tx_free(output);
+  M._tx_free(inputPtr);
+});
 
 test("open task consumes work units incrementally, reports real progress, and transfers a world handle", async () => {
   const M = await TerraWorldWasm();
