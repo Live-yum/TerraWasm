@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 /* Streaming, bounded-memory WLD circuit session. See docs/CIRCUIT_WORLD_ABI_V1.md. */
 #include "terra_alignment.h"
 #include "terra_circuit_world_internal.h"
@@ -10,7 +11,6 @@
 
 extern uint8_t* tx_persistent_alloc(uint32_t);
 extern void tx_persistent_free(void*);
-extern TxWorld* tx_get_world(uint32_t);
 extern void tx_set_error(const char*,const char*);
 extern int read_tile_at(TxWorld*,uint32_t*,uint32_t,TxTile*);
 extern void write_tile(TxWorld*,TxBuf*,const TxTile*,uint32_t);
