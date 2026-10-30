@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 /*
  * terra_commands.c -- Versioned binary command buffer ABI.
  */
@@ -8,7 +9,6 @@
 #include "terra_reader.h"
 #include "terra_types.h"
 
-extern TxWorld* tx_get_world(uint32_t handle);
 extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 extern uint8_t* tx_alloc(uint32_t size);
