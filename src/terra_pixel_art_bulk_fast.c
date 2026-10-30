@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 #include "terra_owner_guards.h"
 /*
  * Fast bulk attachment path for indexed pixel art.
@@ -24,7 +25,6 @@ extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
 extern uint32_t tx_bridge_allocation_size(uint32_t ptr);
 extern uint32_t tx_mark(void);
-extern TxWorld* tx_get_world(uint32_t handle);
 extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 
