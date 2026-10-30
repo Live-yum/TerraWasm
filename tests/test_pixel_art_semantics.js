@@ -73,6 +73,8 @@ test(`${route}: empty clears all tile fields and partial-object metadata; skip a
   // A committed workspace must expose its effective metadata on the same
   // handle, not only after serializing and reopening the WLD bytes.
   assert.equal(json(handle,'signs').length,2,'same-handle signs query must reflect the committed section override');
+  assert.equal(json(handle,'tile_entities').length,2,'same-handle tile entity query must reflect the committed section override');
+  assert.equal(json(handle,'weighted_pressure_plates').length,2,'same-handle pressure plate query must reflect the committed section override');
   const parts=sections(output.bytes).parts;
   assert.deepEqual(parts[2],chest.expected);assert.deepEqual(parts[3],sign.expected);assert.deepEqual(parts[5],entity.expected);
   const keptPlates=Buffer.concat([Buffer.from([2,0,0,0]),plates.subarray(12)]);
