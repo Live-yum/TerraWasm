@@ -38,8 +38,8 @@ TxWorld* tx_world_registry_claim_slot(void) {
 uint32_t tx_world_registry_active_heap_mark(void) {
     uint32_t mark = 0u;
     for (uint32_t index = 0u; index < TX_MAX_WORLDS; index++) {
-        if (g_worlds[index].active && g_worlds[index].heap_mark > mark) {
-            mark = g_worlds[index].heap_mark;
+        if (g_worlds[index].session.active && g_worlds[index].session.heap_mark > mark) {
+            mark = g_worlds[index].session.heap_mark;
         }
     }
     return mark;
@@ -48,7 +48,7 @@ uint32_t tx_world_registry_active_heap_mark(void) {
 void tx_world_registry_visit_active(void (*visitor)(TxWorld*, void*), void* context) {
     if (!visitor) return;
     for (uint32_t index = 0u; index < TX_MAX_WORLDS; index++) {
-        if (g_worlds[index].active) visitor(&g_worlds[index], context);
+        if (g_worlds[index].session.active) visitor(&g_worlds[index], context);
     }
 }
 
@@ -65,7 +65,7 @@ TxWorld* tx_get_world(uint32_t handle) {
     uint32_t encoded_slot = handle & TX_HANDLE_SLOT_MASK;
     if (!handle || encoded_slot == 0u || encoded_slot > TX_MAX_WORLDS) return NULL;
     TxWorld* world = &g_worlds[encoded_slot - 1u];
-    return world->active && world->handle == handle ? world : NULL;
+    return world->session.active && world->session.handle == handle ? world : NULL;
 }
 
 /* The registry is the only module that publishes an incremental opener's
@@ -80,11 +80,11 @@ terrax_world_status tx_world_adopt_open_task(TxWorld* candidate, uint32_t* out_h
     }
     TxWorld* target = &g_worlds[0];
     *target = *candidate;
-    target->handle = tx_world_registry_next_handle(0u);
-    target->active = 1u;
-    target->heap_mark = tx_mark();
+    target->session.handle = tx_world_registry_next_handle(0u);
+    target->session.active = 1u;
+    target->session.heap_mark = tx_mark();
     tx_set_world_open_count(1u);
-    *out_handle = target->handle;
+    *out_handle = target->session.handle;
     tx_clear_error();
     return TERRAX_WORLD_STATUS_OK;
 }
