@@ -386,6 +386,7 @@ else()
         endfunction()
 
         add_terra_contract(terra_allocator_contract tests/allocator_contract.c)
+        add_terra_contract(terra_world_document_layout_contract tests/world_document_layout_contract.c)
         add_terra_contract(terra_native_span_contract tests/native_span_contract.c)
 
         if(TERRAWASM_ENABLE_WLD)
