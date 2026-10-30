@@ -1,4 +1,5 @@
 #include "terra_registry.h"
+#include "terra_runtime_session.h"
 #include "terra_owner_guards.h"
 /* Cooperative file-backed WLD reader/writer. No whole tile or output buffer. */
 #include "terra_stream.h"
@@ -119,8 +120,7 @@ typedef struct StreamTask {
     TxStreamPng* png_encoder;
     StreamStamp* stamp;
 } StreamTask;
-static StreamTask* current;
-static uint32_t generation=1, lease_generation=1;
+#define current (*((StreamTask**)tx_runtime_session_stream_task_slot()))
 static void counter_add(uint32_t* value,uint32_t n){*value=n>UINT32_MAX-*value?UINT32_MAX:*value+n;}
 #ifdef TERRAX_TESTING
 static uint32_t test_memory_bytes;
@@ -154,7 +154,7 @@ uint32_t txw_test_stream_begin_for_runtime(void) {
     task->candidate = (TxWorld*)tx_persistent_alloc(sizeof(TxWorld));
     if (!task->candidate) { tx_internal_free(task); return 0u; }
     memset(task->candidate, 0, sizeof(TxWorld));
-    task->id = generation++;
+    task->id = tx_runtime_session_next_stream_generation();
     task->stage = OPEN_FORMAT;
     current = task;
     tx_heap_reset_pin();
@@ -232,7 +232,7 @@ static StreamTask* new_task(uint32_t* out){
     if(tx_checkpoint_active()){fail("TERRAX_STATE_ERROR","finish workspace transaction before streaming");return NULL;}
     if(!valid_range(out,4)||current){fail("TERRAX_STATE_ERROR","invalid stream output pointer or another task is active");return NULL;}
     StreamTask* t=(StreamTask*)tx_persistent_alloc(sizeof(*t));if(!t){fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
-    memset(t,0,sizeof(*t));t->stats.abi_version=2;t->stats.candidate_count=1;t->id=generation++;if(!t->id)t->id=generation++;
+    memset(t,0,sizeof(*t));t->stats.abi_version=2;t->stats.candidate_count=1;t->id=tx_runtime_session_next_stream_generation();
     t->candidate=(TxWorld*)tx_persistent_alloc(sizeof(TxWorld));t->input=tx_persistent_alloc(WINDOW);
     if(!t->candidate||!t->input){if(t->candidate)tx_internal_free(t->candidate);if(t->input)tx_internal_free(t->input);tx_internal_free(t);fail("TERRAX_WASM_OOM","stream task allocation failed");return NULL;}
     memset(t->candidate,0,sizeof(TxWorld));clear_event(t);current=t;tx_heap_reset_pin();*out=t->id;return t;
@@ -583,7 +583,7 @@ static int32_t acquire_input_impl(uint32_t id,TxStreamInputLease* out,TerraMutab
     if(!destination||(!native_span&&!tx_wasm_span32(destination,t->event.length,&offset)))
         return fail("TERRAX_STATE_ERROR","input pointer requires the native span adapter");
     memset(&t->lease,0,sizeof(t->lease));t->lease.abi_version=2;
-    t->lease.lease_id=lease_generation++;if(!t->lease.lease_id)t->lease.lease_id=lease_generation++;
+    t->lease.lease_id=tx_runtime_session_next_stream_lease_generation();
     t->lease.source_id=t->event.source_id;t->lease.offset=t->event.offset;
     t->lease.length=t->lease.capacity=t->event.length;
     t->lease.data_ptr=offset;
