@@ -31,6 +31,7 @@ set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 include_directories(${INC_DIR})
 
 set(COMMON_SOURCES
+    "${SRC_DIR}/platform_file_io.c"
     "${SRC_DIR}/terra_abi.c"
     "${SRC_DIR}/terra_reader.c"
     "${SRC_DIR}/terra_mem.c"
@@ -357,6 +358,11 @@ else()
     endif()
 
     add_library(terrax_world_static STATIC ${NATIVE_SOURCES})
+    if(TERRAWASM_ENABLE_WLD)
+        # Native codec compilation needs zlib headers; consumers need its link dependency.
+        find_package(ZLIB REQUIRED)
+        target_link_libraries(terrax_world_static PUBLIC ZLIB::ZLIB)
+    endif()
     # Keep libm in the public native link interface: Debug builds cannot rely
     # on the optimizer folding projectile sqrtf calls into instructions.
     if(UNIX)
@@ -388,7 +394,6 @@ else()
         add_terra_contract(terra_native_span_contract tests/native_span_contract.c)
 
         if(TERRAWASM_ENABLE_WLD)
-            find_package(ZLIB REQUIRED)
             add_executable(terra_circuit_order_replay_contract tests/circuit_order_replay_contract.c)
             target_include_directories(terra_circuit_order_replay_contract PRIVATE "${SRC_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/include")
             target_compile_options(terra_circuit_order_replay_contract PRIVATE -UNDEBUG)
@@ -437,6 +442,10 @@ else()
             add_terra_contract(terra_circuit_vm_contract tests/circuit_vm_contract.c)
             add_terra_contract(terra_circuit_actuation_contract tests/circuit_actuation_contract.c)
             target_include_directories(terra_circuit_actuation_contract PRIVATE "${SRC_DIR}")
+            add_terra_contract(terra_wld_file_contract tests/wld_file_contract.c ZLIB::ZLIB)
+            target_include_directories(terra_wld_file_contract PRIVATE "${SRC_DIR}")
+            target_compile_definitions(terra_wld_file_contract PRIVATE TERRAX_TESTING
+                TERRAX_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
             add_terra_contract(terra_native_contract tests/native_contract.c ZLIB::ZLIB)
             target_compile_definitions(terra_native_contract PRIVATE
                 TERRAX_TESTING

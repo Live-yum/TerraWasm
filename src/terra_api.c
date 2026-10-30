@@ -1,4 +1,5 @@
 #include "terra_output.h"
+#include "platform_file_io.h"
 /*
  * terra_api.c -- V2 API implementation.
  *
@@ -217,6 +218,11 @@ static terrax_world_status write_string_to_caller(
     return TERRAX_WORLD_STATUS_OK;
 }
 
+static void *tx_file_allocate(size_t size) {
+    return size > UINT32_MAX ? NULL : tx_alloc((uint32_t)size);
+}
+static const TxFileAllocator tx_file_memory = { tx_file_allocate, tx_internal_free };
+
 /* ---------- Helper: read file into heap ---------- */
 
 static uint8_t* read_file_to_heap(const char* path, uint32_t* out_len) {
@@ -227,7 +233,7 @@ static uint8_t* read_file_to_heap(const char* path, uint32_t* out_len) {
     #define SEEK_END 2
     #endif
 
-    FILE* f = fopen(path, "rb");
+    FILE* f = tx_file_open_utf8(path, 0, &tx_file_memory);
     if (!f) return NULL;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
     long file_size = ftell(f);
@@ -268,140 +274,22 @@ static int tx_write_stream(FILE* f, const uint8_t* data, uint32_t len) {
 
 int write_file_from_heap(const char* path, const uint8_t* data, uint32_t len) {
 
-    FILE* f = fopen(path, "wb");
+    FILE* f = tx_file_open_utf8(path, 1, &tx_file_memory);
     if (!f) return 0;
     int ok = tx_write_stream(f, data, len);
     fclose(f);
     return ok;
 }
 
-static int tx_replace_file(const char* temp_path, const char* path) {
-#ifdef _WIN32
-    return MoveFileExA(
-        temp_path,
-        path,
-        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-    return rename(temp_path, path) == 0;
-#endif
-}
-
-static int tx_remove_if_exists_checked(const char* path) {
-    if (remove(path) == 0) return 1;
-    return errno == ENOENT;
-}
-
-static char* tx_build_temp_save_path(
-    const char* path,
-    unsigned long pid,
-    uint32_t counter) {
-    char suffix[64];
-    int suffix_len = snprintf(
-        suffix,
-        sizeof(suffix),
-        ".tmp.%lu.%lu",
-        pid,
-        (unsigned long)counter);
-    if (suffix_len <= 0 || suffix_len >= (int)sizeof(suffix)) return NULL;
-
-    uint32_t path_len = tx_strlen(path);
-    if (path_len > UINT32_MAX - (uint32_t)suffix_len - 1u) return NULL;
-    char* temp_path = (char*)tx_alloc(path_len + (uint32_t)suffix_len + 1u);
-    if (!temp_path) return NULL;
-    for (uint32_t i = 0; i < path_len; i++) temp_path[i] = path[i];
-    for (int i = 0; i < suffix_len; i++) temp_path[path_len + (uint32_t)i] = suffix[i];
-    temp_path[path_len + (uint32_t)suffix_len] = 0;
-    return temp_path;
-}
-
-static int tx_open_unique_temp_save_file(
-    const char* path,
-    char** out_temp_path,
-    FILE** out_file) {
-    static uint32_t g_tx_save_temp_counter = 0u;
-    unsigned long pid = 0u;
-    if (!out_temp_path || !out_file) return 0;
-    *out_temp_path = NULL;
-    *out_file = NULL;
-#ifdef _WIN32
-    pid = (unsigned long)_getpid();
-#else
-    pid = (unsigned long)getpid();
-#endif
-
-    for (uint32_t attempt = 0; attempt < 1024u; attempt++) {
-        char* temp_path = tx_build_temp_save_path(path, pid, ++g_tx_save_temp_counter);
-        if (!temp_path) return 0;
-#ifdef _WIN32
-        int fd = _open(
-            temp_path,
-            _O_CREAT | _O_EXCL | _O_BINARY | _O_WRONLY,
-            _S_IREAD | _S_IWRITE);
-#else
-        int fd = open(temp_path, O_CREAT | O_EXCL | O_WRONLY, 0600);
-#endif
-        if (fd >= 0) {
-#ifdef _WIN32
-            FILE* f = _fdopen(fd, "wb");
-#else
-            FILE* f = fdopen(fd, "wb");
-#endif
-            if (!f) {
-#ifdef _WIN32
-                _close(fd);
-#else
-                close(fd);
-#endif
-                if (!tx_remove_if_exists_checked(temp_path)) {
-                    tx_internal_free(temp_path);
-                    return 0;
-                }
-                tx_internal_free(temp_path);
-                return 0;
-            }
-            *out_temp_path = temp_path;
-            *out_file = f;
-            return 1;
-        }
-        if (errno != EEXIST) {
-            tx_internal_free(temp_path);
-            return 0;
-        }
-        tx_internal_free(temp_path);
-    }
-    return 0;
-}
-
 static int tx_write_file_atomic_from_heap(
-    const char* path,
-    const uint8_t* data,
-    uint32_t len) {
-    char* temp_path = NULL;
-    FILE* f = NULL;
-    if (!tx_open_unique_temp_save_file(path, &temp_path, &f)) return 0;
-    int ok = tx_write_stream(f, data, len);
-    if (ok && fflush(f) != 0) ok = 0;
-    if (fclose(f) != 0) ok = 0;
-    if (!ok) {
-        if (!tx_remove_if_exists_checked(temp_path)) {
-            tx_internal_free(temp_path);
-            return 0;
-        }
-        tx_internal_free(temp_path);
-        return 0;
-    }
-
-    ok = tx_replace_file(temp_path, path);
-    if (!ok) {
-        /* Replace is atomic only on success; cleanup still checks whether the
-         * temp artifact can be removed on this host after the failed rename. */
-        if (!tx_remove_if_exists_checked(temp_path)) {
-            tx_internal_free(temp_path);
-            return 0;
-        }
-    }
-    tx_internal_free(temp_path);
-    return ok;
+    const char* path, const uint8_t* data, uint32_t len) {
+    TxFilePublishOptions options = {0};
+    options.posix_mode = 0600;
+    options.attempts = 1024;
+#ifdef TERRAX_TESTING
+    options.write_limit = g_tx_test_save_write_limit;
+#endif
+    return tx_file_publish_utf8(path, data, len, &tx_file_memory, &options);
 }
 
 static TxWorld* tx_begin_world_open(uint32_t* allocation_mark) {
