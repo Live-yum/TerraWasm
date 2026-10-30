@@ -1,4 +1,5 @@
 #include "terra_registry.h"
+#include "terra_runtime_session.h"
 /*
  * terra_task.c -- Cooperative, resumable world-open task ABI.
  */
@@ -16,10 +17,8 @@
  * it is not part of the normal direct-open parser surface. */
 #include "terra_wld_guard_task.c"
 
-#define TX_MAX_OPEN_TASKS 4u
-#define TX_TASK_SLOT_BITS 8u
-#define TX_TASK_SLOT_MASK ((1u << TX_TASK_SLOT_BITS) - 1u)
-#define TX_TASK_GENERATION_MASK 0x00ffffffu
+#define TX_MAX_OPEN_TASKS TX_RUNTIME_MAX_OPEN_TASKS
+#define g_tasks (tx_runtime_session_open_task_slots())
 
 /* One work unit intentionally represents enough useful work to amortize the
  * JS/WASM boundary while remaining short enough for Mini Program yielding. */
@@ -41,29 +40,6 @@ enum TxOpenTaskStage {
     TX_OPEN_STAGE_CANCELLED = 10u
 };
 
-typedef struct TxOpenTask {
-    uint8_t active;
-    uint8_t stage;
-    uint8_t allocation_started;
-    uint32_t id;
-
-    const uint8_t* buffer;
-    uint32_t buffer_len;
-    uint8_t* file_data;
-    uint32_t copied_bytes;
-    uint32_t allocation_mark;
-
-    TxWorld* staging_world;
-    TxWldGuardTask guard;
-    TxOpenPreviewTask preview;
-
-    uint32_t world_handle;
-    uint32_t progress;
-    terrax_world_status status;
-} TxOpenTask;
-
-static TxOpenTask g_tasks[TX_MAX_OPEN_TASKS];
-static uint32_t g_next_task_generation = 1u;
 
 extern void* memset(void* dst, int value, unsigned long n);
 extern void* memcpy(void* dst, const void* src, unsigned long n);
@@ -81,11 +57,7 @@ extern uint32_t tx_last_width;
 extern uint32_t tx_last_height;
 
 static uint32_t next_task_id(uint32_t slot_index) {
-    uint32_t generation = g_next_task_generation++ & TX_TASK_GENERATION_MASK;
-    if (generation == 0u) {
-        generation = 1u;
-        g_next_task_generation = 2u;
-    }
+    const uint32_t generation = tx_runtime_session_next_open_task_generation();
     return (generation << TX_TASK_SLOT_BITS) | (slot_index + 1u);
 }
 
