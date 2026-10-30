@@ -125,10 +125,11 @@ typedef struct TxErrorState {
 
 /* ---------- World handle ---------- */
 
-typedef struct TxWorld {
-    uint8_t  active;
-    uint32_t handle;            /* packed generation + slot token exposed to JS */
-    uint32_t allocation_mark;   /* native sequence before the first owned root */
+/* Persistent parsed document state. Runtime handles, task/session caches,
+ * operation responses and platform leases are deliberately not part of this type.
+ * TxWorld keeps an anonymous compatibility view while callers migrate to
+ * world->document; both union members have identical layout. */
+typedef struct WorldDocument {
     uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
 
     /* Raw .wld file bytes (bump-allocated copy) */
@@ -420,6 +421,308 @@ typedef struct TxWorld {
 
     /* Section overrides (for terra_section_set_json) */
     TxSectionOverride section_overrides[TX_MAX_SECTION_OVERRIDES];
+ } WorldDocument;
+
+typedef struct TxWorld {
+    uint8_t  active;
+    uint32_t handle;            /* packed generation + slot token exposed to JS */
+    uint32_t allocation_mark;   /* native sequence before the first owned root */
+    union {
+        WorldDocument document;
+        struct {
+    uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
+
+    /* Raw .wld file bytes (bump-allocated copy) */
+    uint8_t* file;
+    uint32_t file_len;
+    /* File-backed worlds keep only format/non-tile sections in file[]. Their
+     * external tile offsets must never be used as compact metadata offsets. */
+    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
+    uint32_t* stream_columns;
+    uint8_t stream_owned;
+
+    /* Format metadata (parsed from binary) */
+    uint32_t version;
+    uint32_t original_version; /* immutable source release; never a write target */
+    char     magic[8];          /* "relogic" or "xindong" */
+    uint8_t  format_dirty;      /* version/magic changed and must be serialized */
+    uint8_t  file_type;
+    uint32_t revision;
+    uint64_t favorite;
+    uint16_t pointer_count;
+    uint32_t positions[TX_MAX_SECTIONS];  /* section pointer table */
+    uint32_t starts[TX_MAX_SECTIONS];     /* section byte start */
+    uint32_t ends[TX_MAX_SECTIONS];       /* section byte end */
+    uint32_t format_len;                  /* byte length of format section */
+    /* Pre-release-88 worlds have no format/section table.  Keep their
+     * original stream layout so reads can use the version-1 codec and an
+     * untouched file can still be exported byte-for-byte. */
+    uint8_t  legacy_wld;
+    uint32_t legacy_tile_start;
+    uint32_t legacy_tile_end;
+    uint32_t legacy_chest_start;
+    uint32_t legacy_sign_start;
+    uint32_t legacy_npc_start;
+    uint32_t legacy_footer_start;
+    uint32_t legacy_npc_names_start;
+    uint16_t tile_type_count;
+    uint8_t* important;         /* pointer into file[] for tile importance bitmap */
+    uint8_t* important_override;/* owned replacement for a patched format bitmap */
+    uint32_t important_len;
+
+    /* Header metadata (parsed from binary) */
+    char     worldName[TX_MAX_NAME];
+    char     seed[TX_MAX_NAME];
+    char     uuid[40];
+    uint64_t worldGeneratorVersion;
+    int32_t  worldId;
+    int32_t  maxTilesX;
+    int32_t  maxTilesY;
+    int32_t  spawnTileX;
+    int32_t  spawnTileY;
+    double   worldSurface;     /* ground level (double for precision) */
+    double   rockLayer;        /* rock layer level */
+    int32_t  gameMode;
+    int32_t  leftWorld;
+    int32_t  rightWorld;
+    int32_t  topWorld;
+    int32_t  bottomWorld;
+
+    /* ---- Seed flags (version-gated booleans) ---- */
+    uint8_t  drunkWorld;           /* >=222 */
+    uint8_t  ftwWorld;             /* >=227 */
+    uint8_t  tenthAnniversaryWorld; /* >=238 */
+    uint8_t  dontStarveWorld;     /* >=239 */
+    uint8_t  notTheBeesWorld;    /* >=241 */
+    uint8_t  remixWorld;           /* >=249 */
+    uint8_t  noTrapsWorld;        /* >=266 */
+    uint8_t  zenithWorld;          /* >=267; derived as remix&&drunk for <267 */
+    uint8_t  skyblockWorld;        /* >=302 */
+
+    /* ---- Timestamps ---- */
+    uint64_t creationTime;         /* >=141, ticks */
+    uint64_t lastPlayed;           /* >=284, ticks */
+
+    /* ---- Terrain / environment ---- */
+    uint8_t  moonType;
+    uint32_t treeX[3];
+    uint32_t treeStyle[4];
+    uint32_t caveBackX[3];
+    uint32_t caveBackStyle[4];
+    uint32_t iceBackStyle;
+    uint32_t jungleBackStyle;
+    uint32_t hellBackStyle;
+
+    /* ---- Time / world state ---- */
+    double   gameTime;
+    uint8_t  isDayTime;
+    uint32_t moonPhase;
+    uint8_t  isBloodMoon;
+    uint8_t  isEclipse;
+    int32_t  dungeonX;
+    int32_t  dungeonY;
+    uint8_t  isCrimson;
+
+    /* ---- Boss / event progress ---- */
+    uint8_t  downedEye;
+    uint8_t  downedEaterBrain;
+    uint8_t  downedSkeletron;
+    uint8_t  downedQueenBee;
+    uint8_t  downedDestroyer;
+    uint8_t  downedTwins;
+    uint8_t  downedSkeletronPrime;
+    uint8_t  downedAnyMech;
+    uint8_t  downedPlantera;
+    uint8_t  downedGolem;
+    uint8_t  downedKingSlime;     /* >=118 */
+
+    /* ---- Saved NPCs ---- */
+    uint8_t  savedGoblin;
+    uint8_t  savedWizard;
+    uint8_t  savedMech;
+    uint8_t  downedGoblins;
+    uint8_t  downedClown;
+    uint8_t  downedFrost;
+    uint8_t  downedPirates;
+
+    /* ---- World state ---- */
+    uint8_t  shadowOrbSmashed;
+    uint8_t  spawnMeteor;
+    uint8_t  shadowOrbCount;
+    uint32_t altarCount;
+    uint8_t  hardMode;
+    uint8_t  afterPartyOfDoom;   /* >=257 */
+
+    /* ---- Invasion ---- */
+    uint32_t invasionDelay;
+    uint32_t invasionSize;
+    uint32_t invasionType;
+    double   invasionX;
+    double   slimeRainTime;       /* >=118 */
+    uint8_t  sundialCooldown;      /* >=113 */
+
+    /* ---- Weather ---- */
+    uint8_t  isRaining;
+    uint32_t rainTime;
+    float    maxRain;
+
+    /* ---- Ore tiers ---- */
+    int32_t  oreTierCobalt;
+    int32_t  oreTierMythril;
+    int32_t  oreTierAdamantite;
+
+    /* ---- Backgrounds ---- */
+    uint8_t  bgTree;
+    uint8_t  bgCorruption;
+    uint8_t  bgJungle;
+    uint8_t  bgSnow;
+    uint8_t  bgHallow;
+    uint8_t  bgCrimson;
+    uint8_t  bgDesert;
+    uint8_t  bgOcean;
+    int32_t  cloudBgActive;
+    uint16_t numClouds;
+    float    windSpeedSet;
+
+    /* ---- Angler (dynamic: file offset for string array) ---- */
+    uint32_t anglerFinishedSize;          /* >=95 */
+    uint32_t anglersOff;           /* file offset to re-read angler strings */
+    uint8_t  savedAngler;          /* >=99 */
+    uint32_t anglerQuest;          /* >=101 */
+    uint8_t  savedStylist;         /* >=104 */
+    uint8_t  savedTaxCollector;   /* >=140 */
+    uint8_t  savedGolfer;          /* >=201 */
+
+    /* ---- Misc progression ---- */
+    uint32_t invasionSizeStart;   /* >=107 */
+    uint32_t cultistDelay;         /* >=108 */
+
+    /* ---- Kill counts (dynamic: file offset for u32 array) ---- */
+    uint16_t numMobs;             /* >=109 */
+    uint32_t mobsOff;
+
+    /* ---- Banners (dynamic: file offset for u16 array) ---- */
+    uint8_t  claimableBannersPresent;
+    uint16_t numClaimableBanners;
+    uint32_t claimableBannersOff;
+
+    /* ---- Late events ---- */
+    uint8_t  fastForwardTime;     /* >=140 */
+    uint8_t  downedFishron;        /* >=131 */
+    uint8_t  downedMartians;       /* >=140 */
+    uint8_t  downedLunaticCultist; /* >=140 */
+    uint8_t  downedMoonlord;       /* >=140 */
+    uint8_t  downedHalloweenKing; /* >=131 */
+    uint8_t  downedHalloweenTree; /* >=131 */
+    uint8_t  downedChristmasIceQueen; /* >=131 */
+    uint8_t  downedSanta;   /* >=131 */
+    uint8_t  downedChristmasTree;      /* >=131 */
+
+    /* ---- Celestial towers (>=140) ---- */
+    uint8_t  downedCelestialSolar;
+    uint8_t  downedCelestialVortex;
+    uint8_t  downedCelestialNebula;
+    uint8_t  downedCelestialStardust;
+    uint8_t  downedTowerSolar;
+    uint8_t  downedTowerVortex;
+    uint8_t  downedTowerNebula;
+    uint8_t  downedTowerStardust;
+    uint8_t  downedTowerAncient;
+
+    /* ---- Party (>=170) ---- */
+    uint8_t  partyManual;
+    uint8_t  partyGenuine;
+    uint32_t partyCooldown;
+    uint32_t partyCelebratingNPCSize;
+    uint32_t partyCelebratingNPCsOff;        /* file offset for i32 array */
+
+    /* ---- Sandstorm (>=174) ---- */
+    uint8_t  sandstormHappening;
+    uint32_t sandStormTime;
+    float    sandStormSeverity;
+    float    sandstormIntendedSeverity;
+
+    /* ---- DD2 (>=178) ---- */
+    uint8_t  savedBartender;
+    uint8_t  downedInvasionT1;
+    uint8_t  downedInvasionT2;
+    uint8_t  downedInvasionT3;
+
+    /* ---- More backgrounds ---- */
+    uint8_t  mushroomBg;           /* >194 */
+    uint8_t  undergroundDesertBg;         /* >=215 */
+    uint8_t  bgTree2;              /* >=195 */
+    uint8_t  bgTree3;
+    uint8_t  bgTree4;
+
+    /* ---- 1.4+ fields ---- */
+    uint8_t  combatBookUsed;           /* >=204 */
+    uint32_t lanternNightCooldown;      /* >=207 */
+    uint8_t  lanternNightGenuine;
+    uint8_t  lanternNightManual;
+    uint8_t  lanternNightNextNightIsGenuine;
+    uint32_t treetopSize;         /* >=211 */
+    uint32_t treeTopVariationsOff;          /* file offset for i32 array */
+    uint8_t  forceHalloweenForToday;       /* >=212 */
+    uint8_t  forceXMasForToday;
+    uint32_t savedOreTiersCopper;       /* >=216 */
+    uint32_t savedOreTiersIron;
+    uint32_t savedOreTiersSilver;
+    uint32_t savedOreTiersGold;
+    uint8_t  boughtCat;            /* >=217 */
+    uint8_t  boughtDog;
+    uint8_t  boughtBunny;
+    uint8_t  downedEmpressOfLight;        /* >=223 */
+    uint8_t  downedQueenSlime;
+    uint8_t  downedDeerclops;      /* >=240 */
+
+    /* ---- Unlocked spawns (>=250-261) ---- */
+    uint8_t  unlockedSlimeBlueSpawn;
+    uint8_t  unlockedMerchantSpawn;
+    uint8_t  unlockedDemolitionistSpawn;
+    uint8_t  unlockedPartyGirlSpawn;
+    uint8_t  unlockedDyeTraderSpawn;
+    uint8_t  unlockedTruffleSpawn;
+    uint8_t  unlockedArmsDealerSpawn;
+    uint8_t  unlockedNurseSpawn;
+    uint8_t  unlockedPrincessSpawn;
+    uint8_t  combatBookVolumeTwoWasUsed;      /* >=259 */
+    uint8_t  peddlersSatchelWasUsed;      /* >=260 */
+    uint8_t  unlockedSlimeGreenSpawn;  /* >=261 */
+    uint8_t  unlockedSlimeOldSpawn;
+    uint8_t  unlockedSlimePurpleSpawn;
+    uint8_t  unlockedSlimeRainbowSpawn;
+    uint8_t  unlockedSlimeRedSpawn;
+    uint8_t  unlockedSlimeYellowSpawn;
+    uint8_t  unlockedSlimeCopperSpawn;
+
+    /* ---- Late 1.4+ fields ---- */
+    uint8_t  fastForwardTimeToDusk;     /* >=264 */
+    uint8_t  moondialCooldown;     /* >=264 */
+    uint8_t  forceHalloweenForever; /* >=287 */
+    uint8_t  forcexmasForever;    /* >=287 */
+    uint8_t  vampireSeed;          /* >=288 */
+    uint8_t  infectedSeed;         /* >=296 */
+    uint32_t tempmeteorShowerCount;   /* >=291 */
+    uint32_t tempcoinRain;             /* >=291 */
+    uint8_t  teambasedSpawnsSeed;      /* >=297 */
+    uint8_t  numExtradSpawnPointManager;     /* >=297 */
+    uint32_t extradSpawnPointManagerOff;      /* file offset for i32 array */
+    uint8_t  dualdungeonsSeed;    /* >=304 */
+    uint8_t  moreLightningSeed;   /* >=323 */
+    uint8_t  noLightningSeed;     /* >=323 */
+    uint32_t legacySkip;           /* >=299 && <313 */
+    uint32_t maniFestOff;          /* >=299, file offset for 7bit string */
+    uint32_t maniFestLen;          /* >=299, byte length of string at maniFestOff */
+
+    /* Exact binary locations for the explicitly mutable header booleans. */
+    TxHeaderBoolField header_bool_fields[TX_MAX_HEADER_BOOL_FIELDS];
+    uint32_t header_bool_field_count;
+
+    /* Section overrides (for terra_section_set_json) */
+    TxSectionOverride section_overrides[TX_MAX_SECTION_OVERRIDES];
+        };
+    };
     uint32_t heap_mark;
     uint32_t override_heap_mark;
 
