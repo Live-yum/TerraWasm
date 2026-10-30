@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 /*
  * terra_icon.c -- Marker item thumbnail atlas ownership and sizing helpers.
  */
@@ -6,7 +7,6 @@
 extern void* memset(void* dst, int value, unsigned long n);
 extern void* memcpy(void* dst, const void* src, unsigned long n);
 
-extern TxWorld* tx_get_world(uint32_t handle);
 extern uint8_t* tx_alloc(uint32_t size);
 extern void tx_internal_free(void* ptr);
 extern uint32_t tx_mark(void);
