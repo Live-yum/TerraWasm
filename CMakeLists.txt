@@ -62,6 +62,7 @@ set(WLD_SOURCES
     "${SRC_DIR}/terra_wld_guard.c"
     "${SRC_DIR}/terra_future.c"
     "${SRC_DIR}/terra_registry.c"
+    "${SRC_DIR}/terra_runtime_session.c"
     "${SRC_DIR}/terra_api.c"
     "${SRC_DIR}/terra_commit.c"
     "${SRC_DIR}/terra_ops.c"
