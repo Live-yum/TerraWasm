@@ -22,8 +22,34 @@ extern uint32_t tx_mark(void);
 extern int tx_stream_has_task(void);
 extern int tx_world_has_task(void);
 
-TxWorld* tx_world_registry_slots(void) {
-    return g_worlds;
+TxWorld* tx_world_registry_primary_slot(void) {
+    return &g_worlds[0];
+}
+
+TxWorld* tx_world_registry_claim_slot(void) {
+    if (tx_get_world_open_count() != 0u || tx_world_has_task() ||
+        tx_stream_has_task() || tx_checkpoint_active()) {
+        tx_set_error("TERRAX_STATE_ERROR", "close the active world and its tasks before opening another world");
+        return NULL;
+    }
+    return &g_worlds[0];
+}
+
+uint32_t tx_world_registry_active_heap_mark(void) {
+    uint32_t mark = 0u;
+    for (uint32_t index = 0u; index < TX_MAX_WORLDS; index++) {
+        if (g_worlds[index].active && g_worlds[index].heap_mark > mark) {
+            mark = g_worlds[index].heap_mark;
+        }
+    }
+    return mark;
+}
+
+void tx_world_registry_visit_active(void (*visitor)(TxWorld*, void*), void* context) {
+    if (!visitor) return;
+    for (uint32_t index = 0u; index < TX_MAX_WORLDS; index++) {
+        if (g_worlds[index].active) visitor(&g_worlds[index], context);
+    }
 }
 
 uint32_t tx_world_registry_next_handle(uint32_t slot_index) {
