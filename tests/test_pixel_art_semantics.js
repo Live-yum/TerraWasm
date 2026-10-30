@@ -35,8 +35,9 @@ async function runtime() {
   const js=path.resolve(process.env.PIXEL_ART_WEB_ARTIFACT);
   return require(js)({wasmBinary:fs.readFileSync(js.replace(/\.js$/,'.wasm'))});
 }
+for (const commitMode of ['replacement','workspace'])
 for (const route of process.env.PIXEL_ART_WEB_ARTIFACT ? ['fast'] : ['fast','single','bulk','rgba'])
-test(`${route}: empty clears all tile fields and partial-object metadata; skip and adjacent objects stay byte-identical`,async()=>{
+test(`${commitMode}/${route}: empty clears all tile fields and partial-object metadata; skip and adjacent objects stay byte-identical`,async()=>{
   const M=await runtime(),allocations=[];
   const alloc=data=>{const p=M._tx_malloc(typeof data==='number'?data:data.length);assert.ok(p);allocations.push(p);if(typeof data!=='number')M.HEAPU8.set(data,p);return p;};
   const str=s=>alloc(Buffer.from(s+'\0'));
@@ -44,7 +45,37 @@ test(`${route}: empty clears all tile fields and partial-object metadata; skip a
   function error(){M._terra_info_get_last_error_json(0,0n,size);const n=M.HEAPU32[size>>2],p=alloc(n);M._terra_info_get_last_error_json(p,BigInt(n),size);return Buffer.from(M.HEAPU8.subarray(p,M.HEAPU8.indexOf(0,p))).toString();}
   function open(bytes){const p=alloc(bytes),task=M._terra_world_open_begin(p,bytes.length);assert.ok(task,error());let status=10;while(status===10)status=M._terra_world_open_step(task,100);assert.equal(status,0,error());assert.equal(M._terra_world_open_finish(task,hp),0);M._terra_world_task_close(task);return M.HEAPU32[hp>>2];}
   function json(handle,name){const key=str(name);assert.equal(M._terra_section_get_json(handle,key,0,0n,size),0);const len=M.HEAPU32[size>>2],p=alloc(len);assert.equal(M._terra_section_get_json(handle,key,p,BigInt(len),size),0);return JSON.parse(Buffer.from(M.HEAPU8.subarray(p,M.HEAPU8.indexOf(0,p))).toString());}
-  function commit(handle){assert.equal(M._terra_world_commit_to_buffer(handle,0,0,size,hp),0);const len=M.HEAPU32[size>>2],p=alloc(len);assert.equal(M._terra_world_commit_to_buffer(handle,p,len,size,hp),0);return {bytes:Buffer.from(M.HEAPU8.subarray(p,p+len)),handle:M.HEAPU32[hp>>2]};}
+  function commit(handle) {
+    if (commitMode==='replacement') {
+      assert.equal(M._terra_world_commit_to_buffer(handle,0,0,size,hp),0);
+      const len=M.HEAPU32[size>>2],p=alloc(len);
+      assert.equal(M._terra_world_commit_to_buffer(handle,p,len,size,hp),0);
+      return {bytes:Buffer.from(M.HEAPU8.subarray(p,p+len)),handle:M.HEAPU32[hp>>2]};
+    }
+    // Deferred pixel materialization must remain visible on the original owner.
+    // Unlike commit_to_buffer, these APIs never replace its handle.
+    assert.equal(M._terra_world_workspace_checkpoint_size(handle,size),0);
+    const checkpointBytes=M.HEAPU32[size>>2],tokenPtr=alloc(4);
+    assert.equal(M._terra_world_workspace_begin(handle,checkpointBytes,tokenPtr),0);
+    const token=M.HEAPU32[tokenPtr>>2];
+    assert.ok(token);
+    assert.equal(M._terra_world_workspace_save_to_buffer(handle,0,0,size),0);
+    const len=M.HEAPU32[size>>2],p=alloc(len);
+    assert.equal(M._terra_world_workspace_save_to_buffer(handle,p,len,size),0);
+    const bytes=Buffer.from(M.HEAPU8.subarray(p,p+len));
+    assert.equal(M._terra_world_workspace_commit(handle,token),0);
+
+    const names=['chests','signs','tile_entities','weighted_pressure_plates'];
+    // Capture the committed revision BEFORE any close/reopen or handle change.
+    // Counts alone can miss stale coordinates, text, or entity payloads.
+    const current=names.map(name=>json(handle,name));
+    assert.equal(M._terra_world_close(handle),0);
+    const reopened=open(bytes);
+    names.forEach((name,index)=>assert.deepEqual(
+      current[index],json(reopened,name),
+      `same-handle ${name} after workspace commit must equal save/reopen`));
+    return {bytes,handle:reopened};
+  }
   const original=fs.readFileSync(getPrimaryWorldPath());let handle=open(original);
   const header=json(handle,'header');M._terra_world_close(handle);
   const dirty=Buffer.from([15,15,63,30,1,7,2,3,180]);
@@ -70,8 +101,8 @@ test(`${route}: empty clears all tile fields and partial-object metadata; skip a
     else assert.equal(M[route==='bulk'?'_txw_add_pixel_art_chunks_bulk':'_txw_add_pixel_art_chunks_bulk_fast'](handle,alloc(record),record.length,1),0);
   }
   const output=commit(handle);handle=output.handle;
-  // A committed workspace must expose its effective metadata on the same
-  // handle, not only after serializing and reopening the WLD bytes.
+  // The workspace helper checks the original handle before reopening; these
+  // expected counts additionally prevent two equally wrong views from passing.
   assert.equal(json(handle,'signs').length,2,'same-handle signs query must reflect the committed section override');
   assert.equal(json(handle,'tile_entities').length,2,'same-handle tile entity query must reflect the committed section override');
   assert.equal(json(handle,'weighted_pressure_plates').length,2,'same-handle pressure plate query must reflect the committed section override');
