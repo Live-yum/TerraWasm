@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 /*
  * terra_map.c -- Map generation for TerraWasm.
  *
@@ -49,7 +50,6 @@ extern void     buf_cstr(TxBuf* b, const char* s);
 extern int      set_result_buf(TxBuf* b);
 extern int      set_result_bytes(uint8_t* p, uint32_t len);
 
-extern TxWorld* tx_get_world(uint32_t handle);
 extern uint32_t tx_mark(void);
 extern int      tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern void     tx_clear_error(void);
