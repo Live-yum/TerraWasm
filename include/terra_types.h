@@ -129,18 +129,85 @@ typedef struct TxErrorState {
  * operation responses and platform leases are deliberately not part of this type.
  * TxWorld keeps an anonymous compatibility view while callers migrate to
  * world->document; both union members have identical layout. */
+/* Runtime owner: generation, source leases, caches and transient output.
+ * Task registries are moved behind this owner in the next migration step. */
+typedef struct TxRuntimeSession {
+    uint8_t  active;
+    uint32_t handle;            /* packed generation + slot token exposed to JS */
+    uint32_t allocation_mark;   /* native sequence before the first owned root */
+    /* File-backed source offsets and column leases are runtime-session state. */
+    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
+    uint32_t* stream_columns;
+    uint8_t stream_owned;
+
+    };
+    uint32_t heap_mark;
+    uint32_t override_heap_mark;
+
+    /* Marker item thumbnails owned by the active world session. */
+    TxIconAtlas icon_atlas;
+    TxBuf entity_marker_cache; /* selector bytes followed by compact points */
+    uint32_t entity_marker_key_bytes;
+    TxPreparedOutput* prepared_output;
+    uint8_t* region_mask; /* batch-local packed environment membership */
+    uint8_t region_mask_bits;
+    uint16_t region_geometry[5]; /* ocean, hell, space, underground, cavern */
+    uint8_t surface_sand_split; /* batch-local surface run boundary */
+    uint32_t output_capture;
+    uint32_t tile_decode_calls;
+
+    /* Optional TXCI palette used when marker colors are written to MAP. */
+    TxciIndex marker_color_index;
+
+    /* Operation heap tracking -- end-of-previous-operation heap position.
+     * Used by terra_op_execute_json to release only the previous operation's
+     * transient allocations without corrupting caller-allocated data. */
+    uint32_t last_op_heap_end;
+    /* Exact-keyed, single-use operation response for the two-call pattern. */
+    uint8_t* op_response_ptr;
+    uint32_t op_response_len;
+    uint8_t* op_request_key;
+    uint32_t op_request_key_len;
+
+    /* Exact section-indexed, single-use response for section two-call reads. */
+    uint8_t* section_response;
+    uint32_t section_response_len;
+    int32_t  section_response_index;
+
+    /* World-owned media result. Global tx_last_* values are scratch only. */
+    uint8_t* media_result;
+    uint32_t media_result_len;
+    uint32_t media_result_width;
+    uint32_t media_result_height;
+    uint8_t  media_result_kind;  /* 2 = PNG, 3 = MAP */
+
+    /* Pixel art queue (applied during save) */
+    uint8_t* pixel_art_pixels;     /* RGBA pixel data */
+    uint32_t pixel_art_pixels_len;
+    uint8_t* pixel_art_maps;       /* TxPixelMap array (12 bytes each) */
+    uint32_t pixel_art_map_count;
+    int32_t  pixel_art_start_x;
+    int32_t  pixel_art_start_y;
+    uint32_t pixel_art_width;
+    uint32_t pixel_art_height;
+    int32_t  pixel_art_skip_transparent;
+    uint8_t  pixel_art_indexed;
+    uint32_t pixel_art_default_index;
+    uint32_t pixel_art_chunk_cols;
+    uint32_t pixel_art_chunk_rows;
+    TxPixelArtChunk** pixel_art_chunk_table;
+    TxPixelArtChunk* pixel_art_chunks;
+} TxRuntimeSession;
+
+/* Persistent parsed WLD document: bytes, format/header state and overrides.
+ * TxWorld keeps an anonymous compatibility alias while callers migrate to
+ * world->document. */
 typedef struct WorldDocument {
     uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
 
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
     uint32_t file_len;
-    /* File-backed worlds keep only format/non-tile sections in file[]. Their
-     * external tile offsets must never be used as compact metadata offsets. */
-    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
-    uint32_t* stream_columns;
-    uint8_t stream_owned;
-
     /* Format metadata (parsed from binary) */
     uint32_t version;
     uint32_t original_version; /* immutable source release; never a write target */
@@ -424,9 +491,76 @@ typedef struct WorldDocument {
  } WorldDocument;
 
 typedef struct TxWorld {
+    union {
+        TxRuntimeSession session;
+        struct {
     uint8_t  active;
     uint32_t handle;            /* packed generation + slot token exposed to JS */
     uint32_t allocation_mark;   /* native sequence before the first owned root */
+    /* File-backed source offsets and column leases are runtime-session state. */
+    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
+    uint32_t* stream_columns;
+    uint8_t stream_owned;
+
+    };
+    uint32_t heap_mark;
+    uint32_t override_heap_mark;
+
+    /* Marker item thumbnails owned by the active world session. */
+    TxIconAtlas icon_atlas;
+    TxBuf entity_marker_cache; /* selector bytes followed by compact points */
+    uint32_t entity_marker_key_bytes;
+    TxPreparedOutput* prepared_output;
+    uint8_t* region_mask; /* batch-local packed environment membership */
+    uint8_t region_mask_bits;
+    uint16_t region_geometry[5]; /* ocean, hell, space, underground, cavern */
+    uint8_t surface_sand_split; /* batch-local surface run boundary */
+    uint32_t output_capture;
+    uint32_t tile_decode_calls;
+
+    /* Optional TXCI palette used when marker colors are written to MAP. */
+    TxciIndex marker_color_index;
+
+    /* Operation heap tracking -- end-of-previous-operation heap position.
+     * Used by terra_op_execute_json to release only the previous operation's
+     * transient allocations without corrupting caller-allocated data. */
+    uint32_t last_op_heap_end;
+    /* Exact-keyed, single-use operation response for the two-call pattern. */
+    uint8_t* op_response_ptr;
+    uint32_t op_response_len;
+    uint8_t* op_request_key;
+    uint32_t op_request_key_len;
+
+    /* Exact section-indexed, single-use response for section two-call reads. */
+    uint8_t* section_response;
+    uint32_t section_response_len;
+    int32_t  section_response_index;
+
+    /* World-owned media result. Global tx_last_* values are scratch only. */
+    uint8_t* media_result;
+    uint32_t media_result_len;
+    uint32_t media_result_width;
+    uint32_t media_result_height;
+    uint8_t  media_result_kind;  /* 2 = PNG, 3 = MAP */
+
+    /* Pixel art queue (applied during save) */
+    uint8_t* pixel_art_pixels;     /* RGBA pixel data */
+    uint32_t pixel_art_pixels_len;
+    uint8_t* pixel_art_maps;       /* TxPixelMap array (12 bytes each) */
+    uint32_t pixel_art_map_count;
+    int32_t  pixel_art_start_x;
+    int32_t  pixel_art_start_y;
+    uint32_t pixel_art_width;
+    uint32_t pixel_art_height;
+    int32_t  pixel_art_skip_transparent;
+    uint8_t  pixel_art_indexed;
+    uint32_t pixel_art_default_index;
+    uint32_t pixel_art_chunk_cols;
+    uint32_t pixel_art_chunk_rows;
+    TxPixelArtChunk** pixel_art_chunk_table;
+    TxPixelArtChunk* pixel_art_chunks;
+        };
+    };
     union {
         WorldDocument document;
         struct {
@@ -435,12 +569,6 @@ typedef struct TxWorld {
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
     uint32_t file_len;
-    /* File-backed worlds keep only format/non-tile sections in file[]. Their
-     * external tile offsets must never be used as compact metadata offsets. */
-    uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
-    uint32_t* stream_columns;
-    uint8_t stream_owned;
-
     /* Format metadata (parsed from binary) */
     uint32_t version;
     uint32_t original_version; /* immutable source release; never a write target */
@@ -723,62 +851,6 @@ typedef struct TxWorld {
     TxSectionOverride section_overrides[TX_MAX_SECTION_OVERRIDES];
         };
     };
-    uint32_t heap_mark;
-    uint32_t override_heap_mark;
-
-    /* Marker item thumbnails owned by the active world session. */
-    TxIconAtlas icon_atlas;
-    TxBuf entity_marker_cache; /* selector bytes followed by compact points */
-    uint32_t entity_marker_key_bytes;
-    TxPreparedOutput* prepared_output;
-    uint8_t* region_mask; /* batch-local packed environment membership */
-    uint8_t region_mask_bits;
-    uint16_t region_geometry[5]; /* ocean, hell, space, underground, cavern */
-    uint8_t surface_sand_split; /* batch-local surface run boundary */
-    uint32_t output_capture;
-    uint32_t tile_decode_calls;
-
-    /* Optional TXCI palette used when marker colors are written to MAP. */
-    TxciIndex marker_color_index;
-
-    /* Operation heap tracking -- end-of-previous-operation heap position.
-     * Used by terra_op_execute_json to release only the previous operation's
-     * transient allocations without corrupting caller-allocated data. */
-    uint32_t last_op_heap_end;
-    /* Exact-keyed, single-use operation response for the two-call pattern. */
-    uint8_t* op_response_ptr;
-    uint32_t op_response_len;
-    uint8_t* op_request_key;
-    uint32_t op_request_key_len;
-
-    /* Exact section-indexed, single-use response for section two-call reads. */
-    uint8_t* section_response;
-    uint32_t section_response_len;
-    int32_t  section_response_index;
-
-    /* World-owned media result. Global tx_last_* values are scratch only. */
-    uint8_t* media_result;
-    uint32_t media_result_len;
-    uint32_t media_result_width;
-    uint32_t media_result_height;
-    uint8_t  media_result_kind;  /* 2 = PNG, 3 = MAP */
-
-    /* Pixel art queue (applied during save) */
-    uint8_t* pixel_art_pixels;     /* RGBA pixel data */
-    uint32_t pixel_art_pixels_len;
-    uint8_t* pixel_art_maps;       /* TxPixelMap array (12 bytes each) */
-    uint32_t pixel_art_map_count;
-    int32_t  pixel_art_start_x;
-    int32_t  pixel_art_start_y;
-    uint32_t pixel_art_width;
-    uint32_t pixel_art_height;
-    int32_t  pixel_art_skip_transparent;
-    uint8_t  pixel_art_indexed;
-    uint32_t pixel_art_default_index;
-    uint32_t pixel_art_chunk_cols;
-    uint32_t pixel_art_chunk_rows;
-    TxPixelArtChunk** pixel_art_chunk_table;
-    TxPixelArtChunk* pixel_art_chunks;
 } TxWorld;
 
 int tx_world_is_future(const TxWorld* world);
