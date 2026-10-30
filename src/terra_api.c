@@ -537,7 +537,7 @@ terrax_world_status terra_world_workspace_begin(uint32_t handle, uint32_t max_by
 static terrax_world_status tx_finish_workspace(uint32_t handle, uint32_t token, int rollback) {
     TxWorld* world = tx_get_world(handle);
     if (!world) return tx_invalid_handle();
-    if (!token || token != g_workspace_token || handle != g_workspace_checkpoint.handle) {
+    if (!token || token != g_workspace_token || handle != g_workspace_checkpoint.session.handle) {
         tx_set_error("TERRAX_STATE_ERROR", "workspace checkpoint token is stale or invalid");
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
@@ -1430,7 +1430,7 @@ terrax_world_status terra_op_execute_json(
 
 static uint32_t tx_outcome_state(const TxWorld* world) {
     if (!world) return TERRA_TX_INVALID;
-    if (g_workspace_token && g_workspace_checkpoint.handle == world->session.handle)
+    if (g_workspace_token && g_workspace_checkpoint.session.handle == world->session.handle)
         return tx_checkpoint_active() ? TERRA_TX_OPEN : TERRA_TX_INVALID;
     return TERRA_TX_IDLE;
 }
