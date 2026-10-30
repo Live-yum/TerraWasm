@@ -46,6 +46,10 @@ for line in diff.splitlines():
         violations.append(
             f"{current_path}: TxWorld's document representation must have one canonical definition"
         )
+    if re.search(r"\bg_worlds\b|\btx_world_registry_slots\s*\(", added) and current_path != "src/terra_registry.c":
+        violations.append(
+            f"{current_path}: the world slot table must remain private to terra_registry.c"
+        )
 
 if violations:
     print("Architecture boundary violations:")
