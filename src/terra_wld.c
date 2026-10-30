@@ -1816,10 +1816,12 @@ void json_bounded_string(TxBuf *b,const uint8_t *source,uint32_t length){
     buf_u8(b,']');
     }
 /* --- signs section --- *//* Each record is: 7-bit UTF-8 text, int32 X, int32 Y. */TX_COLD_PARSER void serialize_signs_json(TxWorld *w,TxBuf *b){
-    int section=tx_actual_section_index(w,3); uint32_t off=section<0?0u:w->starts[section];
-    uint32_t end=section<0?0u:w->ends[section];
-    uint8_t *p=w->file;
-    uint32_t len=w->file_len;
+    int section=tx_actual_section_index(w,3);
+    TxSectionOverride *override=&w->section_overrides[3];
+    uint32_t off=override->active?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=override->active?override->len:(section<0?0u:w->ends[section]);
+    uint8_t *p=override->active?override->data:w->file;
+    uint32_t len=override->active?override->len:w->file_len;
     buf_u8(b,'[');
     uint32_t sign_count=(int16_t)rd_u16le(p,len,&off);
     if (sign_count<0)sign_count=0;
@@ -2012,10 +2014,12 @@ void json_bounded_string(TxBuf *b,const uint8_t *source,uint32_t length){
     buf_cstr(b,"\n}\n");
     }
 TX_COLD_PARSER void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
-    int section=tx_actual_section_index(w,5); uint32_t off=section<0?0u:w->starts[section];
-    uint32_t end=section<0?0u:w->ends[section];
-    uint8_t *p=w->file;
-    uint32_t len=w->file_len;
+    int section=tx_actual_section_index(w,5);
+    TxSectionOverride *override=&w->section_overrides[5];
+    uint32_t off=override->active?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=override->active?override->len:(section<0?0u:w->ends[section]);
+    uint8_t *p=override->active?override->data:w->file;
+    uint32_t len=override->active?override->len:w->file_len;
     buf_u8(b,'[');
     /* v116-v121 contain the legacy dummy section, not TileEntity records. */
     if (w->version<122u) {
@@ -2211,10 +2215,12 @@ TX_COLD_PARSER void serialize_tile_entities_json(TxWorld *w,TxBuf *b){
     buf_u8(b,']');
     }
 /* --- weighted_pressure_plates section --- */TX_COLD_PARSER void serialize_weighted_pressure_plates_json(TxWorld *w,TxBuf *b){
-    int section=tx_actual_section_index(w,6); uint32_t off=section<0?0u:w->starts[section];
-    uint32_t end=section<0?0u:w->ends[section];
-    uint8_t *p=w->file;
-    uint32_t len=w->file_len;
+    int section=tx_actual_section_index(w,6);
+    TxSectionOverride *override=&w->section_overrides[6];
+    uint32_t off=override->active?0u:(section<0?0u:w->starts[section]);
+    uint32_t end=override->active?override->len:(section<0?0u:w->ends[section]);
+    uint8_t *p=override->active?override->data:w->file;
+    uint32_t len=override->active?override->len:w->file_len;
     buf_u8(b,'[');
     uint32_t count=terra_reader_has(off,4u,end)?rd_u32le(p,len,&off):0u;
     for (int32_t i=0;
