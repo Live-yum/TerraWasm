@@ -92,21 +92,11 @@ extern void txw_clear_pixel_art_state(TxWorld* w);
 
 /* Handle slots and generation allocation are owned by terra_registry.c.
  * API code receives a borrowed slot view only for document lifecycle work. */
-#define g_worlds (tx_world_registry_slots())
 extern void tx_stream_release_world(TxWorld* world);
 static TxWorld g_workspace_checkpoint;
 static uint32_t g_workspace_token = 0, g_next_workspace_token = 1;
 extern int tx_stream_has_task(void);
 extern int tx_world_has_task(void);
-
-static TxWorld* tx_claim_world_slot(void) {
-    if (tx_get_world_open_count() != 0u || tx_world_has_task() ||
-        tx_stream_has_task() || tx_checkpoint_active()) {
-        tx_set_error("TERRAX_STATE_ERROR", "close the active world and its tasks before opening another world");
-        return NULL;
-    }
-    return &g_worlds[0];
-}
 
 static terrax_world_status tx_invalid_handle(void) {
     tx_set_error("TERRAX_INVALID_HANDLE", "world handle is stale or invalid");
@@ -115,45 +105,33 @@ static terrax_world_status tx_invalid_handle(void) {
 
 /* ---------- Heap mark management ---------- */
 
-static uint32_t tx_active_heap_mark(void) {
-    uint32_t mark = 0;
-    for (uint32_t i = 0; i < TX_MAX_WORLDS; i++) {
-        if (g_worlds[i].active) {
-            uint32_t hm = g_worlds[i].heap_mark;
-            if (hm > mark) mark = hm;
-        }
-    }
-    return mark;
-}
-
 /* ---------- Global transient reclamation ---------- */
+
+static void tx_clear_transient_world_state(TxWorld* world, void* context) {
+    (void)context;
+    world->op_response_ptr = 0;
+    world->op_response_len = 0;
+    world->op_request_key = NULL;
+    world->op_request_key_len = 0;
+    world->section_response = NULL;
+    world->section_response_len = 0;
+    world->section_response_index = -1;
+    world->media_result = NULL;
+    world->media_result_len = 0;
+    world->media_result_width = 0;
+    world->media_result_height = 0;
+    world->media_result_kind = 0;
+    world->last_op_heap_end = world->heap_mark;
+}
 
 void tx_reclaim_transients(void) {
     /* Require at least one open world to have a meaningful heap_mark
        to avoid destroying Emscripten runtime allocations. */
     if (tx_get_world_open_count() == 0u) return;
-    uint32_t mark = tx_active_heap_mark();
-    for (uint32_t i = 0; i < TX_MAX_WORLDS; i++) {
-        TxWorld* world = &g_worlds[i];
-        if (!world->active) continue;
-        world->op_response_ptr = 0;
-        world->op_response_len = 0;
-        world->op_request_key = NULL;
-        world->op_request_key_len = 0;
-        world->section_response = NULL;
-        world->section_response_len = 0;
-        world->section_response_index = -1;
-        world->media_result = NULL;
-        world->media_result_len = 0;
-        world->media_result_width = 0;
-        world->media_result_height = 0;
-        world->media_result_kind = 0;
-        world->last_op_heap_end = world->heap_mark;
-    }
+    uint32_t mark = tx_world_registry_active_heap_mark();
+    tx_world_registry_visit_active(tx_clear_transient_world_state, NULL);
     uint32_t current = tx_mark();
-    if (current > mark) {
-        tx_rewind(mark);
-    }
+    if (current > mark) tx_rewind(mark);
     tx_last_ptr = NULL; tx_last_len = tx_last_width = tx_last_height = 0;
 }
 
@@ -366,7 +344,7 @@ static int tx_write_file_atomic_from_heap(
 }
 
 static TxWorld* tx_begin_world_open(uint32_t* allocation_mark) {
-    TxWorld* slot = tx_claim_world_slot();
+    TxWorld* slot = tx_world_registry_claim_slot();
     if (!slot) return NULL;
     *allocation_mark = tx_mark();
     memset(slot, 0, sizeof(TxWorld));
@@ -395,7 +373,7 @@ static terrax_world_status tx_activate_owned_world(
         return TERRAX_WORLD_STATUS_PARSE_ERROR;
     }
 
-    slot->handle = tx_next_handle(0u);
+    slot->handle = tx_world_registry_next_handle(0u);
     slot->active = 1;
     slot->heap_mark = tx_mark();
     tx_set_world_open_count(1u);
@@ -444,7 +422,7 @@ terrax_world_status terra_world_create(
     uint32_t allocation_mark = 0;
     TxWorld* slot = tx_begin_world_open(&allocation_mark);
     if (!slot) return TERRAX_WORLD_STATUS_STATE_ERROR;
-    slot->handle = tx_next_handle(0u);
+    slot->handle = tx_world_registry_next_handle(0u);
     slot->active = 1;
     slot->heap_mark = tx_mark();
     tx_set_world_open_count(tx_get_world_open_count() + 1);
@@ -493,14 +471,15 @@ int tx_world_can_activate_stream(void) {
 int tx_stream_activate_world(TxWorld* candidate, uint32_t* out_handle) {
     if (out_handle) *out_handle = 0;
     if (!candidate || !out_handle || !tx_world_can_activate_stream()) return 0;
-    if (g_worlds[0].active && terra_world_close(g_worlds[0].handle) != TERRAX_WORLD_STATUS_OK) return 0;
-    g_worlds[0] = *candidate;
-    g_worlds[0].handle = tx_next_handle(0u);
-    g_worlds[0].active = 1u;
-    g_worlds[0].allocation_mark = tx_mark();
-    g_worlds[0].heap_mark = tx_mark();
+    TxWorld* primary = tx_world_registry_primary_slot();
+    if (primary->active && terra_world_close(primary->handle) != TERRAX_WORLD_STATUS_OK) return 0;
+    *primary = *candidate;
+    primary->handle = tx_world_registry_next_handle(0u);
+    primary->active = 1u;
+    primary->allocation_mark = tx_mark();
+    primary->heap_mark = tx_mark();
     tx_set_world_open_count(1u);
-    *out_handle = g_worlds[0].handle;
+    *out_handle = primary->handle;
     return 1;
 }
 
@@ -919,7 +898,7 @@ terrax_world_status terra_world_open_from_buffer(
         return TERRAX_WORLD_STATUS_INVALID_ARGUMENT;
     }
 
-    TxWorld* slot = tx_claim_world_slot();
+    TxWorld* slot = tx_world_registry_claim_slot();
     if (!slot) {
         return TERRAX_WORLD_STATUS_STATE_ERROR;
     }
@@ -1216,16 +1195,17 @@ static void tx_clear_media_result(TxWorld* world, int release_root) {
 }
 
 /* Palette switches invalidate only derived resources, never world edits. */
+static void tx_invalidate_map_world(TxWorld* world, void* context) {
+    (void)context;
+    txw_clear_marker_color_index(world);
+    txw_clear_icon_atlas(world->handle);
+    tx_output_clear(world);
+    tx_clear_media_result(world, 1);
+    tx_clear_cached_response(world, 1);
+}
+
 void tx_invalidate_map_resources(void) {
-    for (uint32_t i = 0; i < TX_MAX_WORLDS; i++) {
-        TxWorld* world = &g_worlds[i];
-        if (!world->active) continue;
-        txw_clear_marker_color_index(world);
-        txw_clear_icon_atlas(world->handle);
-        tx_output_clear(world);
-        tx_clear_media_result(world, 1);
-        tx_clear_cached_response(world, 1);
-    }
+    tx_world_registry_visit_active(tx_invalidate_map_world, NULL);
 }
 
 static terrax_world_status tx_op_execute_json_inner(
