@@ -125,22 +125,17 @@ typedef struct TxErrorState {
 
 /* ---------- World handle ---------- */
 
-/* Persistent parsed document state. Runtime handles, task/session caches,
- * operation responses and platform leases are deliberately not part of this type.
- * TxWorld keeps an anonymous compatibility view while callers migrate to
- * world->document; both union members have identical layout. */
-/* Runtime owner: generation, source leases, caches and transient output.
- * Task registries are moved behind this owner in the next migration step. */
+/* Runtime owner: handle generation, source leases, caches, tasks and
+ * transient outputs. Task state machines use the central runtime registry. */
 typedef struct TxRuntimeSession {
     uint8_t  active;
     uint32_t handle;            /* packed generation + slot token exposed to JS */
     uint32_t allocation_mark;   /* native sequence before the first owned root */
-    /* File-backed source offsets and column leases are runtime-session state. */
+    /* File-backed source offsets and column leases belong to the runtime session. */
     uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
     uint32_t* stream_columns;
     uint8_t stream_owned;
 
-    };
     uint32_t heap_mark;
     uint32_t override_heap_mark;
 
@@ -199,15 +194,15 @@ typedef struct TxRuntimeSession {
     TxPixelArtChunk* pixel_art_chunks;
 } TxRuntimeSession;
 
-/* Persistent parsed WLD document: bytes, format/header state and overrides.
- * TxWorld keeps an anonymous compatibility alias while callers migrate to
- * world->document. */
+/* Persistent parsed WLD document: file bytes, format/header state and section
+ * overrides. No handles, task slots, caches, or transient output live here. */
 typedef struct WorldDocument {
     uint64_t workspace_revision; /* native commit counter; never serialized to WLD */
 
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
     uint32_t file_len;
+
     /* Format metadata (parsed from binary) */
     uint32_t version;
     uint32_t original_version; /* immutable source release; never a write target */
@@ -488,8 +483,10 @@ typedef struct WorldDocument {
 
     /* Section overrides (for terra_section_set_json) */
     TxSectionOverride section_overrides[TX_MAX_SECTION_OVERRIDES];
- } WorldDocument;
+} WorldDocument;
 
+/* Temporary compatibility facade: direct field access aliases the explicit
+ * session/document owners. Migrate core code to .session/.document gradually. */
 typedef struct TxWorld {
     union {
         TxRuntimeSession session;
@@ -497,12 +494,11 @@ typedef struct TxWorld {
     uint8_t  active;
     uint32_t handle;            /* packed generation + slot token exposed to JS */
     uint32_t allocation_mark;   /* native sequence before the first owned root */
-    /* File-backed source offsets and column leases are runtime-session state. */
+    /* File-backed source offsets and column leases belong to the runtime session. */
     uint32_t stream_source_id, stream_source_size, stream_tile_start, stream_tile_end;
     uint32_t* stream_columns;
     uint8_t stream_owned;
 
-    };
     uint32_t heap_mark;
     uint32_t override_heap_mark;
 
@@ -569,6 +565,7 @@ typedef struct TxWorld {
     /* Raw .wld file bytes (bump-allocated copy) */
     uint8_t* file;
     uint32_t file_len;
+
     /* Format metadata (parsed from binary) */
     uint32_t version;
     uint32_t original_version; /* immutable source release; never a write target */
