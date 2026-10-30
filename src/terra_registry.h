@@ -4,9 +4,12 @@
 #include <stdint.h>
 #include "terra_types.h"
 
-/* Internal world-handle registry. Returned slots are borrowed and remain
- * owned by the registry; callers must not retain them beyond world lifetime. */
-TxWorld* tx_world_registry_slots(void);
+/* Registry-owned slot acquisition and active-world visitation. Slot pointers
+ * are borrowed document views; the slot table itself never leaves this module. */
+TxWorld* tx_world_registry_claim_slot(void);
+TxWorld* tx_world_registry_primary_slot(void);
+uint32_t tx_world_registry_active_heap_mark(void);
+void tx_world_registry_visit_active(void (*visitor)(TxWorld*, void*), void* context);
 uint32_t tx_world_registry_next_handle(uint32_t slot_index);
 TxWorld* tx_get_world(uint32_t handle);
 
