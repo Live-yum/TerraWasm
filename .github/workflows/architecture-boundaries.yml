@@ -1,0 +1,29 @@
+name: Architecture boundaries
+
+on:
+  pull_request:
+    branches: [refactor]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'scripts/check-architecture-boundaries.py'
+      - 'docs/architecture/**'
+      - '.github/workflows/architecture-boundaries.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terrawasm-architecture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-ownership:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check core ownership dependency ratchet
+        run: python3 scripts/check-architecture-boundaries.py
