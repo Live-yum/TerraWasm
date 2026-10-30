@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 #include "terra_output.h"
 /*
  * terra_commit.c -- Save and reopen a world through one caller-owned buffer.
@@ -14,7 +15,6 @@
 #include "terra_checkpoint.h"
 #include <string.h>
 
-extern TxWorld* tx_get_world(uint32_t handle);
 extern void tx_set_error(const char* code, const char* message);
 extern void tx_clear_error(void);
 extern uint8_t* tx_persistent_alloc(uint32_t size);
