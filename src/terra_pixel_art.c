@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 #include "terra_native_span.h"
 #include "terra_owner_guards.h"
 /*
@@ -29,7 +30,6 @@ extern uint32_t tx_bridge_allocation_size(uint32_t ptr);
 extern int tx_bridge_range_is_valid(uint32_t ptr, uint32_t length);
 extern uint32_t tx_mark(void);
 extern void tx_rewind(uint32_t mark);
-extern TxWorld* tx_get_world(uint32_t handle);
 extern void tx_clear_error(void);
 extern void tx_set_error(const char* code, const char* message);
 
