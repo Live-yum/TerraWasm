@@ -4,8 +4,8 @@
 
 _Static_assert(offsetof(TxWorld, session) == offsetof(TxWorld, active),
     "TxRuntimeSession must own world identity and handle generation state");
-_Static_assert(offsetof(TxWorld, document) == offsetof(TxWorld, workspace_revision),
-    "WorldDocument must be embedded at the first persistent document field");
+_Static_assert(offsetof(TxWorld, document) + offsetof(WorldDocument, workspace_revision) == offsetof(TxWorld, workspace_revision),
+    "legacy document fields must alias the explicit WorldDocument member");
 _Static_assert(offsetof(TxWorld, stream_source_id) == offsetof(TxWorld, session.stream_source_id),
     "source lease state must be owned by TxRuntimeSession");
 _Static_assert(offsetof(TxWorld, version) == offsetof(TxWorld, document.version),
