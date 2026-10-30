@@ -34,11 +34,11 @@ for line in diff.splitlines():
     if not line.startswith("+") or line.startswith("+++"):
         continue
     added = line[1:]
-    if re.search(r"\btx_get_world\s*\(", added) and current_path != "src/terra_api.c":
+    if re.search(r"\btx_get_world\s*\(", added) and current_path != "src/terra_registry.c":
         violations.append(
             f"{current_path}: new direct tx_get_world() use; resolve numeric handles at the API boundary"
         )
-    if re.search(r"\bextern\s+TxWorld\s*\*\s*tx_get_world\s*\(", added) and current_path != "src/terra_api.c":
+    if re.search(r"\bextern\s+TxWorld\s*\*\s*tx_get_world\s*\(", added) and current_path != "src/terra_registry.c":
         violations.append(
             f"{current_path}: do not redeclare the API registry lookup in feature/core modules"
         )
