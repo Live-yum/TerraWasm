@@ -11,7 +11,7 @@ This document defines the target split for the native WLD engine. It is a migrat
 
 ## Current debt retained intentionally
 
-`TxWorld` still combines file bytes, stream offsets, parsed format fields, section overrides, rendering caches, marker state, and task-related state. `terra_api.c` still owns the world slot table and `tx_get_world`; several legacy core modules call that lookup directly. Moving the declaration alone would not solve the coupling, so this migration must move ownership and call flow, not merely headers.
+`WorldDocument` and `TxRuntimeSession` are now explicit types. `TxWorld` remains a temporary compatibility facade with anonymous unions that preserve direct field access, so the physical split is not complete. The world slot table, generation allocator, and handle lookup now live in `terra_registry.c`; `terra_api.c` no longer owns or iterates the table directly and instead uses registry-owned claim/visit operations. Several legacy core modules still call `tx_get_world()` directly, so handle resolution has not yet been fully pushed to the API/composition boundary.
 
 ## First ratchet
 
