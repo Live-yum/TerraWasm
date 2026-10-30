@@ -6,6 +6,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Portable SWAR count shared by rank indexes and seed-lamp parity.
+ * No compiler builtin or optional CPU POPCNT instruction is required. */
+static inline uint32_t cx_popcount_u32(uint32_t value) {
+    value -= (value >> 1) & 0x55555555u;
+    value = (value & 0x33333333u) + ((value >> 2) & 0x33333333u);
+    return (((value + (value >> 4)) & 0x0f0f0f0fu) * 0x01010101u) >> 24;
+}
+
 #define CX_PAGE_SHIFT 16u
 #define CX_PAGE_SIZE (1u << CX_PAGE_SHIFT)
 #define CX_WORDS (CX_PAGE_SIZE / 4u)

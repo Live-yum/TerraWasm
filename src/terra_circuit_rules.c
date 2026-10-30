@@ -110,7 +110,7 @@ static int32_t transaction_begin(void* context){
     CxWorld* w=(CxWorld*)context;w->eval_valid=0;w->vm_trip_index=0;
     if(!w->operation_active)snapshot(w);
     if(w->interaction_pending){w->interaction_pending=0;if(cx_interact(w)<0)return -1;}
-    if(w->seed_lamps&&w->command.kind==TCW_TRIGGER)for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;if(p->value||!cx_inside_wiring(w,p->x,p->y))continue;{CxBinding* b=cx_find_binding(w,p->x,p->y);if(!b||!cx_lazy_toggle(&b->tile))continue;uint32_t wires=cx_wire_mask(&b->tile)&w->command.mask;if(__builtin_popcount(wires)&1u){uint32_t value=(uint32_t)cx_override_value(w,b->gate,b->x,b->y)^1u;if(cx_set_override(w,b->gate,b->x,b->y,value)<0)return -1;}}}
+    if(w->seed_lamps&&w->command.kind==TCW_TRIGGER)for(uint32_t i=0;i<w->point_count;i++){CxInputPoint* p=w->points+i;if(p->value||!cx_inside_wiring(w,p->x,p->y))continue;{CxBinding* b=cx_find_binding(w,p->x,p->y);if(!b||!cx_lazy_toggle(&b->tile))continue;uint32_t wires=cx_wire_mask(&b->tile)&w->command.mask;if(cx_popcount_u32(wires)&1u){uint32_t value=(uint32_t)cx_override_value(w,b->gate,b->x,b->y)^1u;if(cx_set_override(w,b->gate,b->x,b->y,value)<0)return -1;}}}
     return 0;
 }
 int cx_operation_begin(CxWorld* w){
