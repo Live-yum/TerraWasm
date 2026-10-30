@@ -70,6 +70,9 @@ test(`${route}: empty clears all tile fields and partial-object metadata; skip a
     else assert.equal(M[route==='bulk'?'_txw_add_pixel_art_chunks_bulk':'_txw_add_pixel_art_chunks_bulk_fast'](handle,alloc(record),record.length,1),0);
   }
   const output=commit(handle);handle=output.handle;
+  // A committed workspace must expose its effective metadata on the same
+  // handle, not only after serializing and reopening the WLD bytes.
+  assert.equal(json(handle,'signs').length,2,'same-handle signs query must reflect the committed section override');
   const parts=sections(output.bytes).parts;
   assert.deepEqual(parts[2],chest.expected);assert.deepEqual(parts[3],sign.expected);assert.deepEqual(parts[5],entity.expected);
   const keptPlates=Buffer.concat([Buffer.from([2,0,0,0]),plates.subarray(12)]);
