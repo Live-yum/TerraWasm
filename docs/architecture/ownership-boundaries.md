@@ -15,10 +15,12 @@ This document defines the target split for the native WLD engine. It is a migrat
 
 ## First ratchet
 
-`scripts/check-architecture-boundaries.py` compares the PR against its target branch and rejects newly added:
+`scripts/check-architecture-boundaries.py` compares the PR against its target branch and rejects increases in direct lexical dependencies per changed C source/header file. Comments and string/character literals are excluded, and calls/declarations may span lines. It rejects increased:
 - direct `tx_get_world()` call sites outside `src/terra_api.c`;
 - duplicate declarations of the registry lookup outside its owner;
 - duplicate definitions of `TxWorld` outside `include/terra_types.h`.
+
+The lookup implementation and declaration are allowed in `src/terra_registry.c` and `src/terra_registry.h`. Slot-table access remains confined to those owner files, including from the API layer. The check is not a full C preprocessor or ownership proof: macro-expanded/indirect calls and relocation of an equal number of legacy calls within a file are not certified. Runtime task-slot accessors still return mutable borrowed storage and remain encapsulation debt.
 
 Existing call sites are deliberately grandfathered so the first guardrail does not make the current branch unbuildable. A passing result means only that the PR did not increase these dependencies.
 

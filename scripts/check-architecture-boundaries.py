@@ -1,61 +1,74 @@
 #!/usr/bin/env python3
-"""Reject new direct dependencies on the legacy world-handle registry.
+"""Ratchet direct registry dependencies in changed C sources.
 
-This is a ratchet, not a claim that the current codebase is already layered:
-existing tx_get_world call sites remain visible debt. New call sites must go
-through the public API/application boundary until the registry is extracted.
+Compare lexical occurrences per file, not added diff lines: an existing call
+whose formatting or adjacent field access changes is not a new dependency.
+This is not a C preprocessor or a proof that legacy dependencies are removed.
 """
 from __future__ import annotations
-
 import os
 import re
 import subprocess
 import sys
+from collections import Counter
 
-base_ref = os.environ.get("GITHUB_BASE_REF") or os.environ.get("ARCHITECTURE_BASE_REF") or "refactor"
-base = f"origin/{base_ref}"
+OWNER_PATHS = {"src/terra_registry.c", "src/terra_registry.h"}
+API_PATHS = OWNER_PATHS | {"src/terra_api.c"}
+# Preserve token separation/newlines while discarding comments and literals.
+NON_CODE = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\[\s\S]|[^"\\])*"|\'(?:\\[\s\S]|[^\'\\])*\'')
+
+def dependencies(path: str, source: str) -> Counter:
+    source = source.replace("\\\r\n", "").replace("\\\n", "")
+    code = NON_CODE.sub(lambda m: "\n" * m.group().count("\n") + " ", source)
+    counts = Counter()
+    if path not in API_PATHS:
+        counts["direct tx_get_world call/declaration outside API"] = len(re.findall(r"\btx_get_world\s*\(", code))
+    if path not in OWNER_PATHS:
+        counts["registry lookup redeclaration outside owner"] = len(re.findall(r"\bextern\s+TxWorld\s*\*\s*tx_get_world\s*\(", code))
+        counts["world slot table access outside owner"] = len(re.findall(r"\bg_worlds\b|\btx_world_registry_slots\s*\(", code))
+    if path != "include/terra_types.h":
+        counts["duplicate TxWorld definition"] = len(re.findall(r"\btypedef\s+struct\s+TxWorld\b", code))
+    return counts
 
 def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True).strip()
+    return subprocess.check_output(["git", *args], text=True)
 
-try:
-    merge_base = git("merge-base", base, "HEAD")
-    diff = git("diff", "--no-ext-diff", "--unified=0", f"{merge_base}...HEAD", "--", "src", "include")
-except subprocess.CalledProcessError as error:
-    print(f"architecture check could not compare against {base}: {error}", file=sys.stderr)
-    sys.exit(2)
+def source_at(ref: str, path: str) -> str:
+    result = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout
+    # Only a genuinely absent path is an empty baseline; other Git errors fail.
+    paths = git("ls-tree", "--name-only", ref, "--", path).splitlines()
+    if not paths:
+        return ""
+    raise RuntimeError(result.stderr)
 
-violations: list[str] = []
-current_path = ""
-for line in diff.splitlines():
-    if line.startswith("+++ b/"):
-        current_path = line[6:]
-        continue
-    if not line.startswith("+") or line.startswith("+++"):
-        continue
-    added = line[1:]
-    if re.search(r"\btx_get_world\s*\(", added) and current_path not in ("src/terra_registry.c", "src/terra_registry.h"):
-        violations.append(
-            f"{current_path}: new direct tx_get_world() use; resolve numeric handles at the API boundary"
-        )
-    if re.search(r"\bextern\s+TxWorld\s*\*\s*tx_get_world\s*\(", added) and current_path not in ("src/terra_registry.c", "src/terra_registry.h"):
-        violations.append(
-            f"{current_path}: do not redeclare the API registry lookup in feature/core modules"
-        )
-    if re.search(r"typedef\s+struct\s+TxWorld\b", added) and current_path != "include/terra_types.h":
-        violations.append(
-            f"{current_path}: TxWorld's document representation must have one canonical definition"
-        )
-    if re.search(r"\bg_worlds\b|\btx_world_registry_slots\s*\(", added) and current_path not in ("src/terra_registry.c", "src/terra_registry.h"):
-        violations.append(
-            f"{current_path}: the world slot table must remain private to terra_registry.c"
-        )
+def main() -> int:
+    base_ref = os.environ.get("GITHUB_BASE_REF") or os.environ.get("ARCHITECTURE_BASE_REF") or "refactor"
+    base = f"origin/{base_ref}"
+    try:
+        merge_base = git("merge-base", base, "HEAD").strip()
+        paths = git("diff", "--no-ext-diff", "--name-only", "--diff-filter=ACMR", merge_base, "HEAD", "--", "src", "include").splitlines()
+        violations = []
+        for path in paths:
+            if not path.endswith((".c", ".h")):
+                continue
+            before = dependencies(path, source_at(merge_base, path))
+            after = dependencies(path, source_at("HEAD", path))
+            for kind, count in after.items():
+                if count > before[kind]:
+                    violations.append(f"{path}: {kind} increased from {before[kind]} to {count}")
+    except (subprocess.CalledProcessError, RuntimeError) as error:
+        print(f"architecture check could not compare against {base}: {error}", file=sys.stderr)
+        return 2
+    if violations:
+        print("Architecture boundary violations:")
+        for violation in violations:
+            print(f" - {violation}")
+        return 1
+    print("Architecture boundary ratchet passed: no increased direct registry or TxWorld-definition dependencies.")
+    print("Legacy call sites, macro-expanded dependencies and ownership encapsulation are not certified by this lexical check.")
+    return 0
 
-if violations:
-    print("Architecture boundary violations:")
-    for violation in violations:
-        print(f" - {violation}")
-    sys.exit(1)
-
-print("Architecture boundary ratchet passed: no new direct world-registry or TxWorld-definition dependencies.")
-print("Legacy call sites remain and are not certified as migrated by this check.")
+if __name__ == "__main__":
+    sys.exit(main())

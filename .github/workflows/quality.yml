@@ -44,22 +44,26 @@ jobs:
             -Wl,--gc-sections -o "$RUNNER_TEMP/circuit-device-clock"
           "$RUNNER_TEMP/circuit-device-clock"
 
-  windows-plr-filesystem:
+  windows-filesystem:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Configure native Windows PLR file contract
-        run: cmake -S . -B build-windows-plr -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_FEATURE_SET=plr -DTERRAWASM_NATIVE_TESTS=ON
-      - name: Build native Windows PLR file contract
-        run: cmake --build build-windows-plr --config Release --target terra_plr_file_contract terra_allocator_contract terra_native_span_contract --parallel
+        with:
+          lfs: true
+      - name: Install native Windows zlib
+        run: vcpkg install zlib:x64-windows
+      - name: Configure native Windows WLD and PLR file contracts
+        run: cmake -S . -B build-windows-files -DCMAKE_BUILD_TYPE=Release -DTERRAWASM_FEATURE_SET=all -DTERRAWASM_NATIVE_TESTS=ON "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Build native Windows file contracts
+        run: cmake --build build-windows-files --config Release --target terra_wld_file_contract terra_plr_file_contract terra_allocator_contract terra_native_span_contract --parallel
       - name: Verify Unicode paths and real replacement failures
-        run: ctest --test-dir build-windows-plr --build-config Release --output-on-failure -R "^terra_(plr_file|allocator|native_span)_contract$"
+        run: ctest --test-dir build-windows-files --build-config Release --output-on-failure -R "^terra_(wld_file|plr_file|allocator|native_span)_contract$"
       - name: Upload Windows filesystem evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: windows-plr-filesystem-${{ github.sha }}
-          path: build-windows-plr/Testing/Temporary/
+          name: windows-filesystem-${{ github.sha }}
+          path: build-windows-files/Testing/Temporary/
           if-no-files-found: warn
 
   sanitizer-and-fuzz:
@@ -105,6 +109,13 @@ jobs:
       - name: Build and test Node and Web artifacts
         shell: pwsh
         run: ./build.ps1 -Target all -Features all -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Verify workspace metadata on production Web artifact
+        env:
+          PIXEL_ART_WEB_ARTIFACT: ${{ github.workspace }}/build/terrax_world_wasm_web.js
+        run: node --test tests/test_pixel_art_semantics.js
+      - name: Prove workspace regression rejects audited stale readers
+        shell: bash
+        run: bash scripts/test-workspace-metadata-negative.sh "$RUNNER_TEMP/emsdk"
       - name: Build and verify H5 profile from the same source
         shell: bash
         run: scripts/build-h5-profile.sh "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/terrawasm-h5" "$RUNNER_TEMP/emsdk"
@@ -158,6 +169,11 @@ jobs:
       - name: Build and test selected capability set
         shell: pwsh
         run: ./build.ps1 -Target all -Features $env:TERRAWASM_FEATURE_SET -Test -EmsdkDir "$env:RUNNER_TEMP/emsdk"
+      - name: Verify workspace metadata on WLD Web artifact
+        if: matrix.features == 'wld'
+        env:
+          PIXEL_ART_WEB_ARTIFACT: ${{ github.workspace }}/build/terrax_world_wasm_web.js
+        run: node --test tests/test_pixel_art_semantics.js
       - name: Validate buffer-only WLD Web profile
         if: matrix.features == 'wld'
         shell: pwsh

@@ -9,7 +9,7 @@
 
 static TxOpenTask open_tasks[TX_RUNTIME_MAX_OPEN_TASKS];
 static uint32_t open_task_generation = 1u;
-static void* stream_task;
+static struct StreamTask* stream_task;
 static uint32_t stream_generation = 1u;
 static uint32_t stream_lease_generation = 1u;
 
@@ -26,7 +26,7 @@ uint32_t tx_runtime_session_next_open_task_generation(void) {
     return generation;
 }
 
-void** tx_runtime_session_stream_task_slot(void) {
+struct StreamTask** tx_runtime_session_stream_task_slot(void) {
     return &stream_task;
 }
 

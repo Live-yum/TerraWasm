@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'include/**'
       - 'scripts/check-architecture-boundaries.py'
+      - 'tests/test_architecture_boundaries.py'
       - 'docs/architecture/**'
       - '.github/workflows/architecture-boundaries.yml'
   workflow_dispatch:
@@ -25,5 +26,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Verify architecture ratchet positive and negative fixtures
+        run: python3 tests/test_architecture_boundaries.py
       - name: Check core ownership dependency ratchet
         run: python3 scripts/check-architecture-boundaries.py

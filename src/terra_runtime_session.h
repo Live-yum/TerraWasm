@@ -39,7 +39,8 @@ uint32_t tx_runtime_session_next_open_task_generation(void);
 
 /* Stream task representation remains private to terra_stream.c. Its pointer
  * slot and generation sequences are nevertheless owned by this module. */
-void** tx_runtime_session_stream_task_slot(void);
+struct StreamTask;
+struct StreamTask** tx_runtime_session_stream_task_slot(void);
 uint32_t tx_runtime_session_next_stream_generation(void);
 uint32_t tx_runtime_session_next_stream_lease_generation(void);
 

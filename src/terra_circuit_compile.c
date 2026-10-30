@@ -199,13 +199,12 @@ static int prepare_store(CxWorld* w){
     memset(w->cache_pages,0,w->cache_count*sizeof(CxCachePage));memset(w->cache_map,0,(w->store_pages?w->store_pages:1u)*4u);memset(w->stored_pages,0,(w->store_pages+7u)/8u+1u);memset(w->output,0,TERRA_CIRCUIT_WORLD_WINDOW);
     w->output_offset=0;w->phase=CX_ZERO;return TCW_OK;
 }
-static uint32_t popcount(uint32_t v){v=v-((v>>1)&0x55555555u);v=(v&0x33333333u)+((v>>2)&0x33333333u);return (((v+(v>>4))&0x0f0f0f0fu)*0x01010101u)>>24;}
 uint32_t cx_action_index(const CxWorld* w,uint32_t net){
     if(!net||net>w->networks||!(w->action_bits[net>>3]&(1u<<(net&7u))))return CX_NONE;
     uint32_t block=net>>8,count=w->action_rank[block],start=block<<8;
     const uint32_t* words=(const uint32_t*)w->action_bits;
-    for(uint32_t i=start>>5;i<(net>>5);i++)count+=popcount(words[i]);
-    uint32_t mask=net&31u;count+=popcount(words[net>>5]&((mask==0u)?0u:((1u<<mask)-1u)));return count;
+    for(uint32_t i=start>>5;i<(net>>5);i++)count+=cx_popcount_u32(words[i]);
+    uint32_t mask=net&31u;count+=cx_popcount_u32(words[net>>5]&((mask==0u)?0u:((1u<<mask)-1u)));return count;
 }
 static int prepare_intern(CxWorld* w){
     cx_words_free(w,&w->previous_gate);

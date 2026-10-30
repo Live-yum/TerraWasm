@@ -120,7 +120,7 @@ typedef struct StreamTask {
     TxStreamPng* png_encoder;
     StreamStamp* stamp;
 } StreamTask;
-#define current (*((StreamTask**)tx_runtime_session_stream_task_slot()))
+#define current (*tx_runtime_session_stream_task_slot())
 static void counter_add(uint32_t* value,uint32_t n){*value=n>UINT32_MAX-*value?UINT32_MAX:*value+n;}
 #ifdef TERRAX_TESTING
 static uint32_t test_memory_bytes;

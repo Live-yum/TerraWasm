@@ -89,6 +89,9 @@ static uint8_t *encoded(uint32_t handle, uint32_t *length) {
 
 int main(void) {
     const uint32_t baseline = tx_heap_used();
+#ifndef _WIN32
+    mode_t previous_umask = umask(0027);
+#endif
     FILE *fixture = fopen(TERRAWASM_PLR_JSON_FIXTURE_PATH, "rb"); assert(fixture);
     assert(!fseek(fixture, 0, SEEK_END)); long size = ftell(fixture);
     assert(size > 0 && size < 1024 * 1024); rewind(fixture);
@@ -148,6 +151,10 @@ int main(void) {
 #endif
         assert(tx_heap_used() == retained);
         assert(!terra_plr_save(player, path)); exact_file(path, new_bytes, new_length);
+#ifndef _WIN32
+        struct stat info; assert(!stat(path, &info));
+        assert((info.st_mode & 0777) == 0640);
+#endif
         no_candidates(directory);
         uint32_t reopened = 0; assert(!terra_plr_open(path, &reopened));
         uint32_t reopened_length = 0; uint8_t *reopened_bytes = encoded(reopened, &reopened_length);
@@ -155,6 +162,9 @@ int main(void) {
         free(reopened_bytes); assert(!terra_plr_close(reopened)); assert(tx_heap_used() == retained);
     }
     remove_file(path); remove_directory(directory);
+#ifndef _WIN32
+    umask(previous_umask);
+#endif
     free(old_bytes); free(new_bytes); assert(!terra_plr_close(player));
     assert(tx_heap_used() == baseline);
     puts("PLR UTF-8 filesystem: 16 continuous Unicode/emoji publication cycles; short/corrupt/truncated/OOM and replacement failures preserve originals without candidates or owner leaks");

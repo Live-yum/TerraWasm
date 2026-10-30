@@ -1,6 +1,10 @@
 #include <assert.h>
 #include <stddef.h>
 #include "terra_types.h"
+#include "../src/terra_runtime_session.h"
+
+_Static_assert(_Generic(tx_runtime_session_stream_task_slot(), struct StreamTask**: 1, default: 0),
+    "runtime stream slot must retain its concrete pointer type without aliasing void pointer storage");
 
 _Static_assert(offsetof(TxWorld, session) == offsetof(TxWorld, active),
     "TxRuntimeSession must own world identity and handle generation state");

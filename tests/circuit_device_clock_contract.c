@@ -39,7 +39,34 @@ static int interact(CxWorld* world, uint32_t index) {
     return cx_interact(world);
 }
 
+static uint32_t reference_popcount(uint32_t value) {
+    uint32_t count = 0;
+    for (unsigned bit = 0; bit < 32; ++bit) count += (value >> bit) & 1u;
+    return count;
+}
+
+static void test_portable_popcount(void) {
+    /* Exhaust every wire mask, every half-word, and both word halves. */
+    for (uint32_t value = 0; value < 65536u; ++value) {
+        uint32_t expected = reference_popcount(value);
+        assert(cx_popcount_u32(value) == expected);
+        assert(cx_popcount_u32(value << 16) == expected);
+        assert(cx_popcount_u32(value | (value << 16)) == expected * 2u);
+        if (value < 16u) assert((cx_popcount_u32(value) & 1u) == (expected & 1u));
+    }
+    uint32_t state = 0x13579bdfu;
+    for (unsigned i = 0; i < 4096; ++i) {
+        state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+        assert(cx_popcount_u32(state) == reference_popcount(state));
+    }
+    assert(cx_popcount_u32(UINT32_MAX) == 32u);
+    assert(cx_popcount_u32(0x80000000u) == 1u);
+    assert(cx_popcount_u32(0xaaaaaaaau) == 16u);
+    assert(cx_popcount_u32(0x55555555u) == 16u);
+}
+
 int main(void) {
+    test_portable_popcount();
     CxWorld world;
     reset(&world);
     for (uint32_t i = 0; i < COUNT; ++i) {

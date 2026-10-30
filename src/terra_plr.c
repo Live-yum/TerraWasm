@@ -11,6 +11,7 @@
  */
 
 #include "terra_plr.h"
+#include "platform_file_io.h"
 #include "terra_checkpoint.h"
 #include "terra_types.h"
 #include "terra_reader.h"
@@ -3899,46 +3900,14 @@ static const uint8_t *plr_encoded_document(
  * -------------------------------------------------------------------------
  */
 
-#ifdef _WIN32
-typedef wchar_t PlrFileChar;
-#define PLR_FILE_TEXT(text) L##text
-#define plr_file_fopen _wfopen
-#define plr_file_remove _wremove
-/* The public ABI always takes UTF-8, regardless of the process ANSI code page.
- * Reject invalid input instead of silently selecting another filename. Both
- * publication paths are allocated before an exclusive candidate is created. */
-static wchar_t *plr_windows_path(const char *path) {
-    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
-    if (count <= 0 || (uint64_t)count * sizeof(wchar_t) > UINT32_MAX) return NULL;
-    wchar_t *wide = (wchar_t *)plr_malloc((size_t)count * sizeof(wchar_t));
-    if (!wide) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, count) != count) {
-        free(wide);
-        return NULL;
-    }
-    return wide;
-}
-static FILE *plr_fopen_utf8(const char *path) {
-    wchar_t *wide = plr_windows_path(path);
-    if (!wide) return NULL;
-    FILE *file = _wfopen(wide, L"rb");
-    free(wide);
-    return file;
-}
-#else
-typedef char PlrFileChar;
-#define PLR_FILE_TEXT(text) text
-#define plr_file_fopen fopen
-#define plr_file_remove remove
-static FILE *plr_fopen_utf8(const char *path) { return fopen(path, "rb"); }
-#endif
+static const TxFileAllocator plr_file_memory = { plr_malloc, tx_persistent_free };
 
 static int plr_read_file(
     const char *path, uint8_t **out_data, uint32_t *out_length) {
     if (!path || !out_data || !out_length) return 0;
     *out_data = NULL;
     *out_length = 0u;
-    FILE *file = plr_fopen_utf8(path);
+    FILE *file = tx_file_open_utf8(path, 0, &plr_file_memory);
     if (!file) return 0;
     if (fseek(file, 0, SEEK_END) != 0) {
         fclose(file);
@@ -3974,88 +3943,15 @@ static int plr_test_corrupt_candidate;
 void terrax_test_plr_corrupt_candidate(int enabled) { plr_test_corrupt_candidate=enabled; }
 void terrax_test_plr_write_limit(uint32_t limit) { plr_test_write_limit = limit; }
 #endif
-/* Read the completed candidate, not just the source buffer or a write count.
- * Bounded verification establishes byte identity; full parsing was completed
- * before this file was created. No durability/managed-CAS claim is implied. */
-static int plr_candidate_matches(const PlrFileChar* path,const uint8_t* data,uint32_t length) {
-    FILE* file=plr_file_fopen(path,PLR_FILE_TEXT("rb"));if(!file)return 0;
-    uint8_t chunk[4096];uint32_t offset=0;int ok=1;
-    while(ok&&offset<length){
-        uint32_t n=length-offset;if(n>sizeof(chunk))n=sizeof(chunk);
-        if(fread(chunk,1,n,file)!=n||!plr_memory_equal(chunk,data+offset,n))ok=0;
-        offset+=n;
-    }
-    if(ok&&(fgetc(file)!=EOF||ferror(file)))ok=0;
-    if(fclose(file)!=0)ok=0;
-    return ok;
-}
 static int plr_write_file(const char *path, const uint8_t *data, uint32_t length) {
-    if (!path || (!data && length)) return 0;
-#ifdef _WIN32
-    PlrFileChar *target = plr_windows_path(path);
-    if (!target) return 0;
-    uint32_t n = (uint32_t)wcslen(target);
-    unsigned long pid = (unsigned long)_getpid();
-#else
-    const PlrFileChar *target = path;
-    uint32_t n = tx_strlen(path);
-    unsigned long pid = (unsigned long)getpid();
-#endif
-    PlrFileChar *candidate = NULL;
-    int ok = 0;
-    if (n > UINT32_MAX / sizeof(PlrFileChar) - 80u) goto cleanup;
-    candidate = (PlrFileChar *)plr_malloc(((size_t)n + 80u) * sizeof(PlrFileChar));
-    if (!candidate) goto cleanup;
-    static uint32_t sequence;
-    FILE *file = NULL;
-    for (unsigned attempt = 0; attempt < 128; ++attempt) {
-#ifdef _WIN32
-        int count = swprintf(candidate, n + 80u, L"%ls.tmp.%lu.%lu", target, pid, (unsigned long)++sequence);
-        if (count < 0 || (uint32_t)count >= n + 80u) break;
-        /* MSVCRT does not support fopen's C11 exclusive-create mode. */
-        int fd = _wopen(candidate, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-        if (fd >= 0) {
-            file = _fdopen(fd, "wb");
-            if (!file) { _close(fd); plr_file_remove(candidate); break; }
-        }
-#else
-        snprintf(candidate, n + 80u, "%s.tmp.%lu.%lu", target, pid, (unsigned long)++sequence);
-        file = fopen(candidate, "wbx");
-#endif
-        if (file || errno != EEXIST) break;
-    }
-    if (!file) goto cleanup;
-    size_t requested = length;
+    TxFilePublishOptions options = {0};
+    options.posix_mode = 0666;
+    options.attempts = 128;
 #ifdef TERRAX_TESTING
-    if (requested > plr_test_write_limit) requested = plr_test_write_limit;
+    options.write_limit = plr_test_write_limit;
+    options.corrupt_candidate = plr_test_corrupt_candidate;
 #endif
-    size_t written = fwrite(data, 1u, requested, file);
-    ok = written == length && fflush(file) == 0;
-    if (fclose(file) != 0) ok = 0;
-#ifdef TERRAX_TESTING
-    if(ok&&plr_test_corrupt_candidate){
-        FILE* corrupt=plr_file_fopen(candidate,plr_test_corrupt_candidate==3?PLR_FILE_TEXT("wb"):PLR_FILE_TEXT("r+b"));
-        if(!corrupt)ok=0;
-        else {
-            if(plr_test_corrupt_candidate==1){int first=fgetc(corrupt);if(first==EOF||fseek(corrupt,0,SEEK_SET)||fputc(first^0xff,corrupt)==EOF)ok=0;}
-            if(plr_test_corrupt_candidate==2&&(fseek(corrupt,0,SEEK_END)||fputc(0,corrupt)==EOF))ok=0;
-            if(fclose(corrupt))ok=0;
-        }
-    }
-#endif
-    if(ok)ok=plr_candidate_matches(candidate,data,length);
-#ifdef _WIN32
-    if (ok) ok = MoveFileExW(candidate, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-    if (ok) ok = rename(candidate, target) == 0;
-#endif
-    if (!ok) plr_file_remove(candidate);
-cleanup:
-    free(candidate);
-#ifdef _WIN32
-    free(target);
-#endif
-    return ok;
+    return tx_file_publish_utf8(path, data, length, &plr_file_memory, &options);
 }
 
 /* Preview matches Player.LoadPlayer: PaddingMode.None and unread capacity are
