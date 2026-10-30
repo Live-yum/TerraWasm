@@ -192,9 +192,9 @@ static terrax_world_status prepare_task(TxOpenTask* task) {
     }
 
     memset(task->staging_world, 0, sizeof(TxWorld));
-    task->staging_world->allocation_mark = task->allocation_mark;
-    task->staging_world->file = task->file_data;
-    task->staging_world->file_len = task->buffer_len;
+    task->staging_world->session.allocation_mark = task->allocation_mark;
+    task->staging_world->document.file = task->file_data;
+    task->staging_world->document.file_len = task->buffer_len;
     task->stage = TX_OPEN_STAGE_COPY;
     task->progress = 1u;
     return TERRAX_WORLD_STATUS_IN_PROGRESS;
@@ -317,11 +317,11 @@ static terrax_world_status advance_one_unit(TxOpenTask* task) {
             if (tx_open_preview_finish_png(&task->preview) < 0) {
                 return fail_task(task, TERRAX_WORLD_STATUS_INTERNAL_ERROR);
             }
-            task->staging_world->media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
-            task->staging_world->media_result_len = tx_last_len;
-            task->staging_world->media_result_width = tx_last_width;
-            task->staging_world->media_result_height = tx_last_height;
-            task->staging_world->media_result_kind = 2u;
+            task->staging_world->session.media_result = (uint8_t*)(uintptr_t)tx_last_ptr;
+            task->staging_world->session.media_result_len = tx_last_len;
+            task->staging_world->session.media_result_width = tx_last_width;
+            task->staging_world->session.media_result_height = tx_last_height;
+            task->staging_world->session.media_result_kind = 2u;
             task->stage = TX_OPEN_STAGE_ACTIVATE;
             task->progress = 96u;
             return TERRAX_WORLD_STATUS_IN_PROGRESS;
