@@ -1,3 +1,4 @@
+#include "terra_registry.h"
 #include "terra_owner_guards.h"
 /* Cooperative file-backed WLD reader/writer. No whole tile or output buffer. */
 #include "terra_stream.h"
@@ -23,7 +24,6 @@ extern uint8_t* tx_persistent_alloc(uint32_t);
 extern void tx_internal_free(void*);
 extern uint32_t tx_mark(void);
 extern int tx_bridge_range_is_valid(uint32_t,uint32_t);
-extern TxWorld* tx_get_world(uint32_t);
 extern void tx_set_error(const char*,const char*);
 extern void tx_clear_error(void);
 extern char tx_last_error[];
