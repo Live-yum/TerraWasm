@@ -34,14 +34,15 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True, encoding="utf-8")
 
 def source_at(ref: str, path: str) -> str:
-    result = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True, encoding="utf-8")
+    result = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True)
     if result.returncode == 0:
-        return result.stdout
+        return result.stdout.decode("utf-8")
     # Only a genuinely absent path is an empty baseline; other Git errors fail.
     paths = git("ls-tree", "--name-only", ref, "--", path).splitlines()
     if not paths:
         return ""
-    raise RuntimeError(result.stderr)
+    # Diagnostics may use the Git process locale, unlike UTF-8 source bytes.
+    raise RuntimeError(result.stderr.decode("utf-8", errors="backslashreplace"))
 
 def main() -> int:
     base_ref = os.environ.get("GITHUB_BASE_REF") or os.environ.get("ARCHITECTURE_BASE_REF") or "refactor"
