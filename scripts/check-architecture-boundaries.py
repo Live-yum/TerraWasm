@@ -31,10 +31,10 @@ def dependencies(path: str, source: str) -> Counter:
     return counts
 
 def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True)
+    return subprocess.check_output(["git", *args], text=True, encoding="utf-8")
 
 def source_at(ref: str, path: str) -> str:
-    result = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+    result = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True, encoding="utf-8")
     if result.returncode == 0:
         return result.stdout
     # Only a genuinely absent path is an empty baseline; other Git errors fail.
