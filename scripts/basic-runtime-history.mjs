@@ -32,7 +32,21 @@ export function instrumentBasicRuntimeHistory(source) {
     if (source.split(before).length !== 2) throw new Error(`BASIC loader template drift: ${label}`)
     source = source.replace(before, after)
   }
-  return source
+  return flattenBasicRuntimeFactory(source)
+}
+
+// The outer IIFE owns only the script-URL cell. Keep that private, mutable cell
+// in a lexical block instead of allocating an otherwise unused factory/frame.
+// It must remain mutable: the generated factory assigns self.location in a
+// Worker. The comma expression preserves the anonymous async function's name.
+// Neither the async body nor the CommonJS/AMD/global export suffix is rewritten.
+export function flattenBasicRuntimeFactory(source) {
+  const before = 'var TerraWorldWasmWeb=(()=>{var _scriptName=globalThis.document?.currentScript?.src;return async function(moduleArg={})'
+  const after = 'var TerraWorldWasmWeb;{let _scriptName=globalThis.document?.currentScript?.src;TerraWorldWasmWeb=(0,async function(moduleArg={})'
+  const end = ';return moduleRtn}})();'
+  if (!source.startsWith(before) || source.split(before).length !== 2
+    || source.split(end).length !== 2) throw new Error('BASIC loader template drift: factory lexical scope')
+  return source.replace(before, after).replace(end, ';return moduleRtn});}')
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
