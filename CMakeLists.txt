@@ -302,7 +302,7 @@ if(EMSCRIPTEN)
     set(WEB_IDENTITY_FLAGS ${WEB_LINK_OPTIONS})
     list(REMOVE_AT WEB_IDENTITY_FLAGS 0 1)
     list(PREPEND WEB_IDENTITY_FLAGS "--post-js=memory-growth-limit.js" "-sEXPORTED_FUNCTIONS=@exported_functions_web.json")
-    list(APPEND WEB_IDENTITY_FLAGS "--wrapper-transform=basic-runtime-history-v2")
+    list(APPEND WEB_IDENTITY_FLAGS "--wrapper-transform=basic-runtime-history-v3")
     string(JOIN " @@ " COMMON_FLAGS_TEXT ${COMMON_MANIFEST_FLAGS})
     string(JOIN " @@ " NODE_FLAGS_TEXT ${NODE_IDENTITY_FLAGS})
     string(JOIN " @@ " WEB_FLAGS_TEXT ${WEB_IDENTITY_FLAGS})
@@ -341,7 +341,9 @@ if(EMSCRIPTEN)
     )
     find_program(TERRAX_NODE_EXECUTABLE NAMES node REQUIRED)
     set(BASIC_HISTORY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/basic-runtime-history.mjs")
-    set_property(TARGET terrax_world_wasm_web APPEND PROPERTY LINK_DEPENDS "${BASIC_HISTORY_SCRIPT}")
+    set_property(TARGET terrax_world_wasm_web APPEND PROPERTY LINK_DEPENDS "${BASIC_HISTORY_SCRIPT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/prune-native-export-aliases.mjs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor/acorn/acorn.mjs")
     add_custom_command(TARGET terrax_world_wasm_web POST_BUILD
         COMMAND "${TERRAX_NODE_EXECUTABLE}" "${BASIC_HISTORY_SCRIPT}" "$<TARGET_FILE:terrax_world_wasm_web>"
         COMMENT "Instrumenting BASIC memory history and growth fence"

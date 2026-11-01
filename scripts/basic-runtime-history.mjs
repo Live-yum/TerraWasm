@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pruneNativeExportAliases } from './prune-native-export-aliases.mjs'
 
 // Match the reviewed Emscripten loader exactly: compiler drift must fail the
 // build rather than emit a wrapper that silently loses its growth certificate.
@@ -32,7 +33,7 @@ export function instrumentBasicRuntimeHistory(source) {
     if (source.split(before).length !== 2) throw new Error(`BASIC loader template drift: ${label}`)
     source = source.replace(before, after)
   }
-  return flattenBasicRuntimeFactory(source)
+  return pruneNativeExportAliases(flattenBasicRuntimeFactory(source))
 }
 
 // The outer IIFE owns only the script-URL cell. Keep that private, mutable cell

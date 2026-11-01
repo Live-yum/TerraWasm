@@ -90,6 +90,6 @@ test('compiler drift, duplicate wrappers and repeated transformation fail closed
 
 test('compiled Web identity declares the exact producer transformation revision', () => {
   const cmake = fs.readFileSync(new URL('../CMakeLists.txt', import.meta.url), 'utf8')
-  assert.ok(cmake.includes('list(APPEND WEB_IDENTITY_FLAGS "--wrapper-transform=basic-runtime-history-v2")'))
+  assert.ok(cmake.includes('list(APPEND WEB_IDENTITY_FLAGS "--wrapper-transform=basic-runtime-history-v3")'))
   assert.ok(!cmake.includes('--wrapper-transform=basic-runtime-history-v1'))
 })
