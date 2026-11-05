@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -30,7 +31,7 @@ class ArchitectureBoundaries(unittest.TestCase):
             git("commit", "-qm", "candidate")
             env = dict(os.environ, ARCHITECTURE_BASE_REF="refactor")
             env.pop("GITHUB_BASE_REF", None)
-            result = subprocess.run(["python3", str(CHECKER)], cwd=root, env=env,
+            result = subprocess.run([sys.executable, str(CHECKER)], cwd=root, env=env,
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
             if expected:
@@ -133,6 +134,8 @@ class ArchitectureEncoding(unittest.TestCase):
             self.assertEqual(self.checker.source_at("HEAD", "src/valid.c"), source)
 
     def check_locale(self, name, expected_codec):
+        if os.name == "nt":
+            self.skipTest("POSIX locale encodings do not apply on Windows")
         import codecs
         import sys
         env = dict(os.environ, LC_ALL=name, LANG=name,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import vm from 'node:vm'
 import fs from 'node:fs'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { flattenBasicRuntimeFactory } from '../scripts/basic-runtime-history.mjs'
 import { pruneNativeExportAliases } from '../scripts/prune-native-export-aliases.mjs'
 import { parse, version } from '../scripts/vendor/acorn/acorn.mjs'
@@ -106,4 +107,14 @@ test('the offline build parser is the exact vendored upstream version', () => {
   const digest = file => createHash('sha256').update(fs.readFileSync(new URL(file, import.meta.url))).digest('hex')
   assert.equal(digest('../scripts/vendor/acorn/acorn.mjs'), 'b4c8c70200e72bae33cf1085e0ecb1e792c1b6924ed50cab817caf14f51bb249')
   assert.equal(digest('../scripts/vendor/acorn/LICENSE'), '76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7')
+})
+
+test('vendored upstream bytes survive Windows checkout conversion', () => {
+  for (const file of ['acorn.mjs', 'LICENSE']) {
+    const object = `HEAD:scripts/vendor/acorn/${file}`
+    const options = { cwd: new URL('..', import.meta.url) }
+    const original = execFileSync('git', ['show', object], options)
+    const checkout = execFileSync('git', ['-c', 'core.autocrlf=true', 'cat-file', '--filters', object], options)
+    assert.deepEqual(checkout, original, `${file} changed during checkout`)
+  }
 })

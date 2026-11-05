@@ -16,3 +16,5 @@
 *.log
 /tests/out_isolated/
 /tests/*.wld.TEdit
+
+__pycache__/
